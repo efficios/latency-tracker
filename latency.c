@@ -16,7 +16,7 @@ struct latency_state {
 	u64 start_ts;
 	unsigned int timeout;
 	unsigned int thresh;
-	void *cb;
+	int (*cb)(char *key, void *priv);
 	void *priv;
 	u32 key;
 	struct hlist_node hlist;
@@ -39,9 +39,9 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
-int latency_event_in(char *key,
+int latency_event_in(char *key, unsigned int thresh,
 		int (*cb)(char *key, void *priv),
-		unsigned int thresh, unsigned int timeout, void *priv)
+		unsigned int timeout, void *priv)
 {
 	struct latency_state *s;
 	int ret;
@@ -85,8 +85,13 @@ int latency_event_out(char *key)
 
 	hash_for_each_possible(latency_ht, s, hlist, k){
 		now = trace_clock_monotonic_wrapper();
-
+		/*
+		printk("now : %lu, start : %lu, diff : %lu\n",
+				now, s->start_ts, now - s->start_ts);
+				*/
 		if ((now - s->start_ts) > s->thresh) {
+			if (s->cb)
+				s->cb(key, s->priv);
 		}
 		hash_del(&s->hlist);
 		kfree(s);
@@ -106,15 +111,21 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_event_out);
 
+int test_cb(char *key, void *priv)
+{
+	printk("cb called for key %s with %p\n", key, priv);
+	return 0;
+}
+
 static int __init trace_init(void)
 {
 	char *k1 = "blablabla1";
 	char *k2 = "bliblibli1";
 
 	printk("insert k1\n");
-	latency_event_in(k1, NULL, 4000, 0, NULL);
+	latency_event_in(k1, 6000, test_cb, 0, NULL);
 	printk("insert k2\n");
-	latency_event_in(k2, NULL, 4000, 0, NULL);
+	latency_event_in(k2, 4000, test_cb, 0, NULL);
 
 
 	printk("lookup k1\n");
