@@ -12,14 +12,17 @@
 #define CREATE_TRACE_POINTS
 
 struct latency_state {
-	pid_t pid;
+	struct timer_list timer;
+	struct hlist_node hlist;
 	u64 start_ts;
+	u64 end_ts;
 	unsigned int timeout;
 	unsigned int thresh;
-	int (*cb)(char *key, void *priv);
+	u32 hkey;
+	void *key;
+	unsigned int key_len;
+	int (*cb)(struct latency_state *data);
 	void *priv;
-	u32 key;
-	struct hlist_node hlist;
 };
 
 DEFINE_HASHTABLE(latency_ht, 3);
@@ -39,8 +42,8 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
-int latency_event_in(char *key, unsigned int thresh,
-		int (*cb)(char *key, void *priv),
+int latency_event_in(void *key, unsigned int key_len, unsigned int thresh,
+		int (*cb)(struct latency_state *data),
 		unsigned int timeout, void *priv)
 {
 	struct latency_state *s;
@@ -53,15 +56,38 @@ int latency_event_in(char *key, unsigned int thresh,
 	}
 	memset(s, 0, sizeof(struct latency_state));
 
-	s->key = jhash(key, strlen(key), 0);
-	s->pid = current->pid;
+	s->hkey = jhash(key, key_len, 0);
+	printk("hash %u\n", s->hkey);
+	s->key = kmalloc(key_len, GFP_KERNEL);
+	if (!s->key) {
+		printk("alloc failed\n");
+		goto error;
+	}
+	memcpy(s->key, key, key_len);
+	if (!s->key) {
+		printk("failed memcpy\n");
+		goto error;
+	}
 	s->start_ts = trace_clock_monotonic_wrapper();
 	s->thresh = thresh;
 	s->timeout = timeout;
 	s->cb = cb;
 	s->priv = priv;
 
-	hash_add(latency_ht, &s->hlist, s->key);
+	/*
+	if (timeout > 0) {
+		init_timer(&s->timer);
+		s->timer.function = cb;
+		s->timer.expires = jiffies +
+			usecs_to_jiffies(timeout);
+		s->timer.data = s;
+		add_timer(&s->timer);
+
+		del_timer_sync(&s->timer);
+	}
+	*/
+
+	hash_add(latency_ht, &s->hlist, s->hkey);
 
 	ret = 0;
 	goto end;
@@ -73,7 +99,7 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_event_in);
 
-int latency_event_out(char *key)
+int latency_event_out(void *key, unsigned int key_len)
 {
 	struct latency_state *s;
 	int ret;
@@ -82,6 +108,7 @@ int latency_event_out(char *key)
 	u64 now;
 
 	k = jhash(key, strlen(key), 0);
+	printk("hash %u\n", k);
 
 	hash_for_each_possible(latency_ht, s, hlist, k){
 		now = trace_clock_monotonic_wrapper();
@@ -90,8 +117,9 @@ int latency_event_out(char *key)
 				now, s->start_ts, now - s->start_ts);
 				*/
 		if ((now - s->start_ts) > s->thresh) {
+			s->end_ts = now;
 			if (s->cb)
-				s->cb(key, s->priv);
+				s->cb(s);
 		}
 		hash_del(&s->hlist);
 		kfree(s);
@@ -111,9 +139,9 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_event_out);
 
-int test_cb(char *key, void *priv)
+int test_cb(struct latency_state *data)
 {
-	printk("cb called for key %s with %p\n", key, priv);
+	printk("cb called for key %s with %p\n", (char *) data->key, data->priv);
 	return 0;
 }
 
@@ -123,17 +151,17 @@ static int __init trace_init(void)
 	char *k2 = "bliblibli1";
 
 	printk("insert k1\n");
-	latency_event_in(k1, 6000, test_cb, 0, NULL);
+	latency_event_in(k1, strlen(k1), 6000, test_cb, 0, NULL);
 	printk("insert k2\n");
-	latency_event_in(k2, 4000, test_cb, 0, NULL);
+	latency_event_in(k2, strlen(k2), 4000, test_cb, 0, NULL);
 
 
 	printk("lookup k1\n");
-	latency_event_out(k1);
+	latency_event_out(k1, strlen(k1));
 	printk("lookup k2\n");
-	latency_event_out(k2);
+	latency_event_out(k2, strlen(k2));
 	printk("lookup k1\n");
-	latency_event_out(k1);
+	latency_event_out(k1, strlen(k1));
 
 
 	printk("done\n");
