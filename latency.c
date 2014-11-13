@@ -19,7 +19,7 @@ struct latency_state {
 	u32 hkey;
 	void *key;
 	size_t key_len;
-	int (*cb)(struct latency_state *data);
+	void (*cb)(unsigned long ptr, unsigned int timeout);
 	void *priv;
 };
 
@@ -52,6 +52,8 @@ void latency_tracker_event_destroy(struct latency_state *s)
 {
 	hash_del(&s->hlist);
 	kfree(s->key);
+	if (s->timeout > 0)
+		del_timer_sync(&s->timer);
 	kfree(s);
 }
 
@@ -101,9 +103,19 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	module_put(THIS_MODULE);
 }
 
+static
+void latency_tracker_timeout_cb(unsigned long ptr)
+{
+	struct latency_state *data = (struct latency_state *) ptr;
+
+	printk("timeout handler\n");
+	del_timer(&data->timer);
+	data->cb(ptr, 1);
+}
+
 int latency_tracker_event_in(struct latency_tracker *tracker,
 		void *key, size_t key_len, unsigned int thresh,
-		int (*cb)(struct latency_state *data),
+		void (*cb)(unsigned long ptr, unsigned int timeout),
 		unsigned int timeout, void *priv)
 {
 	struct latency_state *s;
@@ -133,18 +145,14 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 	s->cb = cb;
 	s->priv = priv;
 
-	/*
 	if (timeout > 0) {
 		init_timer(&s->timer);
-		s->timer.function = cb;
+		s->timer.function = latency_tracker_timeout_cb;
 		s->timer.expires = jiffies +
 			usecs_to_jiffies(timeout);
-		s->timer.data = s;
+		s->timer.data = (unsigned long) s;
 		add_timer(&s->timer);
-
-		del_timer_sync(&s->timer);
 	}
-	*/
 
 	hash_add(tracker->ht, &s->hlist, s->hkey);
 
@@ -184,7 +192,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 		if ((now - s->start_ts) > s->thresh) {
 			s->end_ts = now;
 			if (s->cb)
-				s->cb(s);
+				s->cb((unsigned long) s, 0);
 		}
 		latency_tracker_event_destroy(s);
 		found = 1;
@@ -203,10 +211,11 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_tracker_event_out);
 
-int test_cb(struct latency_state *data)
+void test_cb(unsigned long ptr, unsigned int timeout)
 {
-	printk("cb called for key %s with %p\n", (char *) data->key, data->priv);
-	return 0;
+	struct latency_state *data = (struct latency_state *) ptr;
+	printk("cb called for key %s with %p, timeout = %d\n", (char *) data->key,
+			data->priv, timeout);
 }
 
 static
@@ -214,8 +223,8 @@ int __init latency_tracker_init(void)
 {
 	char *k1 = "blablabla1";
 	char *k2 = "bliblibli1";
-	struct latency_tracker *tracker;
 	int ret;
+	struct latency_tracker *tracker;
 
 	tracker = latency_tracker_create(NULL, NULL);
 	if (!tracker)
@@ -224,7 +233,7 @@ int __init latency_tracker_init(void)
 	printk("insert k1\n");
 	latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 600, test_cb, 0, NULL);
 	printk("insert k2\n");
-	latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400, test_cb, 0, NULL);
+	latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400, test_cb, 2000000, NULL);
 
 	printk("lookup k1\n");
 	latency_tracker_event_out(tracker, k1, strlen(k1) + 1);
@@ -233,8 +242,8 @@ int __init latency_tracker_init(void)
 	printk("lookup k1\n");
 	latency_tracker_event_out(tracker, k1, strlen(k1) + 1);
 
-	latency_tracker_destroy(tracker);
 	printk("done\n");
+	latency_tracker_destroy(tracker);
 
 	ret = 0;
 	goto end;
