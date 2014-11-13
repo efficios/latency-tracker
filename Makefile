@@ -1,4 +1,4 @@
-obj-m := latency.o
+obj-m := latency_tracker.o
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 default:
