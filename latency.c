@@ -20,12 +20,19 @@ struct latency_state {
 	unsigned int thresh;
 	u32 hkey;
 	void *key;
-	unsigned int key_len;
+	size_t key_len;
 	int (*cb)(struct latency_state *data);
 	void *priv;
 };
 
-DEFINE_HASHTABLE(latency_ht, 3);
+#define DEFAULT_LATENCY_HASH_BITS 3
+#define DEFAULT_LATENCY_TABLE_SIZE (1 << DEFAULT_LATENCY_HASH_BITS)
+
+struct latency_tracker {
+	struct hlist_head ht[DEFAULT_LATENCY_TABLE_SIZE];
+	int (*match_fct) (const void *key1, const void *key2, size_t length);
+	u32 (*hash_fct) (const void *key, u32 length, u32 initval);
+};
 
 static inline u64 trace_clock_monotonic_wrapper(void)
 {
@@ -42,21 +49,55 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
-int latency_event_in(void *key, unsigned int key_len, unsigned int thresh,
+struct latency_tracker *latency_tracker_create(
+		int (*match_fct) (const void *key1, const void *key2,
+			size_t length),
+		u32 (*hash_fct) (const void *key, u32 length, u32 initval))
+
+{
+	struct latency_tracker *tracker;
+
+	tracker = kzalloc(sizeof(struct latency_tracker), GFP_KERNEL);
+	if (!tracker) {
+		printk("alloc tracker failed\n");
+		goto error;
+	}
+	if (!hash_fct) {
+		tracker->hash_fct = jhash;
+	}
+
+	if (!match_fct) {
+		tracker->match_fct = memcmp;
+	}
+	hash_init(tracker->ht);
+
+	goto end;
+
+error:
+	tracker = NULL;
+end:
+	return tracker;
+}
+
+int latency_event_in(struct latency_tracker *tracker,
+		void *key, size_t key_len, unsigned int thresh,
 		int (*cb)(struct latency_state *data),
 		unsigned int timeout, void *priv)
 {
 	struct latency_state *s;
 	int ret;
 
-	s = kmalloc(sizeof(struct latency_state), GFP_KERNEL);
+	if (!tracker) {
+		goto error;
+	}
+
+	s = kzalloc(sizeof(struct latency_state), GFP_KERNEL);
 	if (!s) {
 		printk("Failed to alloc latency_event_in\n");
 		goto error;
 	}
-	memset(s, 0, sizeof(struct latency_state));
 
-	s->hkey = jhash(key, key_len, 0);
+	s->hkey = tracker->hash_fct(key, key_len, 0);
 	printk("hash %u\n", s->hkey);
 	s->key = kmalloc(key_len, GFP_KERNEL);
 	if (!s->key) {
@@ -87,7 +128,7 @@ int latency_event_in(void *key, unsigned int key_len, unsigned int thresh,
 	}
 	*/
 
-	hash_add(latency_ht, &s->hlist, s->hkey);
+	hash_add(tracker->ht, &s->hlist, s->hkey);
 
 	ret = 0;
 	goto end;
@@ -99,7 +140,8 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_event_in);
 
-int latency_event_out(void *key, unsigned int key_len)
+int latency_event_out(struct latency_tracker *tracker,
+		void *key, unsigned int key_len)
 {
 	struct latency_state *s;
 	int ret;
@@ -107,10 +149,15 @@ int latency_event_out(void *key, unsigned int key_len)
 	u32 k;
 	u64 now;
 
-	k = jhash(key, strlen(key), 0);
-	printk("hash %u\n", k);
+	if (!tracker) {
+		goto error;
+	}
 
-	hash_for_each_possible(latency_ht, s, hlist, k){
+	k = tracker->hash_fct(key, key_len, 0);
+
+	hash_for_each_possible(tracker->ht, s, hlist, k){
+		if (tracker->match_fct(key, s->key, key_len))
+			continue;
 		now = trace_clock_monotonic_wrapper();
 		/*
 		printk("now : %lu, start : %lu, diff : %lu\n",
@@ -149,26 +196,25 @@ static int __init trace_init(void)
 {
 	char *k1 = "blablabla1";
 	char *k2 = "bliblibli1";
+	struct latency_tracker *tracker;
+
+	tracker = latency_tracker_create(NULL, NULL);
 
 	printk("insert k1\n");
-	latency_event_in(k1, strlen(k1), 6000, test_cb, 0, NULL);
+	latency_event_in(tracker, k1, strlen(k1) + 1, 6000, test_cb, 0, NULL);
 	printk("insert k2\n");
-	latency_event_in(k2, strlen(k2), 4000, test_cb, 0, NULL);
-
+	latency_event_in(tracker, k2, strlen(k2) + 1, 4000, test_cb, 0, NULL);
 
 	printk("lookup k1\n");
-	latency_event_out(k1, strlen(k1));
+	latency_event_out(tracker, k1, strlen(k1) + 1);
 	printk("lookup k2\n");
-	latency_event_out(k2, strlen(k2));
+	latency_event_out(tracker, k2, strlen(k2) + 1);
 	printk("lookup k1\n");
-	latency_event_out(k1, strlen(k1));
+	latency_event_out(tracker, k1, strlen(k1) + 1);
 
 
 	printk("done\n");
-//	state.entry_ts = kmalloc(65535 * sizeof(unsigned long), GFP_KERNEL);
-//	memset(state.entry_ts, 0, 65535);
 
-//	trace_subsys_eventname(0, current);
 	return 0;
 }
 
