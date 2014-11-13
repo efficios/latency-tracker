@@ -3,7 +3,8 @@ latency_tracker
 
 _by [Julien Desfossez](mailto:jdesfossez@efficios.com)_
 
-This kernel module is a simple latency tracker.
+This kernel module is a simple latency tracker. It is designed to be called
+from anywhere in the kernel (including tracepoints and kprobes).
 
 Using
 -----
