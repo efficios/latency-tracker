@@ -6,6 +6,7 @@
 #include <linux/sched.h>
 #include <linux/hashtable.h>
 #include <linux/jhash.h>
+#include <linux/module.h>
 #include "latency.h"
 
 struct latency_state {
@@ -50,6 +51,7 @@ static
 void latency_tracker_event_destroy(struct latency_state *s)
 {
 	hash_del(&s->hlist);
+	kfree(s->key);
 	kfree(s);
 }
 
@@ -60,6 +62,7 @@ struct latency_tracker *latency_tracker_create(
 
 {
 	struct latency_tracker *tracker;
+	int ret;
 
 	tracker = kzalloc(sizeof(struct latency_tracker), GFP_KERNEL);
 	if (!tracker) {
@@ -73,9 +76,14 @@ struct latency_tracker *latency_tracker_create(
 		tracker->match_fct = memcmp;
 	}
 	hash_init(tracker->ht);
+	ret = try_module_get(THIS_MODULE);
+	if (!ret)
+		goto error_free;
 
 	goto end;
 
+error_free:
+	kfree(tracker);
 error:
 	tracker = NULL;
 end:
@@ -90,6 +98,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	hash_for_each(tracker->ht, bkt, s, hlist)
 		latency_tracker_event_destroy(s);
 	kfree(tracker);
+	module_put(THIS_MODULE);
 }
 
 int latency_tracker_event_in(struct latency_tracker *tracker,
@@ -117,10 +126,7 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 		goto error;
 	}
 	memcpy(s->key, key, key_len);
-	if (!s->key) {
-		printk("failed memcpy\n");
-		goto error;
-	}
+
 	s->start_ts = trace_clock_monotonic_wrapper();
 	s->thresh = thresh;
 	s->timeout = timeout;
@@ -209,13 +215,16 @@ int __init latency_tracker_init(void)
 	char *k1 = "blablabla1";
 	char *k2 = "bliblibli1";
 	struct latency_tracker *tracker;
+	int ret;
 
 	tracker = latency_tracker_create(NULL, NULL);
+	if (!tracker)
+		goto error;
 
 	printk("insert k1\n");
-	latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 6000, test_cb, 0, NULL);
+	latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 600, test_cb, 0, NULL);
 	printk("insert k2\n");
-	latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 4000, test_cb, 0, NULL);
+	latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400, test_cb, 0, NULL);
 
 	printk("lookup k1\n");
 	latency_tracker_event_out(tracker, k1, strlen(k1) + 1);
@@ -224,11 +233,16 @@ int __init latency_tracker_init(void)
 	printk("lookup k1\n");
 	latency_tracker_event_out(tracker, k1, strlen(k1) + 1);
 
-
 	latency_tracker_destroy(tracker);
 	printk("done\n");
 
-	return 0;
+	ret = 0;
+	goto end;
+
+error:
+	ret = -1;
+end:
+	return ret;
 }
 
 static
