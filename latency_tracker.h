@@ -28,8 +28,8 @@ struct latency_tracker_event {
 	struct hlist_node hlist;
 	u64 start_ts;
 	u64 end_ts;
-	unsigned int timeout;
-	unsigned int thresh;
+	uint64_t timeout;
+	uint64_t thresh;
 	u32 hkey;
 	void *key;
 	size_t key_len;
@@ -69,9 +69,9 @@ void latency_tracker_destroy(struct latency_tracker *tracker);
  * The memory management of priv is left entirely to the caller.
  */
 int latency_tracker_event_in(struct latency_tracker *tracker,
-		void *key, size_t key_len, unsigned int thresh,
+		void *key, size_t key_len, uint64_t thresh,
 		void (*cb)(unsigned long ptr, unsigned int timeout),
-		unsigned int timeout, void *priv);
+		uint64_t timeout, void *priv);
 
 /*
  * Stop the tracking of an event.

@@ -130,9 +130,9 @@ void latency_tracker_timeout_cb(unsigned long ptr)
 }
 
 int latency_tracker_event_in(struct latency_tracker *tracker,
-		void *key, size_t key_len, unsigned int thresh,
+		void *key, size_t key_len, uint64_t thresh,
 		void (*cb)(unsigned long ptr, unsigned int timeout),
-		unsigned int timeout, void *priv)
+		uint64_t timeout, void *priv)
 {
 	struct latency_tracker_event *s;
 	int ret;
@@ -165,7 +165,7 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 		init_timer(&s->timer);
 		s->timer.function = latency_tracker_timeout_cb;
 		s->timer.expires = jiffies +
-			usecs_to_jiffies(timeout);
+			nsecs_to_jiffies(timeout);
 		s->timer.data = (unsigned long) s;
 		add_timer(&s->timer);
 	}

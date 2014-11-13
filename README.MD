@@ -13,14 +13,14 @@ Create a latency tracker with:
     struct latency_tracker *latency_tracker_create(
         int (*match_fct) (const void *key1, const void *key2, size_t length),
         u32 (*hash_fct) (const void *key, u32 length, u32 initval));
-You can pass NULL, to use default hash and match functions.
+You can pass NULL, to use default hash (`jhash`) and match (`memcmp`) functions.
 
 On the enter callsite, call:
 
     latency_tracker_event_in(struct latency_tracker *tracker,
-        void *key, size_t key_len, unsigned int thresh,
+        void *key, size_t key_len, uint64_t thresh,
         void (*cb)(unsigned long ptr, unsigned int timeout),
-        unsigned int timeout, void *priv);
+        uint64_t timeout, void *priv);
 
 On the exit callsite, call:
 
@@ -31,7 +31,7 @@ If the delay (ns) between the event_in and event_out is higher than
 thresh, execute cb with a pointer to the struct latency_tracker_event
 of this event. The pointer priv of this structure is initialized from
 priv passed here.
-If timeout (usec) is > 0, start a timer to fire at now + timeout.
+If timeout (nsec) is > 0, start a timer to fire at now + timeout.
 If the timeout fires before the event_out, the timeout argument of the
 callback is set to 1 and the timer is stopped. The event is not removed
 from the HT, so if the event_out arrives eventually, the callback is
