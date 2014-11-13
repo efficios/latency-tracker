@@ -46,6 +46,13 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
+static
+void latency_tracker_event_destroy(struct latency_state *s)
+{
+	hash_del(&s->hlist);
+	kfree(s);
+}
+
 struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
@@ -62,7 +69,6 @@ struct latency_tracker *latency_tracker_create(
 	if (!hash_fct) {
 		tracker->hash_fct = jhash;
 	}
-
 	if (!match_fct) {
 		tracker->match_fct = memcmp;
 	}
@@ -76,7 +82,17 @@ end:
 	return tracker;
 }
 
-int latency_event_in(struct latency_tracker *tracker,
+void latency_tracker_destroy(struct latency_tracker *tracker)
+{
+	int bkt;
+	struct latency_state *s;
+
+	hash_for_each(tracker->ht, bkt, s, hlist)
+		latency_tracker_event_destroy(s);
+	kfree(tracker);
+}
+
+int latency_tracker_event_in(struct latency_tracker *tracker,
 		void *key, size_t key_len, unsigned int thresh,
 		int (*cb)(struct latency_state *data),
 		unsigned int timeout, void *priv)
@@ -90,12 +106,11 @@ int latency_event_in(struct latency_tracker *tracker,
 
 	s = kzalloc(sizeof(struct latency_state), GFP_KERNEL);
 	if (!s) {
-		printk("Failed to alloc latency_event_in\n");
+		printk("Failed to alloc latency_tracker_event_in\n");
 		goto error;
 	}
 
 	s->hkey = tracker->hash_fct(key, key_len, 0);
-	printk("hash %u\n", s->hkey);
 	s->key = kmalloc(key_len, GFP_KERNEL);
 	if (!s->key) {
 		printk("alloc failed\n");
@@ -135,9 +150,9 @@ error:
 end:
 	return ret;
 }
-EXPORT_SYMBOL_GPL(latency_event_in);
+EXPORT_SYMBOL_GPL(latency_tracker_event_in);
 
-int latency_event_out(struct latency_tracker *tracker,
+int latency_tracker_event_out(struct latency_tracker *tracker,
 		void *key, unsigned int key_len)
 {
 	struct latency_state *s;
@@ -165,8 +180,7 @@ int latency_event_out(struct latency_tracker *tracker,
 			if (s->cb)
 				s->cb(s);
 		}
-		hash_del(&s->hlist);
-		kfree(s);
+		latency_tracker_event_destroy(s);
 		found = 1;
 	}
 
@@ -181,7 +195,7 @@ error:
 end:
 	return ret;
 }
-EXPORT_SYMBOL_GPL(latency_event_out);
+EXPORT_SYMBOL_GPL(latency_tracker_event_out);
 
 int test_cb(struct latency_state *data)
 {
@@ -189,7 +203,8 @@ int test_cb(struct latency_state *data)
 	return 0;
 }
 
-static int __init trace_init(void)
+static
+int __init latency_tracker_init(void)
 {
 	char *k1 = "blablabla1";
 	char *k2 = "bliblibli1";
@@ -198,29 +213,31 @@ static int __init trace_init(void)
 	tracker = latency_tracker_create(NULL, NULL);
 
 	printk("insert k1\n");
-	latency_event_in(tracker, k1, strlen(k1) + 1, 6000, test_cb, 0, NULL);
+	latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 6000, test_cb, 0, NULL);
 	printk("insert k2\n");
-	latency_event_in(tracker, k2, strlen(k2) + 1, 4000, test_cb, 0, NULL);
+	latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 4000, test_cb, 0, NULL);
 
 	printk("lookup k1\n");
-	latency_event_out(tracker, k1, strlen(k1) + 1);
+	latency_tracker_event_out(tracker, k1, strlen(k1) + 1);
 	printk("lookup k2\n");
-	latency_event_out(tracker, k2, strlen(k2) + 1);
+	latency_tracker_event_out(tracker, k2, strlen(k2) + 1);
 	printk("lookup k1\n");
-	latency_event_out(tracker, k1, strlen(k1) + 1);
+	latency_tracker_event_out(tracker, k1, strlen(k1) + 1);
 
 
+	latency_tracker_destroy(tracker);
 	printk("done\n");
 
 	return 0;
 }
 
-static void __exit trace_exit(void)
+static
+void __exit latency_tracker_exit(void)
 {
 	printk("exit\n");
 }
 
-module_init(trace_init);
-module_exit(trace_exit);
+module_init(latency_tracker_init);
+module_exit(latency_tracker_exit);
 MODULE_VERSION("1.0");
 MODULE_LICENSE("GPL");
