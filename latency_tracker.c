@@ -65,7 +65,7 @@ void latency_tracker_event_destroy(struct latency_tracker_event *s)
 	hash_del(&s->hlist);
 	kfree(s->key);
 	if (s->timeout > 0)
-		del_timer_sync(&s->timer);
+		del_timer(&s->timer);
 	kfree(s);
 }
 
