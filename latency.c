@@ -6,10 +6,7 @@
 #include <linux/sched.h>
 #include <linux/hashtable.h>
 #include <linux/jhash.h>
-#include "include/trace/events/latency.h"
 #include "latency.h"
-
-#define CREATE_TRACE_POINTS
 
 struct latency_state {
 	struct timer_list timer;
