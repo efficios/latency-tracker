@@ -44,12 +44,10 @@ struct latency_tracker *tracker;
 
 void blk_cb(unsigned long ptr, unsigned int timeout)
 {
-	char b[BDEVNAME_SIZE];
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
 	struct blkkey *key = data->key;
 
-	__bdevname(key->dev, b);
 	printk("CB called, dev = %d,%d, sector = %lu, delay = %llu\n",
 			MAJOR(key->dev), MINOR(key->dev),
 			key->sector, data->end_ts - data->start_ts);
