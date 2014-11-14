@@ -50,7 +50,7 @@ Example usage
 ### Block I/O requests
 To get a callback for all I/O requests that take more than 2 usec to complete:
   - Create a latency_tracker
-  - in `block_rq_issue`, call `latency_tracker_event_in()` with the device and the sector as the key, and `thesh = 2000`
+  - in `block_rq_issue`, call `latency_tracker_event_in()` with the device and the sector as the key, and `thresh = 2000`
   - in `block_rq_complete`, call `latency_tracker_event_out` with the same key
   - if the delay between the event_in and out for the same device + sector is longer than 2 usec, your callback is called.
 
@@ -58,7 +58,7 @@ To get a callback for all I/O requests that take more than 2 usec to complete:
 To get a callback if a task takes more than 5 usec to be scheduled in after a wakeup and get a notification if after 6 usec
 it is still not scheduled in:
   - Create a latency_tracker
-  - in `sched_wakeup`, call `latency_tracker_event_in()` with the pid as key, `thesh = 5000` and `timeout = 6000`
+  - in `sched_wakeup`, call `latency_tracker_event_in()` with the pid as key, `thresh = 5000` and `timeout = 6000`
   - in `sched_switch`, call `latency_tracker_event_out` with the same key
   - if the delay between the event_in and out for the same pid is longer than 5 usec, your callback is called, if after 6 usec the process is still not scheduled in, the callback is called with `timeout = 1`.
 
