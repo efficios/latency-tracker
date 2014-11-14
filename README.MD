@@ -47,12 +47,15 @@ When done, destroy the tracker with:
 Example usage
 -------------
 
-### Block I/O requests (implemented in `examples/block_latency_tp.c`)
+### Block I/O requests
+
 To get a callback for all I/O requests that take more than 5 usec to complete:
   - Create a latency_tracker
   - in `block_rq_issue`, call `latency_tracker_event_in()` with the device and the sector as the key, and `thresh = 5000000`
   - in `block_rq_complete`, call `latency_tracker_event_out` with the same key
   - if the delay between the event_in and out for the same device + sector is longer than 2 usec, your callback is called.
+
+This example is implemented in `examples/block_latency_tp.c`.
 
 ### Scheduler latency
 To get a callback if a task takes more than 5 usec to be scheduled in after a wakeup and get a notification if after 6 usec
