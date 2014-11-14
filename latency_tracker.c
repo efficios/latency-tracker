@@ -30,6 +30,7 @@
 #include <linux/jhash.h>
 #include <linux/module.h>
 #include "latency_tracker.h"
+#include "wrapper/jiffies.h"
 
 #define DEFAULT_LATENCY_HASH_BITS 3
 #define DEFAULT_LATENCY_TABLE_SIZE (1 << DEFAULT_LATENCY_HASH_BITS)
@@ -165,7 +166,7 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 		init_timer(&s->timer);
 		s->timer.function = latency_tracker_timeout_cb;
 		s->timer.expires = jiffies +
-			nsecs_to_jiffies(timeout);
+			wrapper_nsecs_to_jiffies(timeout);
 		s->timer.data = (unsigned long) s;
 		add_timer(&s->timer);
 	}
