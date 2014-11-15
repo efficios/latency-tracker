@@ -101,13 +101,17 @@ struct latency_tracker *latency_tracker_create(
 	tracker->max_events = max_events;
 	tracker->events = kzalloc(sizeof(struct latency_tracker_event) * max_events,
 			GFP_KERNEL);
+	if (!tracker->events)
+		goto error_free;
 	wrapper_vmalloc_sync_all();
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
-		goto error_free;
+		goto error_free_events;
 
 	goto end;
 
+error_free_events:
+	kfree(tracker->events);
 error_free:
 	kfree(tracker);
 error:
