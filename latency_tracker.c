@@ -31,14 +31,20 @@
 #include <linux/module.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
+#include "wrapper/vmalloc.h"
 
 #define DEFAULT_LATENCY_HASH_BITS 3
 #define DEFAULT_LATENCY_TABLE_SIZE (1 << DEFAULT_LATENCY_HASH_BITS)
+
+#define DEFAULT_MAX_ALLOC_EVENTS 100
 
 struct latency_tracker {
 	struct hlist_head ht[DEFAULT_LATENCY_TABLE_SIZE];
 	int (*match_fct) (const void *key1, const void *key2, size_t length);
 	u32 (*hash_fct) (const void *key, u32 length, u32 initval);
+	struct latency_tracker_event *events;
+	int events_used;
+	int max_events;
 };
 
 /*
@@ -64,16 +70,15 @@ static
 void latency_tracker_event_destroy(struct latency_tracker_event *s)
 {
 	hash_del(&s->hlist);
-	kfree(s->key);
 	if (s->timeout > 0)
 		del_timer(&s->timer);
-	kfree(s);
 }
 
 struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
-		u32 (*hash_fct) (const void *key, u32 length, u32 initval))
+		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
+		int max_events)
 
 {
 	struct latency_tracker *tracker;
@@ -90,7 +95,13 @@ struct latency_tracker *latency_tracker_create(
 	if (!match_fct) {
 		tracker->match_fct = memcmp;
 	}
+	if (!max_events)
+		max_events = DEFAULT_MAX_ALLOC_EVENTS;
 	hash_init(tracker->ht);
+	tracker->max_events = max_events;
+	tracker->events = kzalloc(sizeof(struct latency_tracker_event) * max_events,
+			GFP_KERNEL);
+	wrapper_vmalloc_sync_all();
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
 		goto error_free;
@@ -113,6 +124,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 
 	hash_for_each(tracker->ht, bkt, s, hlist)
 		latency_tracker_event_destroy(s);
+	tracker->events_used--;
 	kfree(tracker);
 	module_put(THIS_MODULE);
 }
@@ -141,19 +153,30 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 	if (!tracker) {
 		goto error;
 	}
+	if (key_len > LATENCY_TRACKER_MAX_KEY_SIZE)
+		goto error;
 
+	/*
 	s = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
 	if (!s) {
 		printk("latency_tracker: Failed to alloc latency_tracker_event_in\n");
 		goto error;
 	}
+	*/
+	if (tracker->events_used >= tracker->max_events)
+		goto error;
+
+	s = &tracker->events[++tracker->events_used % tracker->max_events];
+	memset(s, 0, sizeof(*s));
 
 	s->hkey = tracker->hash_fct(key, key_len, 0);
+	/*
 	s->key = kmalloc(key_len, GFP_KERNEL);
 	if (!s->key) {
 		printk("latency_tracker: Key alloc failed\n");
 		goto error;
 	}
+	*/
 	memcpy(s->key, key, key_len);
 
 	s->start_ts = trace_clock_monotonic_wrapper();
@@ -208,6 +231,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 				s->cb((unsigned long) s, 0);
 		}
 		latency_tracker_event_destroy(s);
+		tracker->events_used--;
 		found = 1;
 	}
 
@@ -239,7 +263,7 @@ int test_tracker(void)
 	int ret;
 	struct latency_tracker *tracker;
 
-	tracker = latency_tracker_create(NULL, NULL);
+	tracker = latency_tracker_create(NULL, NULL, 3);
 	if (!tracker)
 		goto error;
 

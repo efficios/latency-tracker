@@ -23,6 +23,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#define LATENCY_TRACKER_MAX_KEY_SIZE 128
+
 struct latency_tracker_event {
 	struct timer_list timer;
 	struct hlist_node hlist;
@@ -31,7 +33,7 @@ struct latency_tracker_event {
 	uint64_t timeout;
 	uint64_t thresh;
 	u32 hkey;
-	void *key;
+	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
 	size_t key_len;
 	void (*cb)(unsigned long ptr, unsigned int timeout);
 	void *priv;
@@ -44,11 +46,13 @@ struct latency_tracker;
  * match_fct: function to compare 2 keys, returns 0 if equal
  *            if NULL: use memcmp
  * hash_fct: function to hash a key, if NULL: use jhash
+ * max_events: expected number of concurrent live events (default: 100)
  */
 struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
-		u32 (*hash_fct) (const void *key, u32 length, u32 initval));
+		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
+		int max_events);
 
 /*
  * Destroy and free a tracker and all the current events in the HT.

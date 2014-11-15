@@ -1,10 +1,11 @@
 /*
- * block_latency_tp.c
+ * sched_latency_tp.c
  *
  * Example of usage of latency_tracker with kernel tracepoints.
- * In this example, we call the callback function blk_cb when the delay
- * between a block request (block_rq_issue) and its completion
- * (block_rq_complete) takes more than BLK_LATENCY_THRESH nanoseconds.
+ * In this example, we call the callback function sched_cb when the delay
+ * between a sched wakeup and its completion (sched_switch) takes more than
+ * SCHED_LATENCY_THRESH nanoseconds. Moreover, if the task is still not scheduled
+ * after SCHED_LATENCY_TIMEOUT nanoseconds, the callback is called with timeout = 1.
  *
  * Copyright (C) 2014 Julien Desfossez <jdesfossez@efficios.com>
  *
@@ -27,73 +28,65 @@
 #include <linux/file.h>
 #include <linux/dcache.h>
 #include <linux/fs.h>
-#include "block_latency_tp.h"
+#include "sched_latency_tp.h"
 #include "../latency_tracker.h"
 
 /*
  * Threshold to execute the callback (nanoseconds).
  */
-#define BLK_LATENCY_THRESH 5 * 1000000
+#define SCHED_LATENCY_THRESH 5 * 1000000
+/*
+ * Timeout to execute the callback (nanoseconds).
+ */
+#define SCHED_LATENCY_TIMEOUT 0 * 1000000
 
-struct blkkey {
-	dev_t dev;
-	sector_t sector;
+struct schedkey {
+	pid_t pid;
 } __attribute__((__packed__));
 
 struct latency_tracker *tracker;
 
-void blk_cb(unsigned long ptr, unsigned int timeout)
+void sched_cb(unsigned long ptr, unsigned int timeout)
 {
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
-	struct blkkey *key = (struct blkkey *) data->key;
+	struct schedkey *key = (struct schedkey *) data->key;
 
-	printk("CB called, dev = %d,%d, sector = %lu, delay = %llu\n",
-			MAJOR(key->dev), MINOR(key->dev),
-			key->sector, data->end_ts - data->start_ts);
+	printk("CB called, pid = %d, delay = %llu, timeout = %d\n",
+			key->pid, data->end_ts - data->start_ts, timeout);
 }
 
 static
-void rq_to_key(struct blkkey *key, struct request *rq)
+void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 {
-	if (!key || !rq)
-		return;
-
-	key->sector = blk_rq_pos(rq);
-	key->dev = rq->rq_disk ? disk_devt(rq->rq_disk) : 0;
-}
-
-static
-void probe_block_rq_issue(void *ignore, struct request_queue *q,
-		struct request *rq)
-{
-	struct blkkey key;
+	struct schedkey key;
 	int ret;
 
-	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+	if (!p || !p->pid)
 		return;
 
-	rq_to_key(&key, rq);
+	key.pid = p->pid;
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-			BLK_LATENCY_THRESH, blk_cb, 0, NULL);
+			SCHED_LATENCY_THRESH, sched_cb, SCHED_LATENCY_TIMEOUT,
+			NULL);
 	WARN_ON(ret);
 }
 
 static
-void probe_block_rq_complete(void *ignore, struct request_queue *q,
-		struct request *rq, unsigned int nr_bytes)
+void probe_sched_switch(void *ignore, struct task_struct *prev,
+		struct task_struct *next)
 {
-	struct blkkey key;
+	struct schedkey key;
 
-	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+	if (!next || !next->pid)
 		return;
 
-	rq_to_key(&key, rq);
+	key.pid = next->pid;
 	latency_tracker_event_out(tracker, &key, sizeof(key));
 }
 
 static
-int __init block_latency_tp_init(void)
+int __init sched_latency_tp_init(void)
 {
 	int ret;
 
@@ -101,12 +94,12 @@ int __init block_latency_tp_init(void)
 	if (!tracker)
 		goto error;
 
-	ret = tracepoint_probe_register("block_rq_issue",
-			probe_block_rq_issue, NULL);
+	ret = tracepoint_probe_register("sched_wakeup",
+			probe_sched_wakeup, NULL);
 	WARN_ON(ret);
 
-	ret = tracepoint_probe_register("block_rq_complete",
-			probe_block_rq_complete, NULL);
+	ret = tracepoint_probe_register("sched_switch",
+			probe_sched_switch, NULL);
 	WARN_ON(ret);
 
 	ret = 0;
@@ -117,19 +110,19 @@ error:
 end:
 	return ret;
 }
-module_init(block_latency_tp_init);
+module_init(sched_latency_tp_init);
 
 static
-void __exit block_latency_tp_exit(void)
+void __exit sched_latency_tp_exit(void)
 {
-	tracepoint_probe_unregister("block_rq_issue",
-			probe_block_rq_issue, NULL);
-	tracepoint_probe_unregister("block_rq_complete",
-			probe_block_rq_complete, NULL);
+	tracepoint_probe_unregister("sched_wakeup",
+			probe_sched_wakeup, NULL);
+	tracepoint_probe_unregister("sched_switch",
+			probe_sched_switch, NULL);
 	tracepoint_synchronize_unregister();
 	latency_tracker_destroy(tracker);
 }
-module_exit(block_latency_tp_exit);
+module_exit(sched_latency_tp_exit);
 
 MODULE_AUTHOR("Julien Desfossez <jdesfossez@efficios.com>");
 MODULE_LICENSE("GPL");
