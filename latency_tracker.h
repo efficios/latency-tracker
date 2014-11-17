@@ -35,6 +35,7 @@ struct latency_tracker_event {
 	u32 hkey;
 	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
 	size_t key_len;
+	struct list_head list;
 	void (*cb)(unsigned long ptr, unsigned int timeout);
 	void *priv;
 };
