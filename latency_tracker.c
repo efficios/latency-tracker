@@ -43,7 +43,7 @@ struct latency_tracker {
 	int (*match_fct) (const void *key1, const void *key2, size_t length);
 	u32 (*hash_fct) (const void *key, u32 length, u32 initval);
 	struct list_head events_free_list;
-	spinlock_t free_list_lock;
+	spinlock_t lock;
 };
 
 /*
@@ -65,13 +65,15 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
+/*
+ * Must be called with the tracker->lock held.
+ */
 static
 struct latency_tracker_event *latency_tracker_get_event(
 		struct latency_tracker *tracker)
 {
 	struct latency_tracker_event *e;
 
-	spin_lock(&tracker->free_list_lock);
 	if (list_empty(&tracker->events_free_list)) {
 		printk("latency_tracker: no more free events, consider "
 				"increasing the max_events parameter\n");
@@ -85,20 +87,23 @@ struct latency_tracker_event *latency_tracker_get_event(
 error:
 	e = NULL;
 end:
-	spin_unlock(&tracker->free_list_lock);
 	return e;
 }
 
+/*
+ * Must be called with the tracker->lock held.
+ */
 static
 void latency_tracker_put_event(struct latency_tracker *tracker,
 		struct latency_tracker_event *e)
 {
 	memset(e, 0, sizeof(struct latency_tracker_event));
-	spin_lock(&tracker->free_list_lock);
 	list_add(&e->list, &tracker->events_free_list);
-	spin_unlock(&tracker->free_list_lock);
 }
 
+/*
+ * Must be called with the tracker->lock held.
+ */
 static
 void latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
@@ -114,12 +119,10 @@ void latency_tracker_destroy_free_list(struct latency_tracker *tracker)
 {
 	struct latency_tracker_event *e, *n;
 
-	spin_lock(&tracker->free_list_lock);
 	list_for_each_entry_safe(e, n, &tracker->events_free_list, list) {
 		list_del(&e->list);
 		kfree(e);
 	}
-	spin_unlock(&tracker->free_list_lock);
 }
 
 struct latency_tracker *latency_tracker_create(
@@ -146,7 +149,7 @@ struct latency_tracker *latency_tracker_create(
 	}
 	if (!max_events)
 		max_events = DEFAULT_MAX_ALLOC_EVENTS;
-	spin_lock_init(&tracker->free_list_lock);
+	spin_lock_init(&tracker->lock);
 
 	hash_init(tracker->ht);
 	INIT_LIST_HEAD(&tracker->events_free_list);
@@ -177,10 +180,18 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 {
 	int bkt;
 	struct latency_tracker_event *s;
+	struct hlist_node *tmp;
+	unsigned long flags;
+	int nb = 0;
 
-	hash_for_each(tracker->ht, bkt, s, hlist)
+	spin_lock_irqsave(&tracker->lock, flags);
+	hash_for_each_safe(tracker->ht, bkt, tmp, s, hlist) {
 		latency_tracker_event_destroy(tracker, s);
+		nb++;
+	}
+	printk("latency_tracker: %d events were still pending at destruction\n", nb);
 	latency_tracker_destroy_free_list(tracker);
+	spin_unlock_irqrestore(&tracker->lock, flags);
 	kfree(tracker);
 	module_put(THIS_MODULE);
 }
@@ -204,6 +215,7 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 		uint64_t timeout, void *priv)
 {
 	struct latency_tracker_event *s;
+	unsigned long flags;
 	int ret;
 
 	if (!tracker) {
@@ -212,9 +224,10 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 	if (key_len > LATENCY_TRACKER_MAX_KEY_SIZE)
 		goto error;
 
+	spin_lock_irqsave(&tracker->lock, flags);
 	s = latency_tracker_get_event(tracker);
 	if (!s)
-		goto error;
+		goto error_unlock;
 
 	s->hkey = tracker->hash_fct(key, key_len, 0);
 	memcpy(s->key, key, key_len);
@@ -235,10 +248,13 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 	}
 
 	hash_add(tracker->ht, &s->hlist, s->hkey);
+	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	ret = 0;
 	goto end;
 
+error_unlock:
+	spin_unlock_irqrestore(&tracker->lock, flags);
 error:
 	ret = -1;
 end:
@@ -252,6 +268,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 	struct latency_tracker_event *s;
 	int ret;
 	int found = 0;
+	unsigned long flags;
 	u32 k;
 	u64 now;
 
@@ -259,8 +276,8 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 		goto error;
 	}
 
+	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
-
 	hash_for_each_possible(tracker->ht, s, hlist, k){
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
@@ -273,6 +290,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 		latency_tracker_event_destroy(tracker, s);
 		found = 1;
 	}
+	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	if (!found)
 		goto error;
