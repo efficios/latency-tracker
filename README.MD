@@ -55,7 +55,7 @@ To get a callback for all I/O requests that take more than 5 usec to complete:
   - in `block_rq_complete`, call `latency_tracker_event_out` with the same key
   - if the delay between the event_in and out for the same device + sector is longer than 2 usec, your callback is called.
 
-This example is implemented in `examples/block_latency_tp.c`.
+This example is implemented in [`examples/block_latency_tp.c`](examples/block_latency_tp.c).
 
 ### Scheduler latency
 To get a callback if a task takes more than 5 usec to be scheduled in after a wakeup and get a notification if after 6 usec
@@ -67,4 +67,4 @@ it is still not scheduled in:
 
 From the callback, you can call functions like printk, tracepoint, take callstacks, gather statistics for later print out, etc.
 
-This example is implemented in `examples/sched_latency_tp.c`.
+This example is implemented in [`examples/sched_latency_tp.c`](examples/sched_latency_tp.c).
