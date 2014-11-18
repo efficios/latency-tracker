@@ -37,7 +37,7 @@ unsigned long wrapper_nsecs_to_jiffies(u64 n)
 {
 	unsigned long (*wrapper_nsecs_to_jiffies_sym)(u64 n);
 
-	wrapper_nsecs_to_jiffies_sym = (void *) kallsyms_lookup_funcptr("nsecs_to_jiffies_sym");
+	wrapper_nsecs_to_jiffies_sym = (void *) kallsyms_lookup_funcptr("nsecs_to_jiffies");
 	if (wrapper_nsecs_to_jiffies_sym) {
 		return wrapper_nsecs_to_jiffies_sym(n);
 	} else {
@@ -51,7 +51,7 @@ unsigned long wrapper_nsecs_to_jiffies64(u64 n)
 {
 	unsigned long (*wrapper_nsecs_to_jiffies64_sym)(u64 n);
 
-	wrapper_nsecs_to_jiffies64_sym = (void *) kallsyms_lookup_funcptr("nsecs_to_jiffies64_sym");
+	wrapper_nsecs_to_jiffies64_sym = (void *) kallsyms_lookup_funcptr("nsecs_to_jiffies64");
 	if (wrapper_nsecs_to_jiffies64_sym) {
 		return wrapper_nsecs_to_jiffies64_sym(n);
 	} else {
@@ -65,13 +65,13 @@ unsigned long wrapper_nsecs_to_jiffies64(u64 n)
 static inline
 unsigned long wrapper_nsecs_to_jiffies(u64 n)
 {
-	return nsecs_to_jiffies_sym(n);
+	return nsecs_to_jiffies(n);
 }
 
 static inline
 unsigned long wrapper_nsecs_to_jiffies64(u64 n)
 {
-	return nsecs_to_jiffies64_sym(n);
+	return nsecs_to_jiffies64(n);
 }
 
 #endif /* CONFIG_KALLSYMS */
