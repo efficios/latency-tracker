@@ -46,12 +46,15 @@ struct schedkey {
 
 struct latency_tracker *tracker;
 
+static int cnt = 0;
+
 void sched_cb(unsigned long ptr, unsigned int timeout)
 {
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->key;
 
+	cnt++;
 	printk("CB called, pid = %d, delay = %llu, timeout = %d\n",
 			key->pid, data->end_ts - data->start_ts, timeout);
 }
@@ -66,10 +69,9 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		return;
 
 	key.pid = p->pid;
-	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-			SCHED_LATENCY_THRESH, sched_cb, SCHED_LATENCY_TIMEOUT,
-			NULL);
-	WARN_ON(ret);
+	latency_tracker_event_in(tracker, &key, sizeof(key),
+		SCHED_LATENCY_THRESH, sched_cb, SCHED_LATENCY_TIMEOUT,
+		NULL);
 }
 
 static
@@ -121,6 +123,7 @@ void __exit sched_latency_tp_exit(void)
 			probe_sched_switch, NULL);
 	tracepoint_synchronize_unregister();
 	latency_tracker_destroy(tracker);
+	printk("Total sched alerts : %d\n", cnt);
 }
 module_exit(sched_latency_tp_exit);
 
