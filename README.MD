@@ -67,3 +67,4 @@ it is still not scheduled in:
 
 From the callback, you can call functions like printk, tracepoint, take callstacks, gather statistics for later print out, etc.
 
+This example is implemented in `examples/sched_latency_tp.c`.
