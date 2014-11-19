@@ -31,6 +31,9 @@
 #include "sched_latency_tp.h"
 #include "../latency_tracker.h"
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/latency_tracker.h>
+
 /*
  * Threshold to execute the callback (nanoseconds).
  */
@@ -54,16 +57,14 @@ void sched_cb(unsigned long ptr, unsigned int timeout)
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->key;
 
+	trace_sched_latency(key->pid, data->end_ts - data->start_ts);
 	cnt++;
-	printk("CB called, pid = %d, delay = %llu, timeout = %d\n",
-			key->pid, data->end_ts - data->start_ts, timeout);
 }
 
 static
 void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 {
 	struct schedkey key;
-	int ret;
 
 	if (!p || !p->pid)
 		return;
