@@ -61,9 +61,11 @@
  */
 static unsigned long usec_threshold = DEFAULT_USEC_SCHED_LATENCY_THRESH;
 module_param(usec_threshold, ulong, 0644);
+MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 
 static unsigned long usec_timeout = DEFAULT_USEC_SCHED_LATENCY_TIMEOUT;
 module_param(usec_timeout, ulong, 0644);
+MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
 struct schedkey {
 	pid_t pid;
@@ -80,7 +82,8 @@ void sched_cb(unsigned long ptr, unsigned int timeout)
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->key;
 
-	trace_sched_latency(key->pid, data->end_ts - data->start_ts);
+	trace_sched_latency(key->pid, data->end_ts - data->start_ts,
+			timeout);
 	cnt++;
 }
 
