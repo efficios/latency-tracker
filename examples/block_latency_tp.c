@@ -98,6 +98,9 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
 
+	if (blk_rq_sectors(rq) == 0)
+		return;
+
 	rq_to_key(&key, rq);
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
