@@ -41,7 +41,6 @@
 #include <linux/sched.h>
 #include "sched_latency_tp.h"
 #include "../latency_tracker.h"
-#include "../wrapper/sched.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
@@ -54,6 +53,8 @@
  * Timeout to execute the callback (microseconds).
  */
 #define DEFAULT_USEC_SCHED_LATENCY_TIMEOUT 0
+
+static pid_t current_pid[NR_CPUS];
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -91,9 +92,8 @@ static
 void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 {
 	struct schedkey key;
-	struct task_struct *t;
 	u64 thresh, timeout;
-	int cpu;
+	int i;
 
 	if (!p || !p->pid)
 		return;
@@ -101,11 +101,8 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	/*
 	 * Make sure we won't wait for a process already running on another CPU.
 	 */
-	for_each_online_cpu(cpu) {
-		t = wrapper_curr_task(cpu);
-		if (!t)
-			continue;
-		if (t->pid == p->pid)
+	for (i = 0; i < NR_CPUS; i++) {
+		if (current_pid[i] == p->pid)
 			return;
 	}
 	key.pid = p->pid;
@@ -125,6 +122,8 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 
 	if (!next || !next->pid)
 		return;
+
+	current_pid[prev->on_cpu] = next->pid;
 
 	key.pid = next->pid;
 	latency_tracker_event_out(tracker, &key, sizeof(key));
