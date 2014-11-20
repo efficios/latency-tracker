@@ -1,0 +1,133 @@
+From ff0c983320ab63f454b5700e2cb603cabfda63b7 Mon Sep 17 00:00:00 2001
+From: Julien Desfossez <jdesfossez@efficios.com>
+Date: Thu, 20 Nov 2014 11:38:18 -0500
+Subject: [MODULES PATCH] Add latency_tracker probes to lttng-modules
+
+Signed-off-by: Julien Desfossez <jdesfossez@efficios.com>
+---
+ .../events/lttng-module/latency_tracker.h          | 30 +++++++++++++++++++++
+ instrumentation/events/mainline/latency_tracker.h  | 31 ++++++++++++++++++++++
+ probes/Makefile                                    |  2 ++
+ probes/lttng-probe-latency_tracker.c               | 22 +++++++++++++++
+ 4 files changed, 85 insertions(+)
+ create mode 100644 instrumentation/events/lttng-module/latency_tracker.h
+ create mode 100644 instrumentation/events/mainline/latency_tracker.h
+ create mode 100644 probes/lttng-probe-latency_tracker.c
+
+diff --git a/instrumentation/events/lttng-module/latency_tracker.h b/instrumentation/events/lttng-module/latency_tracker.h
+new file mode 100644
+index 0000000..d2f6f7f
+--- /dev/null
++++ b/instrumentation/events/lttng-module/latency_tracker.h
+@@ -0,0 +1,30 @@
++#undef TRACE_SYSTEM
++#define TRACE_SYSTEM latency_tracker
++
++#if !defined(LTTNG_TRACE_LATENCY_TRACKER_H) || defined(TRACE_HEADER_MULTI_READ)
++#define LTTNG_TRACE_LATENCY_TRACKER_H
++#include "../../../probes/lttng-tracepoint-event.h"
++#include <linux/tracepoint.h>
++
++LTTNG_TRACEPOINT_EVENT(
++	sched_latency,
++	/* tracepoint function prototype */
++	TP_PROTO(pid_t pid, u64 delay),
++	/* arguments for this tracepoint */
++	TP_ARGS(pid, delay),
++	/* LTTng doesn't need those */
++	TP_STRUCT__entry(
++		__field(int, pid)
++		__field(u64, delay)
++	),
++	TP_fast_assign(
++		tp_assign(pid, pid)
++		tp_assign(delay, delay)
++	),
++	TP_printk("pid=%d, delay=%llu", __entry->pid, __entry->delay)
++   )
++
++#endif /* LTTNG_TRACE_LATENCY_TRACKER_H */
++
++/* this part must be outside protection */
++#include "../../../probes/define_trace.h"
+diff --git a/instrumentation/events/mainline/latency_tracker.h b/instrumentation/events/mainline/latency_tracker.h
+new file mode 100644
+index 0000000..52042a1
+--- /dev/null
++++ b/instrumentation/events/mainline/latency_tracker.h
+@@ -0,0 +1,31 @@
++/* subsystem name is "latency_tracker" */
++#undef TRACE_SYSTEM
++#define TRACE_SYSTEM latency_tracker
++
++#if !defined(_TRACE_LATENCY_TRACKER_H) || defined(TRACE_HEADER_MULTI_READ)
++#define _TRACE_LATENCY_TRACKER_H
++
++#include <linux/tracepoint.h>
++
++TRACE_EVENT(
++	sched_latency,
++	/* tracepoint function prototype */
++	TP_PROTO(pid_t pid, u64 delay),
++	/* arguments for this tracepoint */
++	TP_ARGS(pid, delay),
++	/* LTTng doesn't need those */
++	TP_STRUCT__entry(
++		__field(int, pid)
++		__field(u64, delay)
++	),
++	TP_fast_assign(
++		entry->pid = pid;
++		entry->delay = delay;
++	),
++	TP_printk("pid=%d, delay=%llu", __entry->pid, __entry->delay)
++   );
++
++#endif /* _TRACE_LATENCY_TRACKER_H */
++
++/* this part must be outside protection */
++#include <trace/define_trace.h>
+diff --git a/probes/Makefile b/probes/Makefile
+index 8e4ceb7..acd5297 100644
+--- a/probes/Makefile
++++ b/probes/Makefile
+@@ -17,6 +17,8 @@ obj-m += lttng-probe-power.o
+ 
+ obj-m += lttng-probe-statedump.o
+ 
++obj-m += lttng-probe-latency_tracker.o
++
+ ifneq ($(CONFIG_KVM),)
+ obj-m += lttng-probe-kvm.o
+ ifneq ($(CONFIG_X86),)
+diff --git a/probes/lttng-probe-latency_tracker.c b/probes/lttng-probe-latency_tracker.c
+new file mode 100644
+index 0000000..582ea93
+--- /dev/null
++++ b/probes/lttng-probe-latency_tracker.c
+@@ -0,0 +1,22 @@
++#include <linux/module.h>
++#include "../lttng-tracer.h"
++
++/* Build time verification of mismatch between mainline TRACE_EVENT()
++ * arguments and LTTng adaptation layer LTTNG_TRACEPOINT_EVENT() arguments.
++ */
++#include "../instrumentation/events/mainline/latency_tracker.h"
++
++/* create LTTng tracepoint probes */
++#define LTTNG_PACKAGE_BUILD
++#define CREATE_TRACE_POINTS
++#define TRACE_INCLUDE_PATH ../instrumentation/events/lttng-module
++
++#include "../instrumentation/events/lttng-module/latency_tracker.h"
++
++MODULE_LICENSE("GPL and additional rights");
++MODULE_AUTHOR("Julien Desfossez <jdesfossez@efficios.com>");
++MODULE_DESCRIPTION("LTTng latency_tracker probes");
++MODULE_VERSION(__stringify(LTTNG_MODULES_MAJOR_VERSION) "."
++    __stringify(LTTNG_MODULES_MINOR_VERSION) "."
++    __stringify(LTTNG_MODULES_PATCHLEVEL_VERSION)
++    LTTNG_MODULES_EXTRAVERSION);
+-- 
+1.9.1
+
