@@ -41,7 +41,7 @@ TRACE_EVENT(
 		entry->sector = sector;
 		entry->delay = delay;
 	),
-	TP_printk("dev=%u,%u, sector=%llu, delay=%llu",
+	TP_printk("dev=(%u,%u), sector=%llu, delay=%llu",
 		__entry->major, __entry->minor, __entry->sector,
 		__entry->delay)
    );
