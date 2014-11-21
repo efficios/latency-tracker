@@ -28,6 +28,21 @@ on the context and eventually hang the kernel).
 For more secure and user-friendly use cases, please consider using SystemTap
 instead.
 
+Installation
+------------
+  - Linux kernel headers (`linux-headers-generic` on ubuntu)
+  - gcc and make
+
+On Ubuntu:
+
+```
+apt-get update
+apt-get install git gcc make linux-headers-generic
+git clone https://github.com/jdesfossez/latency_tracker.git
+cd latency_tracker
+make
+```
+
 Using it in the kernel
 ----------------------
 
@@ -161,6 +176,14 @@ Example output:
 [16:04:13.029794374] (+10.651671878) trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7668496, delay = 6486352 }
 [16:04:13.029836068] (+0.000041694) trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7669504, delay = 6531005 }
 ```
+
+Acknowledgment
+--------------
+
+Most of the code for handling the tracepoints, the allocation of memory, the
+usage of kallsyms, the locking is largely inspired by LTTng and the work of
+Mathieu Desnoyers.
+
 
 Final words
 -----------
