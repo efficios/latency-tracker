@@ -110,7 +110,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	timeout = usec_timeout * 1000;
 
 	latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, sched_cb, timeout,
+		thresh, sched_cb, timeout, 0,
 		NULL);
 }
 

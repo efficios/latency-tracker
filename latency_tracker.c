@@ -212,11 +212,13 @@ void latency_tracker_timeout_cb(unsigned long ptr)
 int latency_tracker_event_in(struct latency_tracker *tracker,
 		void *key, size_t key_len, uint64_t thresh,
 		void (*cb)(unsigned long ptr, unsigned int timeout),
-		uint64_t timeout, void *priv)
+		uint64_t timeout, unsigned int unique, void *priv)
 {
 	struct latency_tracker_event *s;
 	unsigned long flags;
+	struct hlist_node *next;
 	int ret;
+	u32 k;
 
 	if (!tracker) {
 		goto error;
@@ -225,6 +227,20 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 		goto error;
 
 	spin_lock_irqsave(&tracker->lock, flags);
+	/*
+	 * If we specify the unique property, get rid of other duplicate keys
+	 * without calling the callback.
+	 */
+	if (unique) {
+		k = tracker->hash_fct(key, key_len, 0);
+		hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
+			if (tracker->match_fct(key, s->key, key_len))
+				continue;
+			latency_tracker_event_destroy(tracker, s);
+			break;
+		}
+	}
+
 	s = latency_tracker_get_event(tracker);
 	if (!s)
 		goto error_unlock;
@@ -327,13 +343,13 @@ int test_tracker(void)
 
 	printk("insert k1\n");
 	ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 6,
-			example_cb, 0, NULL);
+			example_cb, 0, 0, NULL);
 	if (ret)
 		printk("failed\n");
 
 	printk("insert k2\n");
 	ret = latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400,
-			example_cb, 0, NULL);
+			example_cb, 0, 0, NULL);
 	if (ret)
 		printk("failed\n");
 

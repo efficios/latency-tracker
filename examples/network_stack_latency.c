@@ -105,7 +105,7 @@ void probe_netif_receive_skb(void *ignore, struct sk_buff *skb)
 	timeout = usec_timeout * 1000;
 
 	latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, net_cb, timeout,
+		thresh, net_cb, timeout, 1,
 		skb->dev);
 }
 
