@@ -6,6 +6,7 @@
 #define _TRACE_LATENCY_TRACKER_H
 
 #include <linux/tracepoint.h>
+#include <linux/netdevice.h>
 
 TRACE_EVENT(
 	sched_latency,
@@ -44,6 +45,28 @@ TRACE_EVENT(
 	TP_printk("dev=(%u,%u), sector=%llu, delay=%llu",
 		__entry->major, __entry->minor, __entry->sector,
 		__entry->delay)
+   );
+
+TRACE_EVENT(
+	net_latency,
+	TP_PROTO(struct net_device *dev, u64 delay, unsigned int dropped,
+		unsigned int timeout),
+	TP_ARGS(dev, delay, dropped, timeout),
+	TP_STRUCT__entry(
+		__string(name, dev->name)
+		__field(u64, delay)
+		__field(unsigned int, dropped)
+		__field(unsigned int, timeout)
+	),
+	TP_fast_assign(
+		__assign_str(name, dev->name);
+		entry->delay = delay;
+		entry->dropped = dropped;
+		entry->timeout = timeout;
+	),
+	TP_printk("iface=%s, delay=%llu, dropped=%u, timeout=%u",
+		__get_str(name), __entry->delay, __entry->dropped,
+		__entry->timeout)
    );
 
 #endif /* _TRACE_LATENCY_TRACKER_H */
