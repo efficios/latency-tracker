@@ -95,6 +95,7 @@ void probe_netif_receive_skb(void *ignore, struct sk_buff *skb)
 {
 	struct netkey key;
 	u64 thresh, timeout;
+	enum latency_tracker_event_in_ret ret;
 
 	if (!skb)
 		return;
@@ -104,9 +105,15 @@ void probe_netif_receive_skb(void *ignore, struct sk_buff *skb)
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-	latency_tracker_event_in(tracker, &key, sizeof(key),
+	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
 		thresh, net_cb, timeout, 1,
 		skb->dev);
+	if (ret == LATENCY_TRACKER_FULL) {
+		printk("latency_tracker net: no more free events, consider "
+				"increasing the max_events parameter\n");
+	} else if (ret) {
+		printk("latency_tracker net: error adding event\n");
+	}
 }
 
 static

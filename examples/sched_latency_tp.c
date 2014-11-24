@@ -94,6 +94,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	struct schedkey key;
 	u64 thresh, timeout;
 	int i;
+	enum latency_tracker_event_in_ret ret;
 
 	if (!p || !p->pid)
 		return;
@@ -109,9 +110,15 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-	latency_tracker_event_in(tracker, &key, sizeof(key),
+	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
 		thresh, sched_cb, timeout, 0,
 		NULL);
+	if (ret == LATENCY_TRACKER_FULL) {
+		printk("latency_tracker sched: no more free events, consider "
+				"increasing the max_events parameter\n");
+	} else if (ret) {
+		printk("latency_tracker sched: error adding event\n");
+	}
 }
 
 static

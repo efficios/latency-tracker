@@ -94,6 +94,7 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 {
 	struct blkkey key;
 	u64 thresh, timeout;
+	enum latency_tracker_event_in_ret ret;
 
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
@@ -105,8 +106,14 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-	latency_tracker_event_in(tracker, &key, sizeof(key),
+	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
 		thresh, blk_cb, timeout, 0, NULL);
+	if (ret == LATENCY_TRACKER_FULL) {
+		printk("latency_tracker block: no more free events, consider "
+				"increasing the max_events parameter\n");
+	} else if (ret) {
+		printk("latency_tracker block: error adding event\n");
+	}
 }
 
 static

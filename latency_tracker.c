@@ -75,8 +75,6 @@ struct latency_tracker_event *latency_tracker_get_event(
 	struct latency_tracker_event *e;
 
 	if (list_empty(&tracker->events_free_list)) {
-		printk("latency_tracker: no more free events, consider "
-				"increasing the max_events parameter\n");
 		goto error;
 	}
 	e = list_last_entry(&tracker->events_free_list,
@@ -209,7 +207,8 @@ void latency_tracker_timeout_cb(unsigned long ptr)
 	data->cb(ptr, 1);
 }
 
-int latency_tracker_event_in(struct latency_tracker *tracker,
+enum latency_tracker_event_in_ret latency_tracker_event_in(
+		struct latency_tracker *tracker,
 		void *key, size_t key_len, uint64_t thresh,
 		void (*cb)(unsigned long ptr, unsigned int timeout),
 		uint64_t timeout, unsigned int unique, void *priv)
@@ -221,10 +220,13 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 	u32 k;
 
 	if (!tracker) {
-		goto error;
+		ret = LATENCY_TRACKER_ERR;
+		goto end;
 	}
-	if (key_len > LATENCY_TRACKER_MAX_KEY_SIZE)
-		goto error;
+	if (key_len > LATENCY_TRACKER_MAX_KEY_SIZE) {
+		ret = LATENCY_TRACKER_ERR;
+		goto end;
+	}
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	/*
@@ -242,8 +244,10 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 	}
 
 	s = latency_tracker_get_event(tracker);
-	if (!s)
+	if (!s) {
+		ret = LATENCY_TRACKER_FULL;
 		goto error_unlock;
+	}
 
 	s->hkey = tracker->hash_fct(key, key_len, 0);
 	memcpy(s->key, key, key_len);
@@ -264,15 +268,10 @@ int latency_tracker_event_in(struct latency_tracker *tracker,
 	}
 
 	hash_add(tracker->ht, &s->hlist, s->hkey);
-	spin_unlock_irqrestore(&tracker->lock, flags);
-
-	ret = 0;
-	goto end;
+	ret = LATENCY_TRACKER_OK;
 
 error_unlock:
 	spin_unlock_irqrestore(&tracker->lock, flags);
-error:
-	ret = -1;
 end:
 	return ret;
 }

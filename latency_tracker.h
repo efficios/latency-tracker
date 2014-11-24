@@ -43,6 +43,15 @@ struct latency_tracker_event {
 struct latency_tracker;
 
 /*
+ * Return code when adding an event to a tracker.
+ */
+enum latency_tracker_event_in_ret {
+	LATENCY_TRACKER_OK	= 0,
+	LATENCY_TRACKER_FULL	= 1,
+	LATENCY_TRACKER_ERR	= 2,
+};
+
+/*
  * Create a latency tracker.
  * match_fct: function to compare 2 keys, returns 0 if equal
  *            if NULL: use memcmp
@@ -73,7 +82,8 @@ void latency_tracker_destroy(struct latency_tracker *tracker);
  * executed again but with timeout set to 0.
  * The memory management of priv is left entirely to the caller.
  */
-int latency_tracker_event_in(struct latency_tracker *tracker,
+enum latency_tracker_event_in_ret latency_tracker_event_in(
+		struct latency_tracker *tracker,
 		void *key, size_t key_len, uint64_t thresh,
 		void (*cb)(unsigned long ptr, unsigned int timeout),
 		uint64_t timeout, unsigned int unique, void *priv);
