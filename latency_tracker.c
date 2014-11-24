@@ -266,6 +266,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 		void *key, unsigned int key_len)
 {
 	struct latency_tracker_event *s;
+	struct hlist_node *next;
 	int ret;
 	int found = 0;
 	unsigned long flags;
@@ -278,7 +279,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
-	hash_for_each_possible(tracker->ht, s, hlist, k){
+	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
 		now = trace_clock_monotonic_wrapper();
