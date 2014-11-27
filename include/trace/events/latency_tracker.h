@@ -10,20 +10,20 @@
 
 TRACE_EVENT(
 	sched_latency,
-	TP_PROTO(pid_t pid, u64 delay, unsigned int timeout),
-	TP_ARGS(pid, delay, timeout),
+	TP_PROTO(pid_t pid, u64 delay, unsigned int flag),
+	TP_ARGS(pid, delay, flag),
 	TP_STRUCT__entry(
 		__field(int, pid)
 		__field(u64, delay)
-		__field(unsigned int, timeout)
+		__field(unsigned int, flag)
 	),
 	TP_fast_assign(
 		entry->pid = pid;
 		entry->delay = delay;
-		entry->timeout = timeout;
+		entry->flag = flag;
 	),
-	TP_printk("pid=%d, delay=%llu, timeout=%u", __entry->pid,
-		__entry->delay, __entry->timeout)
+	TP_printk("pid=%d, delay=%llu, flag=%u", __entry->pid,
+		__entry->delay, __entry->flag)
    );
 
 TRACE_EVENT(
@@ -50,23 +50,23 @@ TRACE_EVENT(
 TRACE_EVENT(
 	net_latency,
 	TP_PROTO(struct net_device *dev, u64 delay, unsigned int dropped,
-		unsigned int timeout),
-	TP_ARGS(dev, delay, dropped, timeout),
+		unsigned int flag),
+	TP_ARGS(dev, delay, dropped, flag),
 	TP_STRUCT__entry(
 		__string(name, dev->name)
 		__field(u64, delay)
 		__field(unsigned int, dropped)
-		__field(unsigned int, timeout)
+		__field(unsigned int, flag)
 	),
 	TP_fast_assign(
 		__assign_str(name, dev->name);
 		entry->delay = delay;
 		entry->dropped = dropped;
-		entry->timeout = timeout;
+		entry->flag = flag;
 	),
-	TP_printk("iface=%s, delay=%llu, dropped=%u, timeout=%u",
+	TP_printk("iface=%s, delay=%llu, dropped=%u, flag=%u",
 		__get_str(name), __entry->delay, __entry->dropped,
-		__entry->timeout)
+		__entry->flag)
    );
 
 #endif /* _TRACE_LATENCY_TRACKER_H */
