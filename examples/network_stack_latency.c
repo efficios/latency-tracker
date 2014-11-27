@@ -14,6 +14,9 @@
  * /sys/module/net_latency_tp/parameters/usec_threshold and
  * /sys/module/net_latency_tp/parameters/usec_timeout
  *
+ * The garbage collector is enabled by default (every 1s, cleanup events older
+ * than 5ms), the values can be controlled when inserting the module.
+ *
  * It is possible to use nanoseconds, but you have to write manually the value
  * in this source code.
  *
@@ -55,6 +58,18 @@
  * Timeout to execute the callback (microseconds).
  */
 #define DEFAULT_USEC_NET_LATENCY_TIMEOUT 100 * 1000
+
+/* By default, every 1s, garbage collect every event older than 5ms */
+#define DEFAULT_USEC_NET_LATENCY_GC_PERIOD 1000000
+#define DEFAULT_USEC_NET_LATENCY_GC_THRESH 5000
+
+static unsigned long usec_gc_period = DEFAULT_USEC_NET_LATENCY_GC_PERIOD;
+module_param(usec_gc_period, ulong, 0444);
+MODULE_PARM_DESC(usec_gc_period, "Garbage collector period in microseconds");
+
+static unsigned long usec_gc_threshold = DEFAULT_USEC_NET_LATENCY_GC_THRESH;
+module_param(usec_gc_threshold, ulong, 0444);
+MODULE_PARM_DESC(usec_gc_threshold, "Garbage collector threshold in microseconds");
 
 enum net_exit_reason {
 	NET_EXIT_COPY_IOVEC = 0,
@@ -174,8 +189,8 @@ int __init net_latency_tp_init(void)
 {
 	int ret;
 
-	/* every 1s, garbage collect every event older than 5ms */
-	tracker = latency_tracker_create(NULL, NULL, 100, 1000000000, 5000000);
+	tracker = latency_tracker_create(NULL, NULL, 100,
+			usec_gc_period * 1000, usec_gc_threshold * 1000);
 	if (!tracker)
 		goto error;
 
