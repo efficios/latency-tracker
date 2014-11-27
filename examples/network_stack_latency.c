@@ -77,7 +77,7 @@ static struct latency_tracker *tracker;
 static int cnt = 0;
 
 static
-void net_cb(unsigned long ptr, unsigned int timeout)
+void net_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
@@ -87,7 +87,7 @@ void net_cb(unsigned long ptr, unsigned int timeout)
 
 	if (dev)
 		trace_net_latency(dev, data->end_ts - data->start_ts,
-			0, timeout);
+			0, data->cb_flag);
 }
 
 static

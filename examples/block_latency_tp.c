@@ -60,7 +60,7 @@ static struct latency_tracker *tracker;
 static int cnt = 0;
 
 static
-void blk_cb(unsigned long ptr, unsigned int timeout)
+void blk_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
@@ -68,9 +68,9 @@ void blk_cb(unsigned long ptr, unsigned int timeout)
 
 	/*
 	 * Use the timeout as a garbage collector, there are cases where
-	 * we requests are merged and we won't see a corresponding rq_issue.
+	 * requests are merged and we don't see a corresponding rq_complete.
 	 */
-	if (timeout)
+	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT)
 		return;
 
 	trace_block_latency(key->dev, key->sector,

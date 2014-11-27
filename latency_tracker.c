@@ -201,16 +201,17 @@ void latency_tracker_timeout_cb(unsigned long ptr)
 	struct latency_tracker_event *data = (struct latency_tracker_event *) ptr;
 
 	del_timer(&data->timer);
+	data->cb_flag = LATENCY_TRACKER_CB_TIMEOUT;
 	data->timeout = 0;
 
 	/* Run the user-provided callback. */
-	data->cb(ptr, 1);
+	data->cb(ptr);
 }
 
 enum latency_tracker_event_in_ret latency_tracker_event_in(
 		struct latency_tracker *tracker,
 		void *key, size_t key_len, uint64_t thresh,
-		void (*cb)(unsigned long ptr, unsigned int timeout),
+		void (*cb)(unsigned long ptr),
 		uint64_t timeout, unsigned int unique, void *priv)
 {
 	struct latency_tracker_event *s;
@@ -300,8 +301,9 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 		now = trace_clock_monotonic_wrapper();
 		if ((now - s->start_ts) > s->thresh) {
 			s->end_ts = now;
+			s->cb_flag = LATENCY_TRACKER_CB_NORMAL;
 			if (s->cb)
-				s->cb((unsigned long) s, 0);
+				s->cb((unsigned long) s);
 		}
 		latency_tracker_event_destroy(tracker, s);
 		found = 1;
@@ -321,11 +323,11 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_tracker_event_out);
 
-void example_cb(unsigned long ptr, unsigned int timeout)
+void example_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data = (struct latency_tracker_event *) ptr;
-	printk("cb called for key %s with %p, timeout = %d\n", (char *) data->key,
-			data->priv, timeout);
+	printk("cb called for key %s with %p, cb_flag = %d\n", (char *) data->key,
+			data->priv, data->cb_flag);
 }
 
 static

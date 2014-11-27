@@ -77,14 +77,14 @@ static struct latency_tracker *tracker;
 static int cnt = 0;
 
 static
-void sched_cb(unsigned long ptr, unsigned int timeout)
+void sched_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->key;
 
 	trace_sched_latency(key->pid, data->end_ts - data->start_ts,
-			timeout);
+			data->cb_flag);
 	cnt++;
 }
 

@@ -25,6 +25,13 @@
 
 #define LATENCY_TRACKER_MAX_KEY_SIZE 128
 
+enum latency_tracker_cb_flag {
+	LATENCY_TRACKER_CB_NORMAL	= 0,
+	LATENCY_TRACKER_CB_TIMEOUT	= 1,
+	LATENCY_TRACKER_CB_UNIQUE	= 2,
+	LATENCY_TRACKER_CB_GC		= 3,
+};
+
 struct latency_tracker_event {
 	struct timer_list timer;
 	struct hlist_node hlist;
@@ -36,7 +43,8 @@ struct latency_tracker_event {
 	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
 	size_t key_len;
 	struct list_head list;
-	void (*cb)(unsigned long ptr, unsigned int timeout);
+	enum latency_tracker_cb_flag cb_flag;
+	void (*cb)(unsigned long ptr);
 	void *priv;
 };
 
@@ -76,16 +84,17 @@ void latency_tracker_destroy(struct latency_tracker *tracker);
  * of this event. The pointer priv of this structure is initialized from
  * priv passed here.
  * If timeout (usec) is > 0, start a timer to fire at now + timeout.
- * If the timeout fires before the event_out, the timeout argument of the
- * callback is set to 1 and the timer is stopped. The event is not removed
+ * The cb_flag of the structure passed to the callback informs the callback
+ * if it got called because of the timeout or other condition.
+ * If the timeout occurs before the event_out, the event is not removed
  * from the HT, so if the event_out arrives eventually, the callback is
- * executed again but with timeout set to 0.
+ * executed again but with the normal cb_flag.
  * The memory management of priv is left entirely to the caller.
  */
 enum latency_tracker_event_in_ret latency_tracker_event_in(
 		struct latency_tracker *tracker,
 		void *key, size_t key_len, uint64_t thresh,
-		void (*cb)(unsigned long ptr, unsigned int timeout),
+		void (*cb)(unsigned long ptr),
 		uint64_t timeout, unsigned int unique, void *priv);
 
 /*
