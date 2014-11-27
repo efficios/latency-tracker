@@ -51,7 +51,7 @@ Create a latency tracker with:
     struct latency_tracker *latency_tracker_create(
         int (*match_fct) (const void *key1, const void *key2, size_t length),
         u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-	int max_events);
+	int max_events, uint64_t gc_period, uint64_t gc_thresh);
 
 You can pass NULL, to use default hash (`jhash`) and match (`memcmp`)
 functions.
@@ -66,23 +66,29 @@ On the enter callsite, call:
 
     latency_tracker_event_in(struct latency_tracker *tracker,
         void *key, size_t key_len, uint64_t thresh,
-        void (*cb)(unsigned long ptr, unsigned int timeout),
-        uint64_t timeout, void *priv);
+        void (*cb)(unsigned long ptr),
+        uint64_t timeout, unsigned int unique, void *priv);
 
 On the exit callsite, call:
 
     latency_tracker_event_out(struct latency_tracker *tracker,
-        void *key, unsigned int key_len);
+        void *key, unsigned int key_len, unsigned int id);
 
 If the delay (ns) between the event_in and event_out is higher than
 thresh, execute cb with a pointer to the struct latency_tracker_event
 of this event. The pointer priv of this structure is initialized from
 priv passed here.
-If timeout (nsec) is > 0, start a timer to fire at now + timeout.
-If the timeout fires before the event_out, the timeout argument of the
-callback is set to 1 and the timer is stopped. The event is not removed
-from the HT, so if the event_out arrives eventually, the callback is
-executed again but with timeout set to 0.
+
+If timeout (nsec) is > 0, start a timer to fire at now + timeout. If the
+timeout fires before the event_out, the cb_flag argument of the struct passed
+to the callback is set to LATENCY_TRACKER_CB_TIMEOUT and the timer is stopped.
+The event is not removed from the HT, so if the event_out arrives eventually,
+the callback is executed again but with cb_flag set to
+LATENCY_TRACKER_CB_NORMAL.
+
+The id is passed to the callback as the cb_out_id member of the struct. It
+can be used to track the event_out origin if multiple possible.
+
 The memory management of priv is left entirely to the caller.
 
 When done, destroy the tracker with:
