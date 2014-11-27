@@ -43,6 +43,9 @@ struct latency_tracker {
 	int (*match_fct) (const void *key1, const void *key2, size_t length);
 	u32 (*hash_fct) (const void *key, u32 length, u32 initval);
 	struct list_head events_free_list;
+	uint64_t gc_period;
+	uint64_t gc_thresh;
+	struct timer_list timer;
 	spinlock_t lock;
 };
 
@@ -123,11 +126,43 @@ void latency_tracker_destroy_free_list(struct latency_tracker *tracker)
 	}
 }
 
+static
+void latency_tracker_gc_cb(unsigned long ptr)
+{
+	struct latency_tracker *tracker = (struct latency_tracker *) ptr;
+	unsigned long flags;
+	struct latency_tracker_event *s;
+	struct hlist_node *next;
+	int bkt;
+	u64 now;
+
+	del_timer(&tracker->timer);
+	spin_lock_irqsave(&tracker->lock, flags);
+	hash_for_each_safe(tracker->ht, bkt, next, s, hlist){
+		now = trace_clock_monotonic_wrapper();
+		if ((now - s->start_ts) > tracker->gc_thresh) {
+			s->end_ts = now;
+			s->cb_flag = LATENCY_TRACKER_CB_GC;
+			if (s->cb)
+				s->cb((unsigned long) s);
+		}
+		latency_tracker_event_destroy(tracker, s);
+	}
+	spin_unlock_irqrestore(&tracker->lock, flags);
+
+	init_timer(&tracker->timer);
+	tracker->timer.function = latency_tracker_gc_cb;
+	tracker->timer.expires = jiffies +
+		wrapper_nsecs_to_jiffies(tracker->gc_period);
+	tracker->timer.data = (unsigned long) tracker;
+	add_timer(&tracker->timer);
+}
+
 struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events)
+		int max_events, uint64_t gc_period, uint64_t gc_thresh)
 
 {
 	struct latency_tracker *tracker;
@@ -147,6 +182,18 @@ struct latency_tracker *latency_tracker_create(
 	}
 	if (!max_events)
 		max_events = DEFAULT_MAX_ALLOC_EVENTS;
+	tracker->gc_period = gc_period;
+	tracker->gc_thresh = gc_thresh;
+
+	if (gc_period > 0 && gc_thresh > 0) {
+		init_timer(&tracker->timer);
+		tracker->timer.function = latency_tracker_gc_cb;
+		tracker->timer.expires = jiffies +
+			wrapper_nsecs_to_jiffies(gc_period);
+		tracker->timer.data = (unsigned long) tracker;
+		add_timer(&tracker->timer);
+	}
+
 	spin_lock_init(&tracker->lock);
 
 	hash_init(tracker->ht);
@@ -182,6 +229,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	unsigned long flags;
 	int nb = 0;
 
+	del_timer(&tracker->timer);
 	spin_lock_irqsave(&tracker->lock, flags);
 	hash_for_each_safe(tracker->ht, bkt, tmp, s, hlist) {
 		latency_tracker_event_destroy(tracker, s);
@@ -339,7 +387,7 @@ int test_tracker(void)
 	int ret;
 	struct latency_tracker *tracker;
 
-	tracker = latency_tracker_create(NULL, NULL, 3);
+	tracker = latency_tracker_create(NULL, NULL, 3, 0, 0);
 	if (!tracker)
 		goto error;
 

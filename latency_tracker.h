@@ -25,6 +25,8 @@
 
 #define LATENCY_TRACKER_MAX_KEY_SIZE 128
 
+struct latency_tracker;
+
 enum latency_tracker_cb_flag {
 	LATENCY_TRACKER_CB_NORMAL	= 0,
 	LATENCY_TRACKER_CB_TIMEOUT	= 1,
@@ -73,8 +75,6 @@ struct latency_tracker_event {
 	void *priv;
 };
 
-struct latency_tracker;
-
 /*
  * Return code when adding an event to a tracker.
  */
@@ -90,12 +90,15 @@ enum latency_tracker_event_in_ret {
  *            if NULL: use memcmp
  * hash_fct: function to hash a key, if NULL: use jhash
  * max_events: expected number of concurrent live events (default: 100)
+ * gc: every gc_period ns, check if there are events older than gc_thresh ns,
+ *     close them and pass LATENCY_TRACKER_CB_GC as cb_flag (disabled by
+ *     default with 0 and 0).
  */
 struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events);
+		int max_events, uint64_t gc_period, uint64_t gc_thresh);
 
 /*
  * Destroy and free a tracker and all the current events in the HT.

@@ -90,12 +90,11 @@ void net_cb(unsigned long ptr)
 	struct net_device *dev = data->priv;
 
 	/*
-	 * Use the timeout as a garbage collector.
-	 * There are a lot of places in the kernel where the skb cleanup path
-	 * is not instrumented.
+	 * Don't log garbage collector cleanups.
 	 */
-	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT)
+	if (data->cb_flag == LATENCY_TRACKER_CB_GC)
 		return;
+
 	cnt++;
 
 	if (dev)
@@ -175,7 +174,8 @@ int __init net_latency_tp_init(void)
 {
 	int ret;
 
-	tracker = latency_tracker_create(NULL, NULL, 100);
+	/* every 1s, garbage collect every event older than 5ms */
+	tracker = latency_tracker_create(NULL, NULL, 100, 1000000000, 5000000);
 	if (!tracker)
 		goto error;
 

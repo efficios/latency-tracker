@@ -38,6 +38,11 @@
  */
 #define DEFAULT_USEC_BLK_LATENCY_THRESHOLD 5 * 1000
 #define DEFAULT_USEC_BLK_LATENCY_TIMEOUT 0
+/*
+ * Garbage collector parameters (microseconds).
+ */
+#define DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD 0
+#define DEFAULT_USEC_BLK_LATENCY_GC_PERIOD 0
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -50,6 +55,14 @@ MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 static unsigned long usec_timeout = DEFAULT_USEC_BLK_LATENCY_TIMEOUT;
 module_param(usec_timeout, ulong, 0644);
 MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
+
+static unsigned long usec_gc_threshold = DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD;
+module_param(usec_gc_threshold, ulong, 0644);
+MODULE_PARM_DESC(usec_gc_threshold, "Garbage collector threshold in microseconds");
+
+static unsigned long usec_gc_period = DEFAULT_USEC_BLK_LATENCY_GC_PERIOD;
+module_param(usec_gc_period, ulong, 0644);
+MODULE_PARM_DESC(usec_gc_period, "Garbage collector period in microseconds");
 
 struct blkkey {
 	dev_t dev;
@@ -67,10 +80,9 @@ void blk_cb(unsigned long ptr)
 	struct blkkey *key = (struct blkkey *) data->key;
 
 	/*
-	 * Use the timeout as a garbage collector, there are cases where
-	 * requests are merged and we don't see a corresponding rq_complete.
+	 * Don't log garbage collector cleanups.
 	 */
-	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT)
+	if (data->cb_flag == LATENCY_TRACKER_CB_GC)
 		return;
 
 	trace_block_latency(key->dev, key->sector,
@@ -134,7 +146,9 @@ int __init block_latency_tp_init(void)
 {
 	int ret;
 
-	tracker = latency_tracker_create(NULL, NULL, 100);
+	tracker = latency_tracker_create(NULL, NULL, 100,
+			usec_gc_threshold * 1000,
+			usec_gc_period * 1000);
 	if (!tracker)
 		goto error;
 
