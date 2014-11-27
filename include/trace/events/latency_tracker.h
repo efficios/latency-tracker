@@ -49,24 +49,24 @@ TRACE_EVENT(
 
 TRACE_EVENT(
 	net_latency,
-	TP_PROTO(struct net_device *dev, u64 delay, unsigned int dropped,
-		unsigned int flag),
-	TP_ARGS(dev, delay, dropped, flag),
+	TP_PROTO(struct net_device *dev, u64 delay,
+		unsigned int flag, unsigned int out_id),
+	TP_ARGS(dev, delay, flag, out_id),
 	TP_STRUCT__entry(
 		__string(name, dev->name)
 		__field(u64, delay)
-		__field(unsigned int, dropped)
 		__field(unsigned int, flag)
+		__field(unsigned int, out_id)
 	),
 	TP_fast_assign(
 		__assign_str(name, dev->name);
 		entry->delay = delay;
-		entry->dropped = dropped;
 		entry->flag = flag;
+		entry->out_id = out_id;
 	),
-	TP_printk("iface=%s, delay=%llu, dropped=%u, flag=%u",
-		__get_str(name), __entry->delay, __entry->dropped,
-		__entry->flag)
+	TP_printk("iface=%s, delay=%llu, flag=%u, out_id=%u",
+		__get_str(name), __entry->delay, __entry->flag,
+		__entry->out_id)
    );
 
 #endif /* _TRACE_LATENCY_TRACKER_H */

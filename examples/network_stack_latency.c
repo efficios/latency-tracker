@@ -56,6 +56,12 @@
  */
 #define DEFAULT_USEC_NET_LATENCY_TIMEOUT 100 * 1000
 
+enum net_exit_reason {
+	NET_EXIT_COPY_IOVEC = 0,
+	NET_EXIT_CONSUME = 1,
+	NET_EXIT_FREE = 2,
+};
+
 /*
  * microseconds because we can't guarantee the passing of 64-bit
  * arguments to insmod on all architectures.
@@ -83,11 +89,18 @@ void net_cb(unsigned long ptr)
 		(struct latency_tracker_event *) ptr;
 	struct net_device *dev = data->priv;
 
+	/*
+	 * Use the timeout as a garbage collector.
+	 * There are a lot of places in the kernel where the skb cleanup path
+	 * is not instrumented.
+	 */
+	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT)
+		return;
 	cnt++;
 
 	if (dev)
 		trace_net_latency(dev, data->end_ts - data->start_ts,
-			0, data->cb_flag);
+			data->cb_flag, data->cb_out_id);
 }
 
 static
@@ -126,7 +139,35 @@ void probe_skb_copy_datagram_iovec(void *ignore, struct sk_buff *skb, int len)
 
 	key.skb = skb;
 
-	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+	latency_tracker_event_out(tracker, &key, sizeof(key),
+			NET_EXIT_COPY_IOVEC);
+}
+
+static
+void probe_consume_skb(void *ignore, struct sk_buff *skb)
+{
+	struct netkey key;
+
+	if (!skb)
+		return;
+
+	key.skb = skb;
+
+	latency_tracker_event_out(tracker, &key, sizeof(key),
+			NET_EXIT_CONSUME);
+}
+
+static
+void probe_kfree_skb(void *ignore, struct sk_buff *skb, void *location)
+{
+	struct netkey key;
+
+	if (!skb)
+		return;
+
+	key.skb = skb;
+
+	latency_tracker_event_out(tracker, &key, sizeof(key), NET_EXIT_FREE);
 }
 
 static
@@ -146,6 +187,14 @@ int __init net_latency_tp_init(void)
 			probe_skb_copy_datagram_iovec, NULL);
 	WARN_ON(ret);
 
+	ret = tracepoint_probe_register("consume_skb",
+			probe_consume_skb, NULL);
+	WARN_ON(ret);
+
+	ret = tracepoint_probe_register("kfree_skb",
+			probe_kfree_skb, NULL);
+	WARN_ON(ret);
+
 	ret = 0;
 	goto end;
 
@@ -163,6 +212,10 @@ void __exit net_latency_tp_exit(void)
 			probe_netif_receive_skb, NULL);
 	tracepoint_probe_unregister("skb_copy_datagram_iovec",
 			probe_skb_copy_datagram_iovec, NULL);
+	tracepoint_probe_unregister("consume_skb",
+			probe_consume_skb, NULL);
+	tracepoint_probe_unregister("kfree_skb",
+			probe_kfree_skb, NULL);
 	tracepoint_synchronize_unregister();
 	latency_tracker_destroy(tracker);
 	printk("Total net alerts : %d\n", cnt);

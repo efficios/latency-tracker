@@ -32,4 +32,8 @@ DECLARE_TRACE(skb_copy_datagram_iovec,
 	TP_PROTO(struct sk_buff *skb, int len),
 	TP_ARGS(skb, len));
 
+DECLARE_TRACE(consume_skb,
+	TP_PROTO(struct sk_buff *skb),
+	TP_ARGS(skb));
+
 #endif /* _TP_NET_LATENCY_H */
