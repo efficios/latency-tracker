@@ -106,6 +106,15 @@ struct latency_tracker *latency_tracker_create(
 void latency_tracker_destroy(struct latency_tracker *tracker);
 
 /*
+ * Update the tracker garbage collector parameters (ns).
+ * If any of the 2 values equals 0, the GC is stopped.
+ */
+void latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
+		uint64_t gc_thres);
+void latency_tracker_set_gc_period(struct latency_tracker *tracker,
+		uint64_t gc_thres);
+
+/*
  * Start the tracking of an event.
  * If the delay (ns) between the event_in and event_out is higher than
  * thresh, execute cb with a pointer to the struct latency_tracker_event

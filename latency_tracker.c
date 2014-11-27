@@ -46,8 +46,14 @@ struct latency_tracker {
 	uint64_t gc_period;
 	uint64_t gc_thresh;
 	struct timer_list timer;
+	/*
+	 * Protects the access to the HT, the free_list and the timer.
+	 */
 	spinlock_t lock;
 };
+
+static void latency_tracker_enable_gc(struct latency_tracker *tracker);
+static void latency_tracker_gc_cb(unsigned long ptr);
 
 /*
  * Function to get the timestamp.
@@ -136,7 +142,6 @@ void latency_tracker_gc_cb(unsigned long ptr)
 	int bkt;
 	u64 now;
 
-	del_timer(&tracker->timer);
 	spin_lock_irqsave(&tracker->lock, flags);
 	hash_for_each_safe(tracker->ht, bkt, next, s, hlist){
 		now = trace_clock_monotonic_wrapper();
@@ -148,7 +153,18 @@ void latency_tracker_gc_cb(unsigned long ptr)
 		}
 		latency_tracker_event_destroy(tracker, s);
 	}
+	latency_tracker_enable_gc(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
+}
+
+/* Must be called with the lock held. */
+static
+void latency_tracker_enable_gc(struct latency_tracker *tracker)
+{
+	del_timer(&tracker->timer);
+	if (tracker->gc_period == 0 || tracker->gc_thresh == 0) {
+		return;
+	}
 
 	init_timer(&tracker->timer);
 	tracker->timer.function = latency_tracker_gc_cb;
@@ -156,6 +172,28 @@ void latency_tracker_gc_cb(unsigned long ptr)
 		wrapper_nsecs_to_jiffies(tracker->gc_period);
 	tracker->timer.data = (unsigned long) tracker;
 	add_timer(&tracker->timer);
+}
+
+void latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
+		uint64_t gc_thresh)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&tracker->lock, flags);
+	tracker->gc_thresh = gc_thresh;
+	latency_tracker_enable_gc(tracker);
+	spin_unlock_irqrestore(&tracker->lock, flags);
+}
+
+void latency_tracker_set_gc_period(struct latency_tracker *tracker,
+		uint64_t gc_period)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&tracker->lock, flags);
+	tracker->gc_period = gc_period;
+	latency_tracker_enable_gc(tracker);
+	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
 struct latency_tracker *latency_tracker_create(
@@ -185,14 +223,7 @@ struct latency_tracker *latency_tracker_create(
 	tracker->gc_period = gc_period;
 	tracker->gc_thresh = gc_thresh;
 
-	if (gc_period > 0 && gc_thresh > 0) {
-		init_timer(&tracker->timer);
-		tracker->timer.function = latency_tracker_gc_cb;
-		tracker->timer.expires = jiffies +
-			wrapper_nsecs_to_jiffies(gc_period);
-		tracker->timer.data = (unsigned long) tracker;
-		add_timer(&tracker->timer);
-	}
+	latency_tracker_enable_gc(tracker);
 
 	spin_lock_init(&tracker->lock);
 
