@@ -318,6 +318,9 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 		hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 			if (tracker->match_fct(key, s->key, key_len))
 				continue;
+			s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
+			if (s->cb)
+				s->cb((unsigned long) s);
 			latency_tracker_event_destroy(tracker, s);
 			break;
 		}

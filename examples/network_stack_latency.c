@@ -105,9 +105,10 @@ void net_cb(unsigned long ptr)
 	struct net_device *dev = data->priv;
 
 	/*
-	 * Don't log garbage collector cleanups.
+	 * Don't log garbage collector and unique cleanups.
 	 */
-	if (data->cb_flag == LATENCY_TRACKER_CB_GC)
+	if (data->cb_flag == LATENCY_TRACKER_CB_GC ||
+			data->cb_flag == LATENCY_TRACKER_CB_UNIQUE)
 		return;
 
 	cnt++;

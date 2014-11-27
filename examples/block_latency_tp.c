@@ -80,9 +80,10 @@ void blk_cb(unsigned long ptr)
 	struct blkkey *key = (struct blkkey *) data->key;
 
 	/*
-	 * Don't log garbage collector cleanups.
+	 * Don't log garbage collector and unique cleanups.
 	 */
-	if (data->cb_flag == LATENCY_TRACKER_CB_GC)
+	if (data->cb_flag == LATENCY_TRACKER_CB_GC ||
+			data->cb_flag == LATENCY_TRACKER_CB_UNIQUE)
 		return;
 
 	trace_block_latency(key->dev, key->sector,
