@@ -126,7 +126,7 @@ void probe_skb_copy_datagram_iovec(void *ignore, struct sk_buff *skb, int len)
 
 	key.skb = skb;
 
-	latency_tracker_event_out(tracker, &key, sizeof(key));
+	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
 }
 
 static

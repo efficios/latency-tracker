@@ -279,7 +279,7 @@ end:
 EXPORT_SYMBOL_GPL(latency_tracker_event_in);
 
 int latency_tracker_event_out(struct latency_tracker *tracker,
-		void *key, unsigned int key_len)
+		void *key, unsigned int key_len, unsigned int id)
 {
 	struct latency_tracker_event *s;
 	struct hlist_node *next;
@@ -302,6 +302,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 		if ((now - s->start_ts) > s->thresh) {
 			s->end_ts = now;
 			s->cb_flag = LATENCY_TRACKER_CB_NORMAL;
+			s->cb_out_id = id;
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
@@ -355,11 +356,11 @@ int test_tracker(void)
 		printk("failed\n");
 
 	printk("lookup k1\n");
-	latency_tracker_event_out(tracker, k1, strlen(k1) + 1);
+	latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0);
 	printk("lookup k2\n");
-	latency_tracker_event_out(tracker, k2, strlen(k2) + 1);
+	latency_tracker_event_out(tracker, k2, strlen(k2) + 1, 0);
 	printk("lookup k1\n");
-	latency_tracker_event_out(tracker, k1, strlen(k1) + 1);
+	latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0);
 
 	printk("done\n");
 	latency_tracker_destroy(tracker);

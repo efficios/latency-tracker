@@ -133,7 +133,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	current_pid[prev->on_cpu] = next->pid;
 
 	key.pid = next->pid;
-	latency_tracker_event_out(tracker, &key, sizeof(key));
+	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
 }
 
 static

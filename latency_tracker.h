@@ -35,16 +35,41 @@ enum latency_tracker_cb_flag {
 struct latency_tracker_event {
 	struct timer_list timer;
 	struct hlist_node hlist;
+	/* Timestamp of event creation. */
 	u64 start_ts;
+	/* Timestamp of event completion. */
 	u64 end_ts;
+	/* Timeout timestamp. */
 	uint64_t timeout;
+	/* Time threshold value to call the callback. */
 	uint64_t thresh;
+	/* Hash of the key. */
 	u32 hkey;
+	/* Copy of the key. */
 	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
+	/* Len of the key. */
 	size_t key_len;
 	struct list_head list;
+	/*
+	 * Flag set before calling the callback to identify various
+	 * the condition of call (normal, timeout, garbage collect, etc).
+	 */
 	enum latency_tracker_cb_flag cb_flag;
+	/*
+	 * Optional event_out ID, useful if multiple exit paths are
+	 * possible (error, normal, etc).
+	 */
+	unsigned int cb_out_id;
+	/*
+	 * Function pointer to the callback, the pointer passed is this
+	 * struct latency_tracker_event.
+	 */
 	void (*cb)(unsigned long ptr);
+	/*
+	 * Pointer set a event creation by the caller and kept as is up
+	 * to the event destruction. The memory management is left entirely
+	 * to the caller.
+	 */
 	void *priv;
 };
 
@@ -100,8 +125,10 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 /*
  * Stop the tracking of an event.
  * Cancels the timer if it was set.
+ * The optional id is passed to the callback in cb_out_id, it can be used
+ * to identify the origin of the event_out (eg: error or normal).
  */
 int latency_tracker_event_out(struct latency_tracker *tracker,
-		void *key, unsigned int key_len);
+		void *key, unsigned int key_len, unsigned int id);
 
 #endif /*  LATENCY_TRACKER_H */
