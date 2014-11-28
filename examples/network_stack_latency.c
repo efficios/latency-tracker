@@ -41,11 +41,14 @@
 #include <linux/file.h>
 #include <linux/dcache.h>
 #include <linux/fs.h>
+#include <linux/kprobes.h>
 #include <linux/net.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
+
 #include "network_stack_latency.h"
 #include "../latency_tracker.h"
+#include "../wrapper/kallsyms.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
@@ -75,6 +78,7 @@ enum net_exit_reason {
 	NET_EXIT_COPY_IOVEC = 0,
 	NET_EXIT_CONSUME = 1,
 	NET_EXIT_FREE = 2,
+	NET_EXIT_KPROBE_FREE = 3,
 };
 
 /*
@@ -186,9 +190,37 @@ void probe_kfree_skb(void *ignore, struct sk_buff *skb, void *location)
 }
 
 static
+int handle_kfree_skbmem(struct kprobe *p, struct pt_regs *regs)
+{
+#ifdef CONFIG_X86
+	void *skb;
+	struct netkey key;
+
+#ifdef __i386__
+	skb = (void *) regs->ax;
+#else /* __i386__ */
+	skb = (void *) regs->di;
+#endif /* __i386__ */
+
+	key.skb = skb;
+	latency_tracker_event_out(tracker, &key, sizeof(key), NET_EXIT_KPROBE_FREE);
+
+#endif /* CONFIG_X86 */
+	return 0;
+}
+
+static struct kprobe kp = {
+	.pre_handler = handle_kfree_skbmem,
+	.post_handler = NULL,
+	.fault_handler = NULL,
+	.addr = NULL,
+};
+
+static
 int __init net_latency_tp_init(void)
 {
 	int ret;
+	void (*kfree_skbmem_sym)(struct sk_buff *skb);
 
 	tracker = latency_tracker_create(NULL, NULL, 100,
 			usec_gc_period * 1000, usec_gc_threshold * 1000);
@@ -210,6 +242,16 @@ int __init net_latency_tp_init(void)
 	ret = tracepoint_probe_register("kfree_skb",
 			probe_kfree_skb, NULL);
 	WARN_ON(ret);
+
+	kfree_skbmem_sym =
+		(void *) kallsyms_lookup_funcptr("kfree_skbmem");
+	if (!kfree_skbmem_sym) {
+		printk("Failed to hook a kprobe on kfree_skbmem");
+		ret = 0;
+		goto end;
+	}
+	kp.addr = (kprobe_opcode_t *) kfree_skbmem_sym;
+	register_kprobe(&kp);
 
 	ret = 0;
 	goto end;
@@ -233,6 +275,7 @@ void __exit net_latency_tp_exit(void)
 	tracepoint_probe_unregister("kfree_skb",
 			probe_kfree_skb, NULL);
 	tracepoint_synchronize_unregister();
+	unregister_kprobe(&kp);
 	latency_tracker_destroy(tracker);
 	printk("Total net alerts : %d\n", cnt);
 }
