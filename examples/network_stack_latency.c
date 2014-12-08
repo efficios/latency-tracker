@@ -223,7 +223,8 @@ int __init net_latency_tp_init(void)
 	void (*kfree_skbmem_sym)(struct sk_buff *skb);
 
 	tracker = latency_tracker_create(NULL, NULL, 100,
-			usec_gc_period * 1000, usec_gc_threshold * 1000);
+			usec_gc_period * 1000, usec_gc_threshold * 1000,
+			NULL);
 	if (!tracker)
 		goto error;
 

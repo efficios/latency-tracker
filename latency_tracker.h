@@ -98,7 +98,8 @@ struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events, uint64_t gc_period, uint64_t gc_thresh);
+		int max_events, uint64_t gc_period, uint64_t gc_thresh,
+		void *priv);
 
 /*
  * Destroy and free a tracker and all the current events in the HT.
@@ -142,5 +143,8 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
  */
 int latency_tracker_event_out(struct latency_tracker *tracker,
 		void *key, unsigned int key_len, unsigned int id);
+
+
+void *latency_tracker_get_priv(struct latency_tracker *tracker);
 
 #endif /*  LATENCY_TRACKER_H */

@@ -50,6 +50,7 @@ struct latency_tracker {
 	 * Protects the access to the HT, the free_list and the timer.
 	 */
 	spinlock_t lock;
+	void *priv;
 };
 
 static void latency_tracker_enable_gc(struct latency_tracker *tracker);
@@ -200,7 +201,8 @@ struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events, uint64_t gc_period, uint64_t gc_thresh)
+		int max_events, uint64_t gc_period, uint64_t gc_thresh,
+		void *priv)
 
 {
 	struct latency_tracker *tracker;
@@ -222,6 +224,7 @@ struct latency_tracker *latency_tracker_create(
 		max_events = DEFAULT_MAX_ALLOC_EVENTS;
 	tracker->gc_period = gc_period;
 	tracker->gc_thresh = gc_thresh;
+	tracker->priv = priv;
 
 	latency_tracker_enable_gc(tracker);
 
@@ -406,6 +409,12 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_tracker_event_out);
 
+void *latency_tracker_get_priv(struct latency_tracker *tracker)
+{
+	return tracker->priv;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_get_priv);
+
 void example_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data = (struct latency_tracker_event *) ptr;
@@ -421,7 +430,7 @@ int test_tracker(void)
 	int ret;
 	struct latency_tracker *tracker;
 
-	tracker = latency_tracker_create(NULL, NULL, 3, 0, 0);
+	tracker = latency_tracker_create(NULL, NULL, 3, 0, 0, NULL);
 	if (!tracker)
 		goto error;
 
