@@ -82,6 +82,7 @@ struct block_tracker {
 	wait_queue_head_t read_wait;
 	enum wake_reason reason;
 	bool got_alert;
+	int readers;
 };
 
 static struct latency_tracker *tracker;
@@ -117,9 +118,11 @@ void blk_cb(unsigned long ptr)
 			data->end_ts - data->start_ts);
 	cnt++;
 
-	block_priv->reason = BLOCK_TRACKER_WAKE_DATA;
-	wake_up_interruptible(&block_priv->read_wait);
-	block_priv->got_alert = true;
+	if (block_priv->readers > 0) {
+		block_priv->reason = BLOCK_TRACKER_WAKE_DATA;
+		wake_up_interruptible(&block_priv->read_wait);
+		block_priv->got_alert = true;
+	}
 
 end_ts:
 	block_priv->last_alert_ts = data->end_ts;
@@ -219,6 +222,7 @@ int tracker_proc_open(struct inode *inode, struct file *filp)
 
 	init_waitqueue_head(&block_priv->read_wait);
 	block_priv->got_alert = false;
+	block_priv->readers++;
 	filp->private_data = block_priv;
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
@@ -230,6 +234,9 @@ int tracker_proc_open(struct inode *inode, struct file *filp)
 static
 int tracker_proc_release(struct inode *inode, struct file *filp)
 {
+	struct block_tracker *block_priv = filp->private_data;
+
+	block_priv->readers--;
 	module_put(THIS_MODULE);
 	return 0;
 }
