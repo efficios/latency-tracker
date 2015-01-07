@@ -183,6 +183,22 @@ Example output:
 [16:04:13.029836068] (+0.000041694) trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7669504, delay = 6531005 }
 ```
 
+Integration with LTTng snapshots
+--------------------------------
+
+One of the main reason to be for this system if the integration with LTTng
+snapshots. The flight-recorder mode of LTTng allows to write a trace in memory
+in a ring-buffer and only extract it when necessary (lttng snapshot record).
+The main difficulty is to trigger the collection of snapshots at the right
+time. Integrating the latency tracker with this features allows to extract the
+history before the latency was detected and might help understand why it
+happened. The size of the history depends on the LTTng sesssion configuration
+(subbuff size, number and enabled events) and the rate of events generated.  It
+can range from a few milliseconds to minutes.
+
+To try it, the script [`examples/watch-block-event.sh`](examples/watch-block-event.sh)
+give a good starting point.
+
 Acknowledgment
 --------------
 
