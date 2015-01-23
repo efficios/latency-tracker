@@ -41,8 +41,8 @@
 #include <linux/sched.h>
 #include "sched_latency_tp.h"
 #include "../latency_tracker.h"
+#include "../wrapper/tracepoint.h"
 
-#define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
 
 /*
@@ -146,11 +146,11 @@ int __init sched_latency_tp_init(void)
 	if (!tracker)
 		goto error;
 
-	ret = tracepoint_probe_register("sched_wakeup",
+	ret = lttng_wrapper_tracepoint_probe_register("sched_wakeup",
 			probe_sched_wakeup, NULL);
 	WARN_ON(ret);
 
-	ret = tracepoint_probe_register("sched_switch",
+	ret = lttng_wrapper_tracepoint_probe_register("sched_switch",
 			probe_sched_switch, NULL);
 	WARN_ON(ret);
 
@@ -167,9 +167,9 @@ module_init(sched_latency_tp_init);
 static
 void __exit sched_latency_tp_exit(void)
 {
-	tracepoint_probe_unregister("sched_wakeup",
+	lttng_wrapper_tracepoint_probe_unregister("sched_wakeup",
 			probe_sched_wakeup, NULL);
-	tracepoint_probe_unregister("sched_switch",
+	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
 	tracepoint_synchronize_unregister();
 	latency_tracker_destroy(tracker);

@@ -49,8 +49,8 @@
 #include "network_stack_latency.h"
 #include "../latency_tracker.h"
 #include "../wrapper/kallsyms.h"
+#include "../wrapper/tracepoint.h"
 
-#define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
 
 /*
@@ -228,19 +228,19 @@ int __init net_latency_tp_init(void)
 	if (!tracker)
 		goto error;
 
-	ret = tracepoint_probe_register("netif_receive_skb",
+	ret = lttng_wrapper_tracepoint_probe_register("netif_receive_skb",
 			probe_netif_receive_skb, NULL);
 	WARN_ON(ret);
 
-	ret = tracepoint_probe_register("skb_copy_datagram_iovec",
+	ret = lttng_wrapper_tracepoint_probe_register("skb_copy_datagram_iovec",
 			probe_skb_copy_datagram_iovec, NULL);
 	WARN_ON(ret);
 
-	ret = tracepoint_probe_register("consume_skb",
+	ret = lttng_wrapper_tracepoint_probe_register("consume_skb",
 			probe_consume_skb, NULL);
 	WARN_ON(ret);
 
-	ret = tracepoint_probe_register("kfree_skb",
+	ret = lttng_wrapper_tracepoint_probe_register("kfree_skb",
 			probe_kfree_skb, NULL);
 	WARN_ON(ret);
 
@@ -267,13 +267,13 @@ module_init(net_latency_tp_init);
 static
 void __exit net_latency_tp_exit(void)
 {
-	tracepoint_probe_unregister("netif_receive_skb",
+	lttng_wrapper_tracepoint_probe_unregister("netif_receive_skb",
 			probe_netif_receive_skb, NULL);
-	tracepoint_probe_unregister("skb_copy_datagram_iovec",
+	lttng_wrapper_tracepoint_probe_unregister("skb_copy_datagram_iovec",
 			probe_skb_copy_datagram_iovec, NULL);
-	tracepoint_probe_unregister("consume_skb",
+	lttng_wrapper_tracepoint_probe_unregister("consume_skb",
 			probe_consume_skb, NULL);
-	tracepoint_probe_unregister("kfree_skb",
+	lttng_wrapper_tracepoint_probe_unregister("kfree_skb",
 			probe_kfree_skb, NULL);
 	tracepoint_synchronize_unregister();
 	unregister_kprobe(&kp);

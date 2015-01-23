@@ -28,10 +28,11 @@
 #include <linux/dcache.h>
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
+#include <linux/poll.h>
 #include "block_latency_tp.h"
 #include "../latency_tracker.h"
+#include "../wrapper/tracepoint.h"
 
-#define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
 
 /*
@@ -87,6 +88,7 @@ struct block_tracker {
 
 static struct latency_tracker *tracker;
 static int cnt = 0;
+static int rq_cnt = 0;
 
 static struct proc_dir_entry *block_tracker_proc_dentry;
 static const struct file_operations block_tracker_fops;
@@ -114,6 +116,7 @@ void blk_cb(unsigned long ptr)
 			block_priv->ns_rate_limit)
 		goto end_ts;
 
+	printk("BLOCK\n");
 	trace_block_latency(key->dev, key->sector,
 			data->end_ts - data->start_ts);
 	cnt++;
@@ -148,6 +151,7 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 	u64 thresh, timeout;
 	enum latency_tracker_event_in_ret ret;
 
+	rq_cnt++;
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
 
@@ -273,11 +277,11 @@ int __init block_latency_tp_init(void)
 	if (!tracker)
 		goto error;
 
-	ret = tracepoint_probe_register("block_rq_issue",
+	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);
 	WARN_ON(ret);
 
-	ret = tracepoint_probe_register("block_rq_complete",
+	ret = lttng_wrapper_tracepoint_probe_register("block_rq_complete",
 			probe_block_rq_complete, NULL);
 	WARN_ON(ret);
 
@@ -306,9 +310,9 @@ void __exit block_latency_tp_exit(void)
 {
 	struct block_tracker *block_priv;
 
-	tracepoint_probe_unregister("block_rq_issue",
+	lttng_wrapper_tracepoint_probe_unregister("block_rq_issue",
 			probe_block_rq_issue, NULL);
-	tracepoint_probe_unregister("block_rq_complete",
+	lttng_wrapper_tracepoint_probe_unregister("block_rq_complete",
 			probe_block_rq_complete, NULL);
 	tracepoint_synchronize_unregister();
 
@@ -318,6 +322,7 @@ void __exit block_latency_tp_exit(void)
 	latency_tracker_destroy(tracker);
 
 	printk("Total block alerts : %d\n", cnt);
+	printk("Total block requests : %d\n", rq_cnt);
 	if (block_tracker_proc_dentry)
 		remove_proc_entry("block_tracker", NULL);
 }

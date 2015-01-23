@@ -26,17 +26,28 @@
 #include <linux/hrtimer.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
+#include <linux/version.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
+#define RHASHTABLE
+#endif
 #include <linux/hashtable.h>
 #include <linux/jhash.h>
 #include <linux/module.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
 #include "wrapper/vmalloc.h"
+#include "wrapper/tracepoint.h"
+#define CREATE_TRACE_POINTS
+#include <trace/events/latency_tracker.h>
 
 #define DEFAULT_LATENCY_HASH_BITS 3
 #define DEFAULT_LATENCY_TABLE_SIZE (1 << DEFAULT_LATENCY_HASH_BITS)
 
 #define DEFAULT_MAX_ALLOC_EVENTS 100
+
+EXPORT_TRACEPOINT_SYMBOL_GPL(sched_latency);
+EXPORT_TRACEPOINT_SYMBOL_GPL(net_latency);
+EXPORT_TRACEPOINT_SYMBOL_GPL(block_latency);
 
 struct latency_tracker {
 	struct hlist_head ht[DEFAULT_LATENCY_TABLE_SIZE];
@@ -473,12 +484,17 @@ int __init latency_tracker_init(void)
 
 	ret = test_tracker();
 
+	ret = lttng_tracepoint_init();
+	if (ret)
+		return ret;
+
 	return ret;
 }
 
 static
 void __exit latency_tracker_exit(void)
 {
+	lttng_tracepoint_exit();
 }
 
 module_init(latency_tracker_init);
