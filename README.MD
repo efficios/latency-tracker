@@ -129,9 +129,9 @@ Loading the modules
 For example to load two examples provided:
 
 ```
-insmod latency_tracker.ko
-insmod examples/sched_latency_tp.ko
-insmod examples/block_latency_tp.ko
+insmod tracker.ko
+insmod sched_latency.ko
+insmod block_latency.ko
 ```
 
 Reading the output with Ftrace
