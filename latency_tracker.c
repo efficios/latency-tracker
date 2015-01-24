@@ -29,37 +29,21 @@
 #include <linux/version.h>
 #include <linux/jhash.h>
 #include <linux/module.h>
+//#include <linux/rhashtable.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
 #include "wrapper/vmalloc.h"
 #include "wrapper/tracepoint.h"
 #include "wrapper/ht.h"
+#include "tracker_private.h"
 #define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
-
-#define DEFAULT_LATENCY_HASH_BITS 3
-#define DEFAULT_LATENCY_TABLE_SIZE (1 << DEFAULT_LATENCY_HASH_BITS)
 
 #define DEFAULT_MAX_ALLOC_EVENTS 100
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_latency);
 EXPORT_TRACEPOINT_SYMBOL_GPL(net_latency);
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_latency);
-
-struct latency_tracker {
-	struct hlist_head ht[DEFAULT_LATENCY_TABLE_SIZE];
-	int (*match_fct) (const void *key1, const void *key2, size_t length);
-	u32 (*hash_fct) (const void *key, u32 length, u32 initval);
-	struct list_head events_free_list;
-	uint64_t gc_period;
-	uint64_t gc_thresh;
-	struct timer_list timer;
-	/*
-	 * Protects the access to the HT, the free_list and the timer.
-	 */
-	spinlock_t lock;
-	void *priv;
-};
 
 static void latency_tracker_enable_gc(struct latency_tracker *tracker);
 static void latency_tracker_gc_cb(unsigned long ptr);
@@ -124,7 +108,7 @@ static
 void latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
-	wrapper_ht_del(&s->hlist);
+	wrapper_ht_del(tracker, s);
 	if (s->timeout > 0)
 		del_timer(&s->timer);
 	latency_tracker_put_event(tracker, s);
@@ -146,22 +130,11 @@ void latency_tracker_gc_cb(unsigned long ptr)
 {
 	struct latency_tracker *tracker = (struct latency_tracker *) ptr;
 	unsigned long flags;
-	struct latency_tracker_event *s;
-	struct hlist_node *next;
-	int bkt;
 	u64 now;
 
+	now = trace_clock_monotonic_wrapper();
 	spin_lock_irqsave(&tracker->lock, flags);
-	wrapper_ht_for_each_safe(tracker->ht, bkt, next, s, hlist){
-		now = trace_clock_monotonic_wrapper();
-		if ((now - s->start_ts) > tracker->gc_thresh) {
-			s->end_ts = now;
-			s->cb_flag = LATENCY_TRACKER_CB_GC;
-			if (s->cb)
-				s->cb((unsigned long) s);
-		}
-		latency_tracker_event_destroy(tracker, s);
-	}
+	wrapper_ht_gc(tracker, now);
 	latency_tracker_enable_gc(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
@@ -238,7 +211,7 @@ struct latency_tracker *latency_tracker_create(
 
 	spin_lock_init(&tracker->lock);
 
-	wrapper_ht_init(tracker->ht);
+	wrapper_ht_init(tracker);
 
 	INIT_LIST_HEAD(&tracker->events_free_list);
 	for (i = 0; i < max_events; i++) {
@@ -266,18 +239,12 @@ EXPORT_SYMBOL_GPL(latency_tracker_create);
 
 void latency_tracker_destroy(struct latency_tracker *tracker)
 {
-	int bkt;
-	struct latency_tracker_event *s;
-	struct hlist_node *tmp;
 	unsigned long flags;
 	int nb = 0;
 
 	del_timer(&tracker->timer);
 	spin_lock_irqsave(&tracker->lock, flags);
-	wrapper_ht_for_each_safe(tracker->ht, bkt, tmp, s, hlist) {
-		latency_tracker_event_destroy(tracker, s);
-		nb++;
-	}
+	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
 	latency_tracker_destroy_free_list(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
@@ -307,9 +274,7 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 {
 	struct latency_tracker_event *s;
 	unsigned long flags;
-	struct hlist_node *next;
 	int ret;
-	u32 k;
 
 	if (!tracker) {
 		ret = LATENCY_TRACKER_ERR;
@@ -325,18 +290,8 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 	 * If we specify the unique property, get rid of other duplicate keys
 	 * without calling the callback.
 	 */
-	if (unique) {
-		k = tracker->hash_fct(key, key_len, 0);
-		wrapper_ht_for_each_possible_safe(tracker->ht, s, next, hlist, k){
-			if (tracker->match_fct(key, s->key, key_len))
-				continue;
-			s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
-			if (s->cb)
-				s->cb((unsigned long) s);
-			latency_tracker_event_destroy(tracker, s);
-			break;
-		}
-	}
+	if (unique)
+		wrapper_ht_unique_check(tracker, s, key, key_len);
 
 	s = latency_tracker_get_event(tracker);
 	if (!s) {
@@ -362,7 +317,7 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 		add_timer(&s->timer);
 	}
 
-	wrapper_ht_add(tracker->ht, &s->hlist, s->hkey);
+	wrapper_ht_add(tracker, s);
 	ret = LATENCY_TRACKER_OK;
 
 error_unlock:
@@ -375,34 +330,18 @@ EXPORT_SYMBOL_GPL(latency_tracker_event_in);
 int latency_tracker_event_out(struct latency_tracker *tracker,
 		void *key, unsigned int key_len, unsigned int id)
 {
-	struct latency_tracker_event *s;
-	struct hlist_node *next;
 	int ret;
 	int found = 0;
 	unsigned long flags;
-	u32 k;
 	u64 now;
 
 	if (!tracker) {
 		goto error;
 	}
 
+	now = trace_clock_monotonic_wrapper();
 	spin_lock_irqsave(&tracker->lock, flags);
-	k = tracker->hash_fct(key, key_len, 0);
-	wrapper_ht_for_each_possible_safe(tracker->ht, s, next, hlist, k){
-		if (tracker->match_fct(key, s->key, key_len))
-			continue;
-		now = trace_clock_monotonic_wrapper();
-		if ((now - s->start_ts) > s->thresh) {
-			s->end_ts = now;
-			s->cb_flag = LATENCY_TRACKER_CB_NORMAL;
-			s->cb_out_id = id;
-			if (s->cb)
-				s->cb((unsigned long) s);
-		}
-		latency_tracker_event_destroy(tracker, s);
-		found = 1;
-	}
+	found = wrapper_ht_check_event(tracker, key, key_len, id, now);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	if (!found)

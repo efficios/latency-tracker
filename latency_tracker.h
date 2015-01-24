@@ -37,6 +37,7 @@ enum latency_tracker_cb_flag {
 struct latency_tracker_event {
 	struct timer_list timer;
 	struct hlist_node hlist;
+	//struct rhash_head node;
 	/* Timestamp of event creation. */
 	u64 start_ts;
 	/* Timestamp of event completion. */
