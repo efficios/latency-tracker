@@ -27,16 +27,13 @@
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/version.h>
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
-#define RHASHTABLE
-#endif
-#include <linux/hashtable.h>
 #include <linux/jhash.h>
 #include <linux/module.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
 #include "wrapper/vmalloc.h"
 #include "wrapper/tracepoint.h"
+#include "wrapper/ht.h"
 #define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
 
@@ -127,7 +124,7 @@ static
 void latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
-	hash_del(&s->hlist);
+	wrapper_ht_del(&s->hlist);
 	if (s->timeout > 0)
 		del_timer(&s->timer);
 	latency_tracker_put_event(tracker, s);
@@ -155,7 +152,7 @@ void latency_tracker_gc_cb(unsigned long ptr)
 	u64 now;
 
 	spin_lock_irqsave(&tracker->lock, flags);
-	hash_for_each_safe(tracker->ht, bkt, next, s, hlist){
+	wrapper_ht_for_each_safe(tracker->ht, bkt, next, s, hlist){
 		now = trace_clock_monotonic_wrapper();
 		if ((now - s->start_ts) > tracker->gc_thresh) {
 			s->end_ts = now;
@@ -241,7 +238,8 @@ struct latency_tracker *latency_tracker_create(
 
 	spin_lock_init(&tracker->lock);
 
-	hash_init(tracker->ht);
+	wrapper_ht_init(tracker->ht);
+
 	INIT_LIST_HEAD(&tracker->events_free_list);
 	for (i = 0; i < max_events; i++) {
 		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
@@ -276,7 +274,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 
 	del_timer(&tracker->timer);
 	spin_lock_irqsave(&tracker->lock, flags);
-	hash_for_each_safe(tracker->ht, bkt, tmp, s, hlist) {
+	wrapper_ht_for_each_safe(tracker->ht, bkt, tmp, s, hlist) {
 		latency_tracker_event_destroy(tracker, s);
 		nb++;
 	}
@@ -329,7 +327,7 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 	 */
 	if (unique) {
 		k = tracker->hash_fct(key, key_len, 0);
-		hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
+		wrapper_ht_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 			if (tracker->match_fct(key, s->key, key_len))
 				continue;
 			s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
@@ -364,7 +362,7 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 		add_timer(&s->timer);
 	}
 
-	hash_add(tracker->ht, &s->hlist, s->hkey);
+	wrapper_ht_add(tracker->ht, &s->hlist, s->hkey);
 	ret = LATENCY_TRACKER_OK;
 
 error_unlock:
@@ -391,7 +389,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
-	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
+	wrapper_ht_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
 		now = trace_clock_monotonic_wrapper();
