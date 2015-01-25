@@ -29,7 +29,6 @@
 #include <linux/version.h>
 #include <linux/jhash.h>
 #include <linux/module.h>
-//#include <linux/rhashtable.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
 #include "wrapper/vmalloc.h"

@@ -23,6 +23,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <linux/version.h>
 #define LATENCY_TRACKER_MAX_KEY_SIZE 128
 
 struct latency_tracker;
@@ -34,10 +35,17 @@ enum latency_tracker_cb_flag {
 	LATENCY_TRACKER_CB_GC		= 3,
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
+#include <linux/rhashtable.h>
+#else
+struct rhash_head {};
+struct rhashtable {};
+#endif
+
 struct latency_tracker_event {
 	struct timer_list timer;
 	struct hlist_node hlist;
-	//struct rhash_head node;
+	struct rhash_head node;
 	/* Timestamp of event creation. */
 	u64 start_ts;
 	/* Timestamp of event completion. */

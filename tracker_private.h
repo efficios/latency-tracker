@@ -4,9 +4,11 @@
 #define DEFAULT_LATENCY_HASH_BITS 3
 #define DEFAULT_LATENCY_TABLE_SIZE (1 << DEFAULT_LATENCY_HASH_BITS)
 
+#include "wrapper/ht.h"
+
 struct latency_tracker {
         struct hlist_head ht[DEFAULT_LATENCY_TABLE_SIZE];
-//	struct rhashtable rht;
+	struct rhashtable rht;
         int (*match_fct) (const void *key1, const void *key2, size_t length);
         u32 (*hash_fct) (const void *key, u32 length, u32 initval);
         struct list_head events_free_list;
@@ -20,6 +22,7 @@ struct latency_tracker {
         void *priv;
 };
 
+struct latency_tracker_event;
 static
 void latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s);

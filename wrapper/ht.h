@@ -23,17 +23,15 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "../latency_tracker.h"
-#include "../tracker_private.h"
-
-/*
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
 #define RHASHTABLE
 #include <linux/rhashtable.h>
 #endif
-*/
 #include <linux/hashtable.h>
 #include <linux/jhash.h>
+
+#include "../latency_tracker.h"
+#include "../tracker_private.h"
 
 #ifdef RHASHTABLE
 static int lockdep_nl_sk_hash_is_held(void)
@@ -79,19 +77,103 @@ void wrapper_ht_del(struct latency_tracker *tracker,
 }
 
 /*
+ * Returns the number of event still active at destruction time.
+ */
+static inline
+int wrapper_ht_clear(struct latency_tracker *tracker)
+{
+	int nb = 0, i;
+	struct latency_tracker_event *s, *next;
+	struct bucket_table *tbl;
+
+	tbl = rht_dereference_rcu(tracker->rht.tbl, &tracker->rht);
+	for (i = 0; i < tbl->size; i++) {
+		rht_for_each_entry_safe(s, next, tbl->buckets[i],
+				&tracker->rht, node) {
+			latency_tracker_event_destroy(tracker, s);
+			nb++;
+		}
+	}
+
+	return nb;
+}
+
+static inline
+void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
+{
+	struct latency_tracker_event *s, *next;
+	struct bucket_table *tbl;
+	int i;
+
+	tbl = rht_dereference_rcu(tracker->rht.tbl, &tracker->rht);
+	for (i = 0; i < tbl->size; i++) {
+		rht_for_each_entry_safe(s, next, tbl->buckets[i],
+				&tracker->rht, node) {
+			if ((now - s->start_ts) > tracker->gc_thresh) {
+				s->end_ts = now;
+				s->cb_flag = LATENCY_TRACKER_CB_GC;
+				if (s->cb)
+					s->cb((unsigned long) s);
+			}
+			latency_tracker_event_destroy(tracker, s);
+		}
+	}
+}
+
+static inline
+int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
+		unsigned int key_len, unsigned int id, u64 now)
+{
+	struct latency_tracker_event *s;
+	u32 k;
+	int found = 0;
+
+	k = tracker->hash_fct(key, key_len, 0);
+	while ((s = rhashtable_lookup(&tracker->rht, &k))) {
+		if (tracker->match_fct(key, s->key, key_len))
+			continue;
+		if ((now - s->start_ts) > s->thresh) {
+			s->end_ts = now;
+			s->cb_flag = LATENCY_TRACKER_CB_NORMAL;
+			s->cb_out_id = id;
+			if (s->cb)
+				s->cb((unsigned long) s);
+		}
+		latency_tracker_event_destroy(tracker, s);
+		found = 1;
+	}
+
+	return found;
+}
+
+static inline
+void wrapper_ht_unique_check(struct latency_tracker *tracker,
+		struct latency_tracker_event *s, void *key, size_t key_len)
+{
+	u32 k;
+	k = tracker->hash_fct(key, key_len, 0);
+	while ((s = rhashtable_lookup(&tracker->rht, &k))) {
+		if (tracker->match_fct(key, s->key, key_len))
+			continue;
+		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
+		if (s->cb)
+			s->cb((unsigned long) s);
+		latency_tracker_event_destroy(tracker, s);
+		break;
+	}
+}
+
+/*
 #define hash_for_each_safe(tracker, xxbkt, xxtmp, obj, n, tbl) \
 	rht_for_each_entry_safe(obj, n, xxhead, tracker->rht, node)
 	*/
 
 #else /* RHASHTABLE */
 
-struct rhash_head {};
-struct rhashtable {};
 #define wrapper_ht_init(tracker) hash_init(tracker->ht)
 #define wrapper_ht_add(tracker, s) hash_add(tracker->ht, &s->hlist, s->hkey)
 #define wrapper_ht_del(tracker, s) hash_del(&s->hlist)
 
-#endif /* RHASHTABLE */
 
 /*
  * Returns the number of event still active at destruction time.
@@ -174,5 +256,6 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		break;
 	}
 }
+#endif /* RHASHTABLE */
 
 #endif /* _LTTNG_WRAPPER_HT_H */
