@@ -196,7 +196,6 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 	struct latency_tracker_event *s;
 	struct hlist_node *tmp;
 
-	printk("clear hashtable\n");
 	hash_for_each_safe(tracker->ht, bkt, tmp, s, hlist){
 		latency_tracker_event_destroy(tracker, s);
 		nb++;
@@ -235,7 +234,6 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
-	printk("hashed key: %lu, %p\n", k, &k);
 	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
