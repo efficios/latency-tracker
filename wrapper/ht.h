@@ -45,16 +45,22 @@ bool rht_check_above_75(const struct rhashtable *ht, size_t new_size)
 		return 0;
 }
 
+static inline u32 already_hashed(const void *data, u32 len, u32 seed)
+{
+	const u32 *k = data;
+	return *k;
+}
+
 static inline
 void wrapper_ht_init(struct latency_tracker *tracker)
 {
 	struct rhashtable_params ht_params = {
 		.head_offset = offsetof(struct latency_tracker_event, node),
 		.key_offset = offsetof(struct latency_tracker_event, hkey),
-		.key_len = sizeof(u32), /* portid */
-		.hashfn = jhash,
+		.key_len = sizeof(u32),
+		.hashfn = already_hashed,
 		.max_shift = DEFAULT_LATENCY_TABLE_SIZE,
-		.grow_decision = rht_check_above_75,
+//		.grow_decision = rht_check_above_75,
 //		.shrink_decision = rht_shrink_below_30_2,
 //		.mutex_is_held = lockdep_nl_sk_hash_is_held,
 	};
@@ -190,6 +196,7 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 	struct latency_tracker_event *s;
 	struct hlist_node *tmp;
 
+	printk("clear hashtable\n");
 	hash_for_each_safe(tracker->ht, bkt, tmp, s, hlist){
 		latency_tracker_event_destroy(tracker, s);
 		nb++;
@@ -228,6 +235,7 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
+	printk("hashed key: %lu, %p\n", k, &k);
 	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
