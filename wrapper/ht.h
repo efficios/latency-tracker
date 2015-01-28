@@ -34,6 +34,17 @@
 #include "../tracker_private.h"
 
 #ifdef RHASHTABLE
+
+bool rht_check_above_75(const struct rhashtable *ht, size_t new_size)
+{
+	        /* Expand table when exceeding 75% load */
+		if (ht->nelems > (new_size / 4 * 3)) {
+			printk("would grow, old: %lu, new: %lu\n", ht->nelems,
+					new_size);
+		}
+		return 0;
+}
+
 static inline
 void wrapper_ht_init(struct latency_tracker *tracker)
 {
@@ -42,9 +53,9 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 		.key_offset = offsetof(struct latency_tracker_event, hkey),
 		.key_len = sizeof(u32), /* portid */
 		.hashfn = jhash,
-		.max_shift = 16, /* 64K */
-//		.grow_decision = rht_grow_above_75,
-//		.shrink_decision = rht_shrink_below_30,
+		.max_shift = DEFAULT_LATENCY_TABLE_SIZE,
+		.grow_decision = rht_check_above_75,
+//		.shrink_decision = rht_shrink_below_30_2,
 //		.mutex_is_held = lockdep_nl_sk_hash_is_held,
 	};
 
