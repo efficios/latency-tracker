@@ -54,8 +54,8 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 		.key_len = sizeof(u32), /* portid */
 		.hashfn = jhash,
 		.max_shift = 16, /* 64K */
-		.grow_decision = rht_grow_above_75,
-		.shrink_decision = rht_shrink_below_30,
+//		.grow_decision = rht_grow_above_75,
+//		.shrink_decision = rht_shrink_below_30,
 		.mutex_is_held = lockdep_nl_sk_hash_is_held,
 	};
 
@@ -129,7 +129,10 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 	int found = 0;
 
 	k = tracker->hash_fct(key, key_len, 0);
-	while ((s = rhashtable_lookup(&tracker->rht, &k))) {
+	do {
+		s = rhashtable_lookup(&tracker->rht, &k);
+		if (!s)
+			break;
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
 		if ((now - s->start_ts) > s->thresh) {
@@ -141,7 +144,9 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 		}
 		latency_tracker_event_destroy(tracker, s);
 		found = 1;
-	}
+
+
+	} while (s);
 
 	return found;
 }
@@ -152,7 +157,10 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 {
 	u32 k;
 	k = tracker->hash_fct(key, key_len, 0);
-	while ((s = rhashtable_lookup(&tracker->rht, &k))) {
+	do {
+		s = rhashtable_lookup(&tracker->rht, &k);
+		if (!s)
+			break;
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
 		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
@@ -160,7 +168,7 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 			s->cb((unsigned long) s);
 		latency_tracker_event_destroy(tracker, s);
 		break;
-	}
+	} while (s);
 }
 
 /*
