@@ -34,17 +34,6 @@
 #include "../tracker_private.h"
 
 #ifdef RHASHTABLE
-static int lockdep_nl_sk_hash_is_held(void)
-{
-/*
-#ifdef CONFIG_LOCKDEP
-        if (debug_locks)
-                return lockdep_is_held(&nl_sk_hash_lock) || lockdep_is_held(&nl_table_lock);
-#endif
-*/
-        return 1;
-}
-
 static inline
 void wrapper_ht_init(struct latency_tracker *tracker)
 {
@@ -56,7 +45,7 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 		.max_shift = 16, /* 64K */
 //		.grow_decision = rht_grow_above_75,
 //		.shrink_decision = rht_shrink_below_30,
-		.mutex_is_held = lockdep_nl_sk_hash_is_held,
+//		.mutex_is_held = lockdep_nl_sk_hash_is_held,
 	};
 
 	rhashtable_init(&tracker->rht, &ht_params);
@@ -171,17 +160,11 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 	} while (s);
 }
 
-/*
-#define hash_for_each_safe(tracker, xxbkt, xxtmp, obj, n, tbl) \
-	rht_for_each_entry_safe(obj, n, xxhead, tracker->rht, node)
-	*/
-
 #else /* RHASHTABLE */
 
 #define wrapper_ht_init(tracker) hash_init(tracker->ht)
 #define wrapper_ht_add(tracker, s) hash_add(tracker->ht, &s->hlist, s->hkey)
 #define wrapper_ht_del(tracker, s) hash_del(&s->hlist)
-
 
 /*
  * Returns the number of event still active at destruction time.
