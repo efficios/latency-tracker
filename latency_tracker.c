@@ -107,10 +107,14 @@ static
 void latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
+	unsigned long flags;
+
+	spin_lock_irqsave(&tracker->lock, flags);
 	wrapper_ht_del(tracker, s);
 	if (s->timeout > 0)
 		del_timer(&s->timer);
 	latency_tracker_put_event(tracker, s);
+	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
 static
@@ -331,7 +335,6 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 {
 	int ret;
 	int found = 0;
-	unsigned long flags;
 	u64 now;
 
 	if (!tracker) {
@@ -339,9 +342,7 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 	}
 
 	now = trace_clock_monotonic_wrapper();
-	spin_lock_irqsave(&tracker->lock, flags);
 	found = wrapper_ht_check_event(tracker, key, key_len, id, now);
-	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	if (!found)
 		goto error;

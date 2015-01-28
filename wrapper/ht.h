@@ -128,6 +128,7 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 	u32 k;
 	int found = 0;
 
+	rcu_read_lock();
 	k = tracker->hash_fct(key, key_len, 0);
 	do {
 		s = rhashtable_lookup(&tracker->rht, &k);
@@ -147,6 +148,7 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 
 
 	} while (s);
+	rcu_read_unlock();
 
 	return found;
 }
@@ -222,7 +224,9 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 	struct hlist_node *next;
 	u32 k;
 	int found = 0;
+	unsigned long flags;
 
+	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
 	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 		if (tracker->match_fct(key, s->key, key_len))
@@ -234,9 +238,12 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
+		spin_unlock_irqrestore(&tracker->lock, flags);
 		latency_tracker_event_destroy(tracker, s);
 		found = 1;
+		spin_lock_irqsave(&tracker->lock, flags);
 	}
+	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	return found;
 }
