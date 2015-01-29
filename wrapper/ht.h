@@ -37,12 +37,12 @@
 
 bool rht_check_above_75(const struct rhashtable *ht, size_t new_size)
 {
-	        /* Expand table when exceeding 75% load */
-		if (ht->nelems > (new_size / 4 * 3)) {
-			printk("would grow, old: %lu, new: %lu\n", ht->nelems,
-					new_size);
-		}
-		return 0;
+	/* Expand table when exceeding 75% load */
+	if (ht->nelems > (new_size / 4 * 3)) {
+		printk("would grow, old: %lu, new: %lu\n", ht->nelems,
+				new_size);
+	}
+	return 0;
 }
 
 static inline u32 already_hashed(const void *data, u32 len, u32 seed)
@@ -92,6 +92,7 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 	struct latency_tracker_event *s, *next;
 	struct bucket_table *tbl;
 
+	rcu_read_lock();
 	tbl = rht_dereference_rcu(tracker->rht.tbl, &tracker->rht);
 	for (i = 0; i < tbl->size; i++) {
 		rht_for_each_entry_safe(s, next, tbl->buckets[i],
@@ -100,6 +101,7 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 			nb++;
 		}
 	}
+	rcu_read_unlock();
 
 	return nb;
 }
@@ -111,6 +113,7 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 	struct bucket_table *tbl;
 	int i;
 
+	rcu_read_lock();
 	tbl = rht_dereference_rcu(tracker->rht.tbl, &tracker->rht);
 	for (i = 0; i < tbl->size; i++) {
 		rht_for_each_entry_safe(s, next, tbl->buckets[i],
@@ -124,6 +127,7 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 			latency_tracker_event_destroy(tracker, s);
 		}
 	}
+	rcu_read_unlock();
 }
 
 static inline
@@ -165,6 +169,7 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 {
 	u32 k;
 	k = tracker->hash_fct(key, key_len, 0);
+	rcu_read_lock();
 	do {
 		s = rhashtable_lookup(&tracker->rht, &k);
 		if (!s)
@@ -177,6 +182,7 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		latency_tracker_event_destroy(tracker, s);
 		break;
 	} while (s);
+	rcu_read_unlock();
 }
 
 #else /* RHASHTABLE */
