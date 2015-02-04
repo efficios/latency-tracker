@@ -4,7 +4,7 @@
 /*
  * wrapper/ht-base.h
  *
- * Default Linux kernel HT
+ * Linux kernel rhashtable
  *
  * Copyright (C) 2014-2015 Julien Desfossez <jdesfossez@efficios.com>
  *

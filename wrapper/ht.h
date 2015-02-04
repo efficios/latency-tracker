@@ -24,7 +24,8 @@
  */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
-#define RHASHTABLE
+//#define RHASHTABLE
+#define URCUHT
 #endif
 #include <linux/jhash.h>
 
@@ -33,7 +34,9 @@
 
 #ifdef RHASHTABLE
 #include "ht-rhashtable.h"
-#else /* RHASHTABLE */
+#elif defined URCUHT /* RHASHTABLE */
+#include "ht-urcuht.h"
+#else
 #include "ht-base.h"
 #endif /* RHASHTABLE */
 
