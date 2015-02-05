@@ -79,6 +79,8 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
 	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
+		if (s->key_len != key_len)
+			continue;
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
 		if ((now - s->start_ts) > s->thresh) {
@@ -106,6 +108,8 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 	u32 k;
 	k = tracker->hash_fct(key, key_len, 0);
 	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
+		if (s->key_len != key_len)
+			continue;
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
 		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;

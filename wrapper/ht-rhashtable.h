@@ -134,6 +134,8 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 		s = rhashtable_lookup(&tracker->rht, &k);
 		if (!s)
 			break;
+		if (s->key_len != key_len)
+			continue;
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
 		if ((now - s->start_ts) > s->thresh) {
@@ -164,6 +166,8 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		s = rhashtable_lookup(&tracker->rht, &k);
 		if (!s)
 			break;
+		if (s->key_len != key_len)
+			continue;
 		if (tracker->match_fct(key, s->key, key_len))
 			continue;
 		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
