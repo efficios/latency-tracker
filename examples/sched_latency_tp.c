@@ -81,7 +81,7 @@ void sched_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
-	struct schedkey *key = (struct schedkey *) data->key;
+	struct schedkey *key = (struct schedkey *) data->tkey.key;
 
 	trace_sched_latency(key->pid, data->end_ts - data->start_ts,
 			data->cb_flag);

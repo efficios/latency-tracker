@@ -98,7 +98,7 @@ void blk_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
-	struct blkkey *key = (struct blkkey *) data->key;
+	struct blkkey *key = (struct blkkey *) data->tkey.key;
 	struct block_tracker *block_priv =
 		(struct block_tracker *) data->priv;
 

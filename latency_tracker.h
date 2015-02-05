@@ -43,6 +43,11 @@ struct rhashtable {};
 #endif
 #include "rculfhash-internal.h"
 
+struct latency_tracker_key {
+	size_t key_len;
+	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
+};
+
 struct latency_tracker_event {
 	struct timer_list timer;
 	/* basic kernel HT */
@@ -63,9 +68,7 @@ struct latency_tracker_event {
 	/* Hash of the key. */
 	u32 hkey;
 	/* Copy of the key. */
-	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
-	/* Len of the key. */
-	size_t key_len;
+	struct latency_tracker_key tkey;
 	struct list_head list;
 	/* back pointer to the tracker. */
 	struct latency_tracker *tracker;

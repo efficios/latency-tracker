@@ -290,12 +290,6 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 		goto end;
 	}
 
-	/*
-	 * If we specify the unique property, get rid of other duplicate keys
-	 * without calling the callback.
-	 */
-	if (unique)
-		wrapper_ht_unique_check(tracker, s, key, key_len);
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	s = latency_tracker_get_event(tracker);
@@ -307,9 +301,9 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 	s->hkey = tracker->hash_fct(key, key_len, 0);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 
-	memcpy(s->key, key, key_len);
+	memcpy(s->tkey.key, key, key_len);
+	s->tkey.key_len = key_len;
 	s->tracker = tracker;
-	s->key_len = key_len;
 	s->start_ts = trace_clock_monotonic_wrapper();
 	s->thresh = thresh;
 	s->timeout = timeout;
@@ -325,6 +319,12 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 		add_timer(&s->timer);
 	}
 
+	/*
+	 * If we specify the unique property, get rid of other duplicate keys
+	 * without calling the callback.
+	 */
+	if (unique)
+		wrapper_ht_unique_check(tracker, &s->tkey);
 	wrapper_ht_add(tracker, s);
 	ret = LATENCY_TRACKER_OK;
 	goto end;
@@ -342,13 +342,16 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 	int ret;
 	int found = 0;
 	u64 now;
+	struct latency_tracker_key tkey;
 
 	if (!tracker) {
 		goto error;
 	}
 
 	now = trace_clock_monotonic_wrapper();
-	found = wrapper_ht_check_event(tracker, key, key_len, id, now);
+	tkey.key_len = key_len;
+	memcpy(tkey.key, key, key_len);
+	found = wrapper_ht_check_event(tracker, &tkey, id, now);
 
 	if (!found)
 		goto error;
@@ -372,7 +375,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_get_priv);
 void example_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data = (struct latency_tracker_event *) ptr;
-	printk("cb called for key %s with %p, cb_flag = %d\n", (char *) data->key,
+	printk("cb called for key %s with %p, cb_flag = %d\n", (char *) data->tkey.key,
 			data->priv, data->cb_flag);
 }
 
