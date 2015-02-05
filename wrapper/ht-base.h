@@ -26,7 +26,14 @@
 #include <linux/hashtable.h>
 
 #define wrapper_ht_init(tracker) hash_init(tracker->ht)
-#define wrapper_ht_add(tracker, s) hash_add(tracker->ht, &s->hlist, s->hkey)
+#define wrapper_ht_add(tracker, s) \
+{ \
+	spin_lock_irqsave(&tracker->lock, flags); \
+	hash_add(tracker->ht, &s->hlist, s->hkey); \
+	spin_unlock_irqrestore(&tracker->lock, flags); \
+}
+
+/* Always called with spin_lock held. */
 #define wrapper_ht_del(tracker, s) hash_del(&s->hlist)
 
 /*
@@ -39,11 +46,14 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 	int bkt;
 	struct latency_tracker_event *s;
 	struct hlist_node *tmp;
+	unsigned long flags;
 
+	spin_lock_irqsave(&tracker->lock, flags);
 	hash_for_each_safe(tracker->ht, bkt, tmp, s, hlist){
 		latency_tracker_event_destroy(tracker, s);
 		nb++;
 	}
+	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	return nb;
 }
@@ -53,8 +63,10 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 {
 	struct latency_tracker_event *s;
 	struct hlist_node *tmp;
+	unsigned long flags;
 	int bkt;
 
+	spin_lock_irqsave(&tracker->lock, flags);
 	hash_for_each_safe(tracker->ht, bkt, tmp, s, hlist){
 		if ((now - s->start_ts) > tracker->gc_thresh) {
 			s->end_ts = now;
@@ -64,6 +76,7 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 		}
 		latency_tracker_event_destroy(tracker, s);
 	}
+	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
 static inline
@@ -90,10 +103,8 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
-		spin_unlock_irqrestore(&tracker->lock, flags);
 		latency_tracker_event_destroy(tracker, s);
 		found = 1;
-		spin_lock_irqsave(&tracker->lock, flags);
 	}
 	spin_unlock_irqrestore(&tracker->lock, flags);
 
@@ -105,7 +116,10 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		struct latency_tracker_event *s, void *key, size_t key_len)
 {
 	struct hlist_node *next;
+	unsigned long flags;
 	u32 k;
+
+	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
 	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 		if (s->key_len != key_len)
@@ -115,9 +129,12 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
 		if (s->cb)
 			s->cb((unsigned long) s);
+		spin_unlock_irqrestore(&tracker->lock, flags);
 		latency_tracker_event_destroy(tracker, s);
+		spin_lock_irqsave(&tracker->lock, flags);
 		break;
 	}
+	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
 #endif /* _LTTNG_WRAPPER_HT_BASEHT_H */

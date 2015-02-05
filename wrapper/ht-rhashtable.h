@@ -62,9 +62,14 @@ static inline
 void wrapper_ht_add(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
+	unsigned long flags;
+
+	spin_lock_irqsave(&tracker->lock, flags);
 	rhashtable_insert(&tracker->rht, &s->node, GFP_KERNEL);
+	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
+/* Always called with spin_lock held. */
 static inline
 void wrapper_ht_del(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
@@ -81,13 +86,16 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 	int nb = 0, i;
 	struct latency_tracker_event *s, *next;
 	struct bucket_table *tbl;
+	unsigned long flags;
 
 	rcu_read_lock();
 	tbl = rht_dereference_rcu(tracker->rht.tbl, &tracker->rht);
 	for (i = 0; i < tbl->size; i++) {
 		rht_for_each_entry_safe(s, next, tbl->buckets[i],
 				&tracker->rht, node) {
+			spin_lock_irqsave(&tracker->lock, flags);
 			latency_tracker_event_destroy(tracker, s);
+			spin_unlock_irqrestore(&tracker->lock, flags);
 			nb++;
 		}
 	}
@@ -101,6 +109,7 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 {
 	struct latency_tracker_event *s, *next;
 	struct bucket_table *tbl;
+	unsigned long flags;
 	int i;
 
 	rcu_read_lock();
@@ -114,7 +123,9 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 				if (s->cb)
 					s->cb((unsigned long) s);
 			}
+			spin_lock_irqsave(&tracker->lock, flags);
 			latency_tracker_event_destroy(tracker, s);
+			spin_unlock_irqrestore(&tracker->lock, flags);
 		}
 	}
 	rcu_read_unlock();
@@ -125,11 +136,14 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 		unsigned int key_len, unsigned int id, u64 now)
 {
 	struct latency_tracker_event *s;
+	unsigned long flags;
 	u32 k;
 	int found = 0;
 
-	rcu_read_lock();
+	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
+	spin_unlock_irqrestore(&tracker->lock, flags);
+	rcu_read_lock();
 	do {
 		s = rhashtable_lookup(&tracker->rht, &k);
 		if (!s)
@@ -145,10 +159,10 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
+		spin_lock_irqsave(&tracker->lock, flags);
 		latency_tracker_event_destroy(tracker, s);
+		spin_unlock_irqrestore(&tracker->lock, flags);
 		found = 1;
-
-
 	} while (s);
 	rcu_read_unlock();
 
@@ -160,7 +174,11 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		struct latency_tracker_event *s, void *key, size_t key_len)
 {
 	u32 k;
+	unsigned long flags;
+
+	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
+	spin_unlock_irqrestore(&tracker->lock, flags);
 	rcu_read_lock();
 	do {
 		s = rhashtable_lookup(&tracker->rht, &k);
@@ -173,7 +191,9 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
 		if (s->cb)
 			s->cb((unsigned long) s);
+		spin_lock_irqsave(&tracker->lock, flags);
 		latency_tracker_event_destroy(tracker, s);
+		spin_unlock_irqrestore(&tracker->lock, flags);
 		break;
 	} while (s);
 	rcu_read_unlock();

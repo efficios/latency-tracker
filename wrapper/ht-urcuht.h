@@ -36,16 +36,18 @@ int urcu_match(struct cds_lfht_node *node, const void *key)
 
 	new_s = (struct latency_tracker_event *) key;
 	s = caa_container_of(node, struct latency_tracker_event, urcunode);
-	if (s->key_len != new_s->key_len)
-		return 0;
-	return !s->tracker->match_fct(s->key, new_s->key, s->key_len);
+	printk("match %u, %u, %p\n", s->key_len, new_s->key_len, new_s);
+//	if (s->key_len != new_s->key_len)
+//		return 0;
+	return !s->tracker->match_fct(s->key, new_s, s->key_len);
 }
 
 
 static inline
 void wrapper_ht_init(struct latency_tracker *tracker)
 {
-	tracker->urcu_ht = cds_lfht_new(0, DEFAULT_LATENCY_TABLE_SIZE,
+	tracker->urcu_ht = cds_lfht_new(DEFAULT_LATENCY_TABLE_SIZE,
+			DEFAULT_LATENCY_TABLE_SIZE,
 			DEFAULT_LATENCY_TABLE_SIZE, 0, NULL);
 }
 
@@ -55,9 +57,10 @@ void wrapper_ht_add(struct latency_tracker *tracker,
 {
 	struct cds_lfht_node *node_ptr;
 
+	rcu_read_lock();
 	node_ptr = cds_lfht_add_unique(tracker->urcu_ht,
-			s->hkey, 
-			urcu_match, (void *) s, &s->urcunode);
+			s->hkey, urcu_match, (void *) s->key, &s->urcunode);
+	rcu_read_unlock();
 
 	if (node_ptr != &s->urcunode)
 		printk("ERR HT ADD\n");
@@ -67,7 +70,9 @@ static inline
 void wrapper_ht_del(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
+	rcu_read_lock();
 	cds_lfht_del(tracker->urcu_ht, &s->urcunode);
+	rcu_read_unlock();
 }
 
 /*
@@ -112,10 +117,8 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 	struct latency_tracker_event *s;
 	u32 k;
 	int found = 0;
-	unsigned long flags;
 	struct cds_lfht_iter iter;
 
-	spin_lock_irqsave(&tracker->lock, flags);
 	k = tracker->hash_fct(key, key_len, 0);
 
 	cds_lfht_for_each_entry_duplicate(tracker->urcu_ht, k,
@@ -127,12 +130,10 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
-		spin_unlock_irqrestore(&tracker->lock, flags);
 		latency_tracker_event_destroy(tracker, s);
 		found = 1;
-		spin_lock_irqsave(&tracker->lock, flags);
 	}
-	spin_unlock_irqrestore(&tracker->lock, flags);
+	printk("wrapper_ht_check_event 3\n");
 
 	return found;
 }

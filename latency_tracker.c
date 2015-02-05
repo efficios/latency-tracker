@@ -107,14 +107,11 @@ static
 void latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&tracker->lock, flags);
 	wrapper_ht_del(tracker, s);
+
 	if (s->timeout > 0)
 		del_timer(&s->timer);
 	latency_tracker_put_event(tracker, s);
-	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
 static
@@ -136,8 +133,8 @@ void latency_tracker_gc_cb(unsigned long ptr)
 	u64 now;
 
 	now = trace_clock_monotonic_wrapper();
-	spin_lock_irqsave(&tracker->lock, flags);
 	wrapper_ht_gc(tracker, now);
+	spin_lock_irqsave(&tracker->lock, flags);
 	latency_tracker_enable_gc(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
@@ -245,12 +242,17 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	unsigned long flags;
 	int nb = 0;
 
+	spin_lock_irqsave(&tracker->lock, flags);
 	del_timer(&tracker->timer);
+	spin_unlock_irqrestore(&tracker->lock, flags);
+
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
+
 	spin_lock_irqsave(&tracker->lock, flags);
 	latency_tracker_destroy_free_list(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
+
 	kfree(tracker);
 	module_put(THIS_MODULE);
 }
@@ -288,7 +290,6 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 		goto end;
 	}
 
-	spin_lock_irqsave(&tracker->lock, flags);
 	/*
 	 * If we specify the unique property, get rid of other duplicate keys
 	 * without calling the callback.
@@ -296,6 +297,7 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 	if (unique)
 		wrapper_ht_unique_check(tracker, s, key, key_len);
 
+	spin_lock_irqsave(&tracker->lock, flags);
 	s = latency_tracker_get_event(tracker);
 	if (!s) {
 		ret = LATENCY_TRACKER_FULL;
@@ -303,9 +305,11 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 	}
 
 	s->hkey = tracker->hash_fct(key, key_len, 0);
+	spin_unlock_irqrestore(&tracker->lock, flags);
+
 	memcpy(s->key, key, key_len);
 	s->tracker = tracker;
-
+	s->key_len = key_len;
 	s->start_ts = trace_clock_monotonic_wrapper();
 	s->thresh = thresh;
 	s->timeout = timeout;
@@ -323,6 +327,7 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 
 	wrapper_ht_add(tracker, s);
 	ret = LATENCY_TRACKER_OK;
+	goto end;
 
 error_unlock:
 	spin_unlock_irqrestore(&tracker->lock, flags);

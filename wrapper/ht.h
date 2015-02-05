@@ -32,12 +32,12 @@
 #include "../latency_tracker.h"
 #include "../tracker_private.h"
 
-#ifdef RHASHTABLE
-#include "ht-rhashtable.h"
-#elif defined URCUHT /* RHASHTABLE */
+//#ifdef RHASHTABLE
+//#include "ht-rhashtable.h"
+//#elif defined URCUHT /* RHASHTABLE */
 #include "ht-urcuht.h"
-#else
-#include "ht-base.h"
-#endif /* RHASHTABLE */
+//#else
+//#include "ht-base.h"
+//#endif /* RHASHTABLE */
 
 #endif /* _LTTNG_WRAPPER_HT_H */
