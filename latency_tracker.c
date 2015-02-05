@@ -304,6 +304,7 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 
 	s->hkey = tracker->hash_fct(key, key_len, 0);
 	memcpy(s->key, key, key_len);
+	s->tracker = tracker;
 
 	s->start_ts = trace_clock_monotonic_wrapper();
 	s->thresh = thresh;

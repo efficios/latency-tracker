@@ -67,6 +67,8 @@ struct latency_tracker_event {
 	/* Len of the key. */
 	size_t key_len;
 	struct list_head list;
+	/* back pointer to the tracker. */
+	struct latency_tracker *tracker;
 	/*
 	 * Flag set before calling the callback to identify various
 	 * the condition of call (normal, timeout, garbage collect, etc).
