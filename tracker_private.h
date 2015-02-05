@@ -14,6 +14,7 @@ struct latency_tracker {
 	struct rhashtable rht;
 	/* urcu ht */
 	struct cds_lfht *urcu_ht;
+	/* Returns 0 on match. */
         int (*match_fct) (const void *key1, const void *key2, size_t length);
         u32 (*hash_fct) (const void *key, u32 length, u32 initval);
         struct list_head events_free_list;
