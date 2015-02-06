@@ -442,6 +442,7 @@ static
 void __exit latency_tracker_exit(void)
 {
 	lttng_tracepoint_exit();
+	rcu_barrier_sched();
 }
 
 module_init(latency_tracker_init);
