@@ -50,7 +50,7 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	hash_for_each_safe(tracker->ht, bkt, tmp, s, hlist){
-		latency_tracker_event_destroy(tracker, s);
+		__latency_tracker_event_destroy(tracker, s);
 		nb++;
 	}
 	spin_unlock_irqrestore(&tracker->lock, flags);
@@ -74,7 +74,7 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
-		latency_tracker_event_destroy(tracker, s);
+		__latency_tracker_event_destroy(tracker, s);
 	}
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
@@ -103,7 +103,7 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
-		latency_tracker_event_destroy(tracker, s);
+		__latency_tracker_event_destroy(tracker, s);
 		found = 1;
 	}
 	spin_unlock_irqrestore(&tracker->lock, flags);
@@ -130,9 +130,7 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
 		if (s->cb)
 			s->cb((unsigned long) s);
-		spin_unlock_irqrestore(&tracker->lock, flags);
-		latency_tracker_event_destroy(tracker, s);
-		spin_lock_irqsave(&tracker->lock, flags);
+		__latency_tracker_event_destroy(tracker, s);
 		break;
 	}
 	spin_unlock_irqrestore(&tracker->lock, flags);

@@ -31,9 +31,9 @@
 #include <linux/module.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
-#include "wrapper/vmalloc.h"
 #include "wrapper/tracepoint.h"
 #include "wrapper/ht.h"
+#include "wrapper/freelist.h"
 #include "tracker_private.h"
 #define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
@@ -66,63 +66,23 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
-/*
- * Must be called with the tracker->lock held.
- */
-static
-struct latency_tracker_event *latency_tracker_get_event(
-		struct latency_tracker *tracker)
-{
-	struct latency_tracker_event *e;
-	unsigned long flags;
-
-	spin_lock_irqsave(&tracker->lock, flags);
-	if (list_empty(&tracker->events_free_list)) {
-		goto error;
-	}
-	e = list_last_entry(&tracker->events_free_list,
-			struct latency_tracker_event, list);
-	list_del(&e->list);
-	goto end;
-
-error:
-	e = NULL;
-end:
-	spin_unlock_irqrestore(&tracker->lock, flags);
-	return e;
-}
-
-/*
- * Must be called with the tracker->lock held.
- */
-static
-void latency_tracker_put_event(struct latency_tracker *tracker,
-		struct latency_tracker_event *e)
-{
-	memset(e, 0, sizeof(struct latency_tracker_event));
-	list_add(&e->list, &tracker->events_free_list);
-}
-
 static
 void deferred_latency_tracker_put_event(struct rcu_head *head)
 {
 #ifdef URCUHT
-	unsigned long flags;
 	struct latency_tracker *tracker;
 	struct latency_tracker_event *s =
 		caa_container_of(head, struct latency_tracker_event, urcuhead);
 	tracker = s->tracker;
-	spin_lock_irqsave(&tracker->lock, flags);
-	latency_tracker_put_event(tracker, s);
-	spin_unlock_irqrestore(&tracker->lock, flags);
+	wrapper_freelist_put_event(tracker, s);
 #endif /* URCUHT */
 }
 
 /*
- * Must be called with the tracker->lock held if not using urcu HT.
+ * Must be called with proper locking.
  */
 static
-void latency_tracker_event_destroy(struct latency_tracker *tracker,
+void __latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
 	wrapper_ht_del(tracker, s);
@@ -130,22 +90,23 @@ void latency_tracker_event_destroy(struct latency_tracker *tracker,
 	if (s->timeout > 0)
 		del_timer_sync(&s->timer);
 
-	if (tracker->urcu_ht)
-		call_rcu_sched(&s->urcuhead,
-				deferred_latency_tracker_put_event);
-	else
-		latency_tracker_put_event(tracker, s);
+#ifdef BASEHT
+	__wrapper_freelist_put_event(tracker, s);
+#else
+	call_rcu_sched(&s->urcuhead,
+			deferred_latency_tracker_put_event);
+#endif
 }
 
 static
-void latency_tracker_destroy_free_list(struct latency_tracker *tracker)
+void latency_tracker_event_destroy(struct latency_tracker *tracker,
+		struct latency_tracker_event *s)
 {
-	struct latency_tracker_event *e, *n;
+	unsigned long flags;
 
-	list_for_each_entry_safe(e, n, &tracker->events_free_list, list) {
-		list_del(&e->list);
-		kfree(e);
-	}
+	spin_lock_irqsave(&tracker->lock, flags);
+	__latency_tracker_event_destroy(tracker, s);
+	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
 static
@@ -210,8 +171,7 @@ struct latency_tracker *latency_tracker_create(
 
 {
 	struct latency_tracker *tracker;
-	struct latency_tracker_event *e;
-	int ret, i;
+	int ret;
 
 	tracker = kzalloc(sizeof(struct latency_tracker), GFP_KERNEL);
 	if (!tracker) {
@@ -236,14 +196,10 @@ struct latency_tracker *latency_tracker_create(
 
 	wrapper_ht_init(tracker);
 
-	INIT_LIST_HEAD(&tracker->events_free_list);
-	for (i = 0; i < max_events; i++) {
-		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
-		if (!e)
-			goto error_free_events;
-		list_add(&e->list, &tracker->events_free_list);
-	}
-	wrapper_vmalloc_sync_all();
+	ret = wrapper_freelist_init(tracker, max_events);
+	if (ret < 0)
+		goto error_free_events;
+
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
 		goto error_free_events;
@@ -251,7 +207,7 @@ struct latency_tracker *latency_tracker_create(
 	goto end;
 
 error_free_events:
-	latency_tracker_destroy_free_list(tracker);
+	wrapper_freelist_destroy(tracker);
 	kfree(tracker);
 error:
 	tracker = NULL;
@@ -270,7 +226,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
 
-	latency_tracker_destroy_free_list(tracker);
+	wrapper_freelist_destroy(tracker);
 
 	kfree(tracker);
 	module_put(THIS_MODULE);
@@ -312,7 +268,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	}
 
 
-	s = latency_tracker_get_event(tracker);
+	s = wrapper_freelist_get_event(tracker);
 	if (!s) {
 		ret = LATENCY_TRACKER_FULL;
 		goto end;

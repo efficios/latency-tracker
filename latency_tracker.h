@@ -69,7 +69,11 @@ struct latency_tracker_event {
 	u32 hkey;
 	/* Copy of the key. */
 	struct latency_tracker_key tkey;
+#ifdef LLFREELIST
+	struct llist_node llist;
+#else
 	struct list_head list;
+#endif
 	/* back pointer to the tracker. */
 	struct latency_tracker *tracker;
 	/*

@@ -17,7 +17,11 @@ struct latency_tracker {
 	/* Returns 0 on match. */
         int (*match_fct) (const void *key1, const void *key2, size_t length);
         u32 (*hash_fct) (const void *key, u32 length, u32 initval);
-        struct list_head events_free_list;
+#ifdef LLFREELIST
+	struct llist_head ll_events_free_list;
+#else
+	struct list_head events_free_list;
+#endif
         uint64_t gc_period;
         uint64_t gc_thresh;
         struct timer_list timer;
@@ -31,6 +35,9 @@ struct latency_tracker {
 struct latency_tracker_event;
 static
 void latency_tracker_event_destroy(struct latency_tracker *tracker,
+		struct latency_tracker_event *s);
+static
+void __latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s);
 
 #endif /* _TRACKER_PRIVATE_H */
