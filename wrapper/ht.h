@@ -35,7 +35,9 @@
 #elif defined(RHASHTABLE)
 #include "ht-rhashtable.h"
 #else /* RHASHTABLE */
+#if !defined(URCUHT)
 #define URCUHT
+#endif /* !defined(URCUHT) */
 #include "ht-urcuht.h"
 #endif /* RHASHTABLE */
 

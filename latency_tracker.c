@@ -297,7 +297,9 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		uint64_t timeout, unsigned int unique, void *priv)
 {
 	struct latency_tracker_event *s;
+#ifdef BASEHT
 	unsigned long flags;
+#endif
 	int ret;
 
 	if (!tracker) {
