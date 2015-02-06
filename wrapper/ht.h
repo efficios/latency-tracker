@@ -28,15 +28,15 @@
 #include "../tracker_private.h"
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
 #define BASEHT
-#else /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
+#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
 
-#ifdef RHASHTABLE
+#ifdef BASEHT
+#include "ht-base.h"
+#elif defined(RHASHTABLE)
 #include "ht-rhashtable.h"
 #else /* RHASHTABLE */
 #define URCUHT
 #include "ht-urcuht.h"
 #endif /* RHASHTABLE */
-
-#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
 
 #endif /* _LTTNG_WRAPPER_HT_H */
