@@ -305,6 +305,16 @@
 /* Value of the end pointer. Should not interact with flags. */
 #define END_VALUE		NULL
 
+#if !defined(lockless_dereference)
+/* Copied from include/linux/rcupdate.h 3.18+ */
+#define lockless_dereference(p) \
+({ \
+        typeof(p) _________p1 = ACCESS_ONCE(p); \
+        smp_read_barrier_depends(); /* Dependency order vs. p above. */ \
+        (_________p1); \
+})
+#endif /* lockless_dereference */
+
 /*
  * Algorithm to reverse bits in a word by lookup table, extended to
  * 64-bit words.
