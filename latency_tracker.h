@@ -123,6 +123,9 @@ struct latency_tracker *latency_tracker_create(
 
 /*
  * Destroy and free a tracker and all the current events in the HT.
+ *
+ * All events causing a call to event_in and event_out MUST be disabled before
+ * calling this function.
  */
 void latency_tracker_destroy(struct latency_tracker *tracker);
 
@@ -148,8 +151,18 @@ void latency_tracker_set_gc_period(struct latency_tracker *tracker,
  * from the HT, so if the event_out arrives eventually, the callback is
  * executed again but with the normal cb_flag.
  * The memory management of priv is left entirely to the caller.
+ *
+ * If this function is called from a tracepoint or a kprobe, you should call
+ * _latency_tracker_event_in instead to avoid nesting two
+ * rcu_read_lock_sched_notrace.
  */
 enum latency_tracker_event_in_ret latency_tracker_event_in(
+		struct latency_tracker *tracker,
+		void *key, size_t key_len, uint64_t thresh,
+		void (*cb)(unsigned long ptr),
+		uint64_t timeout, unsigned int unique, void *priv);
+
+enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		struct latency_tracker *tracker,
 		void *key, size_t key_len, uint64_t thresh,
 		void (*cb)(unsigned long ptr),
@@ -160,8 +173,14 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
  * Cancels the timer if it was set.
  * The optional id is passed to the callback in cb_out_id, it can be used
  * to identify the origin of the event_out (eg: error or normal).
+ *
+ * If this function is called from a tracepoint or a kprobe, you should call
+ * _latency_tracker_event_out instead to avoid nesting two
+ * rcu_read_lock_sched_notrace.
  */
 int latency_tracker_event_out(struct latency_tracker *tracker,
+		void *key, unsigned int key_len, unsigned int id);
+int _latency_tracker_event_out(struct latency_tracker *tracker,
 		void *key, unsigned int key_len, unsigned int id);
 
 

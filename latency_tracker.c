@@ -74,7 +74,9 @@ struct latency_tracker_event *latency_tracker_get_event(
 		struct latency_tracker *tracker)
 {
 	struct latency_tracker_event *e;
+	unsigned long flags;
 
+	spin_lock_irqsave(&tracker->lock, flags);
 	if (list_empty(&tracker->events_free_list)) {
 		goto error;
 	}
@@ -86,6 +88,7 @@ struct latency_tracker_event *latency_tracker_get_event(
 error:
 	e = NULL;
 end:
+	spin_unlock_irqrestore(&tracker->lock, flags);
 	return e;
 }
 
@@ -100,8 +103,21 @@ void latency_tracker_put_event(struct latency_tracker *tracker,
 	list_add(&e->list, &tracker->events_free_list);
 }
 
+static
+void deferred_latency_tracker_put_event(struct rcu_head *head)
+{
+	unsigned long flags;
+	struct latency_tracker *tracker;
+	struct latency_tracker_event *s =
+		caa_container_of(head, struct latency_tracker_event, urcuhead);
+	tracker = s->tracker;
+	spin_lock_irqsave(&tracker->lock, flags);
+	latency_tracker_put_event(tracker, s);
+	spin_unlock_irqrestore(&tracker->lock, flags);
+}
+
 /*
- * Must be called with the tracker->lock held.
+ * Must be called with the tracker->lock held if not using urcu HT.
  */
 static
 void latency_tracker_event_destroy(struct latency_tracker *tracker,
@@ -110,8 +126,13 @@ void latency_tracker_event_destroy(struct latency_tracker *tracker,
 	wrapper_ht_del(tracker, s);
 
 	if (s->timeout > 0)
-		del_timer(&s->timer);
-	latency_tracker_put_event(tracker, s);
+		del_timer_sync(&s->timer);
+
+	if (tracker->urcu_ht)
+		call_rcu_sched(&s->urcuhead,
+				deferred_latency_tracker_put_event);
+	else
+		latency_tracker_put_event(tracker, s);
 }
 
 static
@@ -239,19 +260,15 @@ EXPORT_SYMBOL_GPL(latency_tracker_create);
 
 void latency_tracker_destroy(struct latency_tracker *tracker)
 {
-	unsigned long flags;
 	int nb = 0;
 
-	spin_lock_irqsave(&tracker->lock, flags);
+	synchronize_sched();
 	del_timer(&tracker->timer);
-	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
 
-	spin_lock_irqsave(&tracker->lock, flags);
 	latency_tracker_destroy_free_list(tracker);
-	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	kfree(tracker);
 	module_put(THIS_MODULE);
@@ -271,14 +288,13 @@ void latency_tracker_timeout_cb(unsigned long ptr)
 	data->cb(ptr);
 }
 
-enum latency_tracker_event_in_ret latency_tracker_event_in(
+enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		struct latency_tracker *tracker,
 		void *key, size_t key_len, uint64_t thresh,
 		void (*cb)(unsigned long ptr),
 		uint64_t timeout, unsigned int unique, void *priv)
 {
 	struct latency_tracker_event *s;
-	unsigned long flags;
 	int ret;
 
 	if (!tracker) {
@@ -291,15 +307,13 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 	}
 
 
-	spin_lock_irqsave(&tracker->lock, flags);
 	s = latency_tracker_get_event(tracker);
 	if (!s) {
 		ret = LATENCY_TRACKER_FULL;
-		goto error_unlock;
+		goto end;
 	}
 
 	s->hkey = tracker->hash_fct(key, key_len, 0);
-	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	memcpy(s->tkey.key, key, key_len);
 	s->tkey.key_len = key_len;
@@ -327,16 +341,30 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 		wrapper_ht_unique_check(tracker, &s->tkey);
 	wrapper_ht_add(tracker, s);
 	ret = LATENCY_TRACKER_OK;
-	goto end;
 
-error_unlock:
-	spin_unlock_irqrestore(&tracker->lock, flags);
 end:
+	return ret;
+}
+EXPORT_SYMBOL_GPL(_latency_tracker_event_in);
+
+enum latency_tracker_event_in_ret latency_tracker_event_in(
+		struct latency_tracker *tracker,
+		void *key, size_t key_len, uint64_t thresh,
+		void (*cb)(unsigned long ptr),
+		uint64_t timeout, unsigned int unique, void *priv)
+{
+	enum latency_tracker_event_in_ret ret;
+
+	rcu_read_lock_sched_notrace();
+	ret = _latency_tracker_event_in(tracker, key, key_len, thresh, cb,
+			timeout, unique, priv);
+	rcu_read_unlock_sched_notrace();
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_event_in);
 
-int latency_tracker_event_out(struct latency_tracker *tracker,
+int _latency_tracker_event_out(struct latency_tracker *tracker,
 		void *key, unsigned int key_len, unsigned int id)
 {
 	int ret;
@@ -362,6 +390,18 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 error:
 	ret = -1;
 end:
+	return ret;
+}
+EXPORT_SYMBOL_GPL(_latency_tracker_event_out);
+
+int latency_tracker_event_out(struct latency_tracker *tracker,
+		void *key, unsigned int key_len, unsigned int id)
+{
+	int ret;
+
+	rcu_read_lock_sched_notrace();
+	ret = _latency_tracker_event_out(tracker, key, key_len, id);
+	rcu_read_unlock_sched_notrace();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_event_out);
@@ -398,7 +438,7 @@ int test_tracker(void)
 		printk("failed\n");
 
 	printk("insert k2\n");
-	ret = latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400,
+	ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400,
 			example_cb, 0, 0, NULL);
 	if (ret)
 		printk("failed\n");
@@ -408,7 +448,7 @@ int test_tracker(void)
 	printk("lookup k2\n");
 	latency_tracker_event_out(tracker, k2, strlen(k2) + 1, 0);
 	printk("lookup k1\n");
-	latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0);
+	_latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0);
 
 	printk("done\n");
 	latency_tracker_destroy(tracker);

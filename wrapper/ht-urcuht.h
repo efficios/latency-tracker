@@ -71,6 +71,11 @@ static inline
 void wrapper_ht_del(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
+	/*
+	 * TODO: check return value to make sure we can kfree.
+	 * Not required now because we should not have concurrent del of
+	 * the same node, but it might happen in the future.
+	 */
 	rcu_read_lock();
 	cds_lfht_del(tracker->urcu_ht, &s->urcunode);
 	rcu_read_unlock();
