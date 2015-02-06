@@ -1,4 +1,4 @@
-ccflags-y += -I$(PWD)/include
+ccflags-y += -I$(PWD)/include $(EXTCFLAGS)
 
 tracker-objs := latency_tracker.o rculfhash.o rculfhash-mm-chunk.o
 tracker-objs += $(shell \

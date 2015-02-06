@@ -132,8 +132,8 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 }
 
 static inline
-int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
-		unsigned int key_len, unsigned int id, u64 now)
+int wrapper_ht_check_event(struct latency_tracker *tracker,
+		struct latency_tracker_key *tkey, unsigned int id, u64 now)
 {
 	struct latency_tracker_event *s;
 	unsigned long flags;
@@ -141,16 +141,16 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 	int found = 0;
 
 	spin_lock_irqsave(&tracker->lock, flags);
-	k = tracker->hash_fct(key, key_len, 0);
+	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 	rcu_read_lock();
 	do {
 		s = rhashtable_lookup(&tracker->rht, &k);
 		if (!s)
 			break;
-		if (s->key_len != key_len)
+		if (s->tkey.key_len != tkey->key_len)
 			continue;
-		if (tracker->match_fct(key, s->key, key_len))
+		if (tracker->match_fct(tkey->key, s->tkey.key, tkey->key_len))
 			continue;
 		if ((now - s->start_ts) > s->thresh) {
 			s->end_ts = now;
@@ -171,22 +171,23 @@ int wrapper_ht_check_event(struct latency_tracker *tracker, void *key,
 
 static inline
 void wrapper_ht_unique_check(struct latency_tracker *tracker,
-		struct latency_tracker_event *s, void *key, size_t key_len)
+		struct latency_tracker_key *tkey)
 {
 	u32 k;
 	unsigned long flags;
+	struct latency_tracker_event *s;
 
 	spin_lock_irqsave(&tracker->lock, flags);
-	k = tracker->hash_fct(key, key_len, 0);
+	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 	rcu_read_lock();
 	do {
 		s = rhashtable_lookup(&tracker->rht, &k);
 		if (!s)
 			break;
-		if (s->key_len != key_len)
+		if (s->tkey.key_len != tkey->key_len)
 			continue;
-		if (tracker->match_fct(key, s->key, key_len))
+		if (tracker->match_fct(tkey->key, s->tkey.key, tkey->key_len))
 			continue;
 		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
 		if (s->cb)

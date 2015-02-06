@@ -106,6 +106,7 @@ void latency_tracker_put_event(struct latency_tracker *tracker,
 static
 void deferred_latency_tracker_put_event(struct rcu_head *head)
 {
+#ifdef URCUHT
 	unsigned long flags;
 	struct latency_tracker *tracker;
 	struct latency_tracker_event *s =
@@ -114,6 +115,7 @@ void deferred_latency_tracker_put_event(struct rcu_head *head)
 	spin_lock_irqsave(&tracker->lock, flags);
 	latency_tracker_put_event(tracker, s);
 	spin_unlock_irqrestore(&tracker->lock, flags);
+#endif /* URCUHT */
 }
 
 /*
