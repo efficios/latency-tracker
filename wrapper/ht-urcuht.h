@@ -52,33 +52,36 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 	tracker->urcu_ht = cds_lfht_new(size, size, size, 0, NULL);
 }
 
+/* TODO: we assume unique key feature enabled. */
 static inline
-void wrapper_ht_add(struct latency_tracker *tracker,
+struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
 	struct cds_lfht_node *node_ptr;
 
 	rcu_read_lock_sched_notrace();
-	node_ptr = cds_lfht_add_unique(tracker->urcu_ht,
+	node_ptr = cds_lfht_add_replace(tracker->urcu_ht,
 			s->hkey, urcu_match, (void *) &s->tkey, &s->urcunode);
 	rcu_read_unlock_sched_notrace();
 
-	if (node_ptr != &s->urcunode)
-		printk("ERR HT ADD\n");
+	if (node_ptr != NULL) {
+		/* Return replaced event. */
+		return container_of(node_ptr, struct latency_tracker_event,
+				urcunode);
+	}
+	return NULL;
 }
 
 static inline
-void wrapper_ht_del(struct latency_tracker *tracker,
+int wrapper_ht_del(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
-	/*
-	 * TODO: check return value to make sure we can kfree.
-	 * Not required now because we should not have concurrent del of
-	 * the same node, but it might happen in the future.
-	 */
+	int ret;
+
 	rcu_read_lock_sched_notrace();
-	cds_lfht_del(tracker->urcu_ht, &s->urcunode);
+	ret = cds_lfht_del(tracker->urcu_ht, &s->urcunode);
 	rcu_read_unlock_sched_notrace();
+	return ret;
 }
 
 /*
@@ -153,21 +156,6 @@ static inline
 void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		struct latency_tracker_key *tkey)
 {
-	u32 k;
-	struct cds_lfht_iter iter;
-	struct latency_tracker_event *s;
-
-	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
-	rcu_read_lock_sched_notrace();
-	cds_lfht_for_each_entry_duplicate(tracker->urcu_ht, k,
-			urcu_match, tkey, &iter, s, urcunode) {
-		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
-		if (s->cb)
-			s->cb((unsigned long) s);
-		__latency_tracker_event_destroy(tracker, s);
-		break;
-	}
-	rcu_read_unlock_sched_notrace();
 }
 
 #endif /* _LTTNG_WRAPPER_HT_BASEHT_H */

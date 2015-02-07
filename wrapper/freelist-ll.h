@@ -53,8 +53,6 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 	struct latency_tracker_event *e, *n;
 	struct llist_node *list;
 
-	/* Wait for all call_rcu_sched have completed. */
-	rcu_barrier_sched();
 	list = llist_del_all(&tracker->ll_events_free_list);
 	llist_for_each_entry_safe(e, n, list, llist) {
 		kfree(e);

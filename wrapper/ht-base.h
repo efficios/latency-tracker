@@ -25,16 +25,32 @@
 
 #include <linux/hashtable.h>
 
-#define wrapper_ht_init(tracker) hash_init(tracker->ht)
-#define wrapper_ht_add(tracker, s) \
-{ \
-	spin_lock_irqsave(&tracker->lock, flags); \
-	hash_add(tracker->ht, &s->hlist, s->hkey); \
-	spin_unlock_irqrestore(&tracker->lock, flags); \
+static inline
+void wrapper_ht_init(struct latency_tracker *tracker)
+{
+	hash_init(tracker->ht);
+}
+
+static inline
+struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
+		struct latency_tracker_event *s)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&tracker->lock, flags);
+	hash_add(tracker->ht, &s->hlist, s->hkey);
+	spin_unlock_irqrestore(&tracker->lock, flags);
+	return NULL;
 }
 
 /* Always called with spin_lock held. */
-#define wrapper_ht_del(tracker, s) hash_del(&s->hlist)
+static inline
+int wrapper_ht_del(struct latency_tracker *tracker,
+		struct latency_tracker_event *s)
+{
+	hash_del(&s->hlist);
+	return 0;
+}
 
 /*
  * Returns the number of event still active at destruction time.

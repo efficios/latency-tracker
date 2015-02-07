@@ -59,7 +59,7 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 }
 
 static inline
-void wrapper_ht_add(struct latency_tracker *tracker,
+struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
 	unsigned long flags;
@@ -67,14 +67,16 @@ void wrapper_ht_add(struct latency_tracker *tracker,
 	spin_lock_irqsave(&tracker->lock, flags);
 	rhashtable_insert(&tracker->rht, &s->node, GFP_KERNEL);
 	spin_unlock_irqrestore(&tracker->lock, flags);
+	return NULL;
 }
 
 /* Always called with spin_lock held. */
 static inline
-void wrapper_ht_del(struct latency_tracker *tracker,
+int wrapper_ht_del(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
 	rhashtable_remove(&tracker->rht, &s->node, GFP_KERNEL);
+	return 0;
 }
 
 /*

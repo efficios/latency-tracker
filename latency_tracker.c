@@ -66,16 +66,28 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
+#ifndef BASEHT
 static
 void deferred_latency_tracker_put_event(struct rcu_head *head)
 {
-#ifdef URCUHT
 	struct latency_tracker *tracker;
 	struct latency_tracker_event *s =
-		caa_container_of(head, struct latency_tracker_event, urcuhead);
+		container_of(head, struct latency_tracker_event, urcuhead);
 	tracker = s->tracker;
 	wrapper_freelist_put_event(tracker, s);
+}
 #endif /* URCUHT */
+
+static
+void discard_event(struct latency_tracker *tracker,
+		struct latency_tracker_event *s)
+{
+#ifdef BASEHT
+	__wrapper_freelist_put_event(tracker, s);
+#else
+	call_rcu_sched(&s->urcuhead,
+			deferred_latency_tracker_put_event);
+#endif
 }
 
 /*
@@ -85,17 +97,17 @@ static
 void __latency_tracker_event_destroy(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
-	wrapper_ht_del(tracker, s);
+	int ret;
 
+	ret = wrapper_ht_del(tracker, s);
+	if (ret) {
+		/* Has already been removed concurrently, we do not own it. */
+		return;
+	}
 	if (s->timeout > 0)
 		del_timer_sync(&s->timer);
 
-#ifdef BASEHT
-	__wrapper_freelist_put_event(tracker, s);
-#else
-	call_rcu_sched(&s->urcuhead,
-			deferred_latency_tracker_put_event);
-#endif
+	discard_event(tracker, s);
 }
 
 static
@@ -132,7 +144,6 @@ void latency_tracker_enable_gc(struct latency_tracker *tracker)
 		return;
 	}
 
-	init_timer(&tracker->timer);
 	tracker->timer.function = latency_tracker_gc_cb;
 	tracker->timer.expires = jiffies +
 		wrapper_nsecs_to_jiffies(tracker->gc_period);
@@ -190,6 +201,7 @@ struct latency_tracker *latency_tracker_create(
 	tracker->gc_thresh = gc_thresh;
 	tracker->priv = priv;
 
+	init_timer(&tracker->timer);
 	latency_tracker_enable_gc(tracker);
 
 	spin_lock_init(&tracker->lock);
@@ -220,11 +232,25 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 {
 	int nb = 0;
 
+	/*
+	 * All callers of in/out are required to have preemption disable. We
+	 * issue a synchronize_sched to ensure no more in/out are running.
+	 */
 	synchronize_sched();
-	del_timer(&tracker->timer);
+
+	/*
+	 * Remove timer, and make sure currently running timers have completed.
+	 */
+	del_timer_sync(&tracker->timer);
 
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
+
+	/*
+	 * Wait for all call_rcu_sched issued within wrapper_ht_clear to have
+	 * completed.
+	 */
+	rcu_barrier_sched();
 
 	wrapper_freelist_destroy(tracker);
 
@@ -252,10 +278,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		void (*cb)(unsigned long ptr),
 		uint64_t timeout, unsigned int unique, void *priv)
 {
-	struct latency_tracker_event *s;
-#ifdef BASEHT
-	unsigned long flags;
-#endif
+	struct latency_tracker_event *s, *old_s;
 	int ret;
 
 	if (!tracker) {
@@ -266,7 +289,6 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		ret = LATENCY_TRACKER_ERR;
 		goto end;
 	}
-
 
 	s = wrapper_freelist_get_event(tracker);
 	if (!s) {
@@ -300,7 +322,10 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	 */
 	if (unique)
 		wrapper_ht_unique_check(tracker, &s->tkey);
-	wrapper_ht_add(tracker, s);
+	old_s = wrapper_ht_add(tracker, s);
+	if (old_s) {
+		discard_event(tracker, old_s);
+	}
 	ret = LATENCY_TRACKER_OK;
 
 end:
@@ -376,6 +401,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_get_priv);
 void example_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data = (struct latency_tracker_event *) ptr;
+
 	printk("cb called for key %s with %p, cb_flag = %d\n", (char *) data->tkey.key,
 			data->priv, data->cb_flag);
 }
@@ -399,8 +425,10 @@ int test_tracker(void)
 		printk("failed\n");
 
 	printk("insert k2\n");
+	rcu_read_lock_sched_notrace();
 	ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400,
 			example_cb, 0, 0, NULL);
+	rcu_read_unlock_sched_notrace();
 	if (ret)
 		printk("failed\n");
 
@@ -409,7 +437,9 @@ int test_tracker(void)
 	printk("lookup k2\n");
 	latency_tracker_event_out(tracker, k2, strlen(k2) + 1, 0);
 	printk("lookup k1\n");
+	rcu_read_lock_sched_notrace();
 	_latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0);
+	rcu_read_unlock_sched_notrace();
 
 	printk("done\n");
 	latency_tracker_destroy(tracker);
@@ -421,7 +451,6 @@ error:
 	ret = -1;
 end:
 	return ret;
-
 }
 
 static
@@ -442,7 +471,6 @@ static
 void __exit latency_tracker_exit(void)
 {
 	lttng_tracepoint_exit();
-	rcu_barrier_sched();
 }
 
 module_init(latency_tracker_init);
