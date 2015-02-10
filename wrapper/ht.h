@@ -26,15 +26,20 @@
 #include <linux/jhash.h>
 #include "../latency_tracker.h"
 #include "../tracker_private.h"
+
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
+#if !defined(BASEHT)
 #define BASEHT
+#endif /* !defined(BASEHT) */
 #endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
 
 #ifdef BASEHT
 #include "ht-base.h"
 #elif defined(RHASHTABLE)
 #include "ht-rhashtable.h"
+
 #else /* RHASHTABLE */
+
 #if !defined(URCUHT)
 #define URCUHT
 #endif /* !defined(URCUHT) */
