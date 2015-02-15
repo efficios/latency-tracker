@@ -47,7 +47,7 @@ int urcu_match(struct cds_lfht_node *node, const void *key)
 static inline
 void wrapper_ht_init(struct latency_tracker *tracker)
 {
-	unsigned long size = 1 << DEFAULT_LATENCY_TABLE_SIZE;
+	unsigned long size = 2048;
 
 	tracker->urcu_ht = cds_lfht_new(size, size, size, 0, NULL);
 }
