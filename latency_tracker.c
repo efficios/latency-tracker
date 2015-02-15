@@ -66,7 +66,6 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
-#if defined(LLFREELIST) || defined(URCUHT)
 static
 void deferred_latency_tracker_put_event(struct rcu_head *head)
 {
@@ -76,7 +75,6 @@ void deferred_latency_tracker_put_event(struct rcu_head *head)
 	tracker = s->tracker;
 	wrapper_freelist_put_event(tracker, s);
 }
-#endif /* LLFREELIST */
 
 static
 void discard_event(struct latency_tracker *tracker,
