@@ -35,7 +35,17 @@ static inline
 struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
+#if defined(LLFREELIST)
+	unsigned long flags;
+
+	spin_lock_irqsave(&tracker->lock, flags);
+#endif
+
 	hash_add(tracker->ht, &s->hlist, s->hkey);
+
+#if defined(LLFREELIST)
+	spin_unlock_irqrestore(&tracker->lock, flags);
+#endif
 	return NULL;
 }
 
