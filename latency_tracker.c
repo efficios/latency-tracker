@@ -278,6 +278,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 {
 	struct latency_tracker_event *s, *old_s;
 	int ret;
+	unsigned long flags;
 
 	if (!tracker) {
 		ret = LATENCY_TRACKER_ERR;
@@ -288,7 +289,15 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		goto end;
 	}
 
+#if !defined(LLFREELIST)
+	spin_lock_irqsave(&tracker->lock, flags);
+#endif
+
 	s = wrapper_freelist_get_event(tracker);
+
+#if !defined(LLFREELIST) && defined URCUHT
+	spin_unlock_irqrestore(&tracker->lock, flags);
+#endif
 	if (!s) {
 		ret = LATENCY_TRACKER_FULL;
 		goto end;
@@ -324,6 +333,9 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	if (old_s) {
 		discard_event(tracker, old_s);
 	}
+#if !defined(LLFREELIST) && !defined(URCUHT)
+	spin_unlock_irqrestore(&tracker->lock, flags);
+#endif
 	ret = LATENCY_TRACKER_OK;
 
 end:

@@ -63,9 +63,7 @@ struct latency_tracker_event *wrapper_freelist_get_event(
 		struct latency_tracker *tracker)
 {
 	struct latency_tracker_event *e;
-	unsigned long flags;
 
-	spin_lock_irqsave(&tracker->lock, flags);
 	if (list_empty(&tracker->events_free_list)) {
 		goto error;
 	}
@@ -77,7 +75,6 @@ struct latency_tracker_event *wrapper_freelist_get_event(
 error:
 	e = NULL;
 end:
-	spin_unlock_irqrestore(&tracker->lock, flags);
 	return e;
 }
 

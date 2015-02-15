@@ -62,11 +62,7 @@ static inline
 struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&tracker->lock, flags);
 	rhashtable_insert(&tracker->rht, &s->node, GFP_KERNEL);
-	spin_unlock_irqrestore(&tracker->lock, flags);
 	return NULL;
 }
 
