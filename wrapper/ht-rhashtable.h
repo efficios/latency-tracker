@@ -49,7 +49,8 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 		.key_offset = offsetof(struct latency_tracker_event, hkey),
 		.key_len = sizeof(u32),
 		.hashfn = already_hashed,
-		.max_shift = DEFAULT_LATENCY_TABLE_SIZE,
+		.nelem_hint = 1024; /* next_pow2(nelem_hint * 4 / 3) */
+//		.max_shift = DEFAULT_LATENCY_TABLE_SIZE,
 //		.grow_decision = rht_check_above_75,
 //		.shrink_decision = rht_shrink_below_30_2,
 //		.mutex_is_held = lockdep_nl_sk_hash_is_held,
