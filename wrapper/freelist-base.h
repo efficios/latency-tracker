@@ -35,16 +35,70 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 	INIT_LIST_HEAD(&tracker->events_free_list);
 	for (i = 0; i < max_events; i++) {
 		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
+//		printk("- alloc'd %p\n", e);
 		if (!e)
 			goto error;
+		if (i == max_events/2) {
+			printk("setting the flag at %d\n", i);
+			e->resize_flag = 1;
+		}
 		list_add(&e->list, &tracker->events_free_list);
 	}
+
+	tracker->free_list_nelems = max_events;
 	wrapper_vmalloc_sync_all();
 
 	return 0;
 
 error:
 	return -1;
+}
+
+static
+void wrapper_resize_work(struct work_struct *work)
+{
+	struct latency_tracker *tracker;
+	int i, max_events;
+	struct latency_tracker_event *e, *n;
+	struct list_head tmp_list;
+	unsigned long flags;
+
+	return;
+	INIT_LIST_HEAD(&tmp_list);
+	tracker = container_of(work, struct latency_tracker, resize_w);
+
+	max_events = tracker->free_list_nelems * 2;
+	printk("increasing to %d\n", max_events);
+
+	for (i = 0; i < max_events; i++) {
+		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
+//		printk("- realloc'd %p\n", e);
+		if (!e)
+			goto error;
+		if (i == max_events/2) {
+			printk("setting the flag at %d\n", i);
+			e->resize_flag = 1;
+		}
+		list_add(&e->list, &tmp_list);
+	}
+
+	spin_lock_irqsave(&tracker->lock, flags);
+	list_for_each_entry_safe(e, n, &tmp_list, list) {
+		list_del(&e->list);
+		list_add(&e->list, &tracker->events_free_list);
+	}
+	tracker->free_list_nelems = max_events;
+	spin_unlock_irqrestore(&tracker->lock, flags);
+
+	printk("resize done\n");
+	goto end;
+
+error:
+	printk("resize error\n");
+	return;
+
+end:
+	return;
 }
 
 static inline
@@ -63,18 +117,28 @@ struct latency_tracker_event *wrapper_freelist_get_event(
 		struct latency_tracker *tracker)
 {
 	struct latency_tracker_event *e;
+	int ret;
 
 	if (list_empty(&tracker->events_free_list)) {
 		goto error;
 	}
 	e = list_last_entry(&tracker->events_free_list,
 			struct latency_tracker_event, list);
+	if (e->resize_flag) {
+		printk("starting the resize\n");
+		ret = queue_work(tracker->resize_q, &tracker->resize_w);
+		if (!ret) {
+			printk("error queueing\n");
+			goto error;
+		}
+	}
 	list_del(&e->list);
 	goto end;
 
 error:
 	e = NULL;
 end:
+//	printk("- using %p\n", e);
 	return e;
 }
 

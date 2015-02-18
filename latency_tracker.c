@@ -29,6 +29,7 @@
 #include <linux/version.h>
 #include <linux/jhash.h>
 #include <linux/module.h>
+#include <linux/workqueue.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
 #include "wrapper/tracepoint.h"
@@ -210,6 +211,9 @@ struct latency_tracker *latency_tracker_create(
 	if (ret < 0)
 		goto error_free_events;
 
+	tracker->resize_q = create_singlethread_workqueue("resize");
+	INIT_WORK(&tracker->resize_w, wrapper_resize_work);
+
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
 		goto error_free_events;
@@ -240,6 +244,12 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	 * Remove timer, and make sure currently running timers have completed.
 	 */
 	del_timer_sync(&tracker->timer);
+
+	/*
+	 * Stop and destroy the freelist resize work queue.
+	 */
+	flush_workqueue(tracker->resize_q);
+	destroy_workqueue(tracker->resize_q);
 
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
@@ -421,26 +431,29 @@ int test_tracker(void)
 {
 	char *k1 = "blablabla1";
 	char *k2 = "bliblibli1";
-	int ret;
+	int ret, i;
 	struct latency_tracker *tracker;
 
 	tracker = latency_tracker_create(NULL, NULL, 3, 0, 0, NULL);
 	if (!tracker)
 		goto error;
 
-	printk("insert k1\n");
-	ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 6,
-			example_cb, 0, 0, NULL);
-	if (ret)
-		printk("failed\n");
+	for (i = 0; i < 30; i++) {
+		printk("insert k1\n");
+		ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 6,
+				example_cb, 0, 0, NULL);
+		if (ret)
+			printk("failed\n");
 
-	printk("insert k2\n");
-	rcu_read_lock_sched_notrace();
-	ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400,
-			example_cb, 0, 0, NULL);
-	rcu_read_unlock_sched_notrace();
-	if (ret)
-		printk("failed\n");
+		printk("insert k2\n");
+		rcu_read_lock_sched_notrace();
+		ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400,
+				example_cb, 0, 0, NULL);
+		rcu_read_unlock_sched_notrace();
+		if (ret)
+			printk("failed\n");
+		yield();
+	}
 
 	printk("lookup k1\n");
 	latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0);

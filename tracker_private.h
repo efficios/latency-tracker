@@ -5,6 +5,8 @@
 //#define DEFAULT_LATENCY_TABLE_SIZE (1 << DEFAULT_LATENCY_HASH_BITS)
 #define DEFAULT_LATENCY_TABLE_SIZE 2048
 
+#include <linux/workqueue.h>
+
 #include "wrapper/ht.h"
 #include "rculfhash-internal.h"
 
@@ -18,6 +20,7 @@ struct latency_tracker {
 	/* Returns 0 on match. */
         int (*match_fct) (const void *key1, const void *key2, size_t length);
         u32 (*hash_fct) (const void *key, u32 length, u32 initval);
+	int free_list_nelems;
 #ifdef LLFREELIST
 	struct llist_head ll_events_free_list;
 #else
@@ -26,6 +29,8 @@ struct latency_tracker {
         uint64_t gc_period;
         uint64_t gc_thresh;
         struct timer_list timer;
+	struct workqueue_struct *resize_q;
+	struct work_struct resize_w;
         /*
          * Protects the access to the HT, the free_list and the timer.
          */

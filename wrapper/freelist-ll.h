@@ -39,6 +39,7 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 			goto error;
 		llist_add(&e->llist, &tracker->ll_events_free_list);
 	}
+	tracker->free_list_nelems = max_events;
 	wrapper_vmalloc_sync_all();
 
 	return 0;

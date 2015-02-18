@@ -92,6 +92,11 @@ struct latency_tracker_event {
 	 */
 	void (*cb)(unsigned long ptr);
 	/*
+	 * Marker to indicate the half of the freelist, it is used to trigger
+	 * the resize mechanism.
+	 */
+	int resize_flag;
+	/*
 	 * Pointer set a event creation by the caller and kept as is up
 	 * to the event destruction. The memory management is left entirely
 	 * to the caller.

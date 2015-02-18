@@ -114,8 +114,8 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		thresh, sched_cb, timeout, 0,
 		NULL);
 	if (ret == LATENCY_TRACKER_FULL) {
-		printk("latency_tracker sched: no more free events, consider "
-				"increasing the max_events parameter\n");
+//		printk("latency_tracker sched: no more free events, consider "
+//				"increasing the max_events parameter\n");
 	} else if (ret) {
 		printk("latency_tracker sched: error adding event\n");
 	}
@@ -141,7 +141,7 @@ int __init sched_latency_tp_init(void)
 {
 	int ret;
 
-	tracker = latency_tracker_create(NULL, NULL, 204800, 0, 0,
+	tracker = latency_tracker_create(NULL, NULL, 30, 0, 0,
 			NULL);
 	if (!tracker)
 		goto error;
