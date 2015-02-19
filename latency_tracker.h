@@ -119,6 +119,8 @@ enum latency_tracker_event_in_ret {
  *            if NULL: use memcmp
  * hash_fct: function to hash a key, if NULL: use jhash
  * max_events: expected number of concurrent live events (default: 100)
+ * max_resize: allow the freelist to grow up to this number of concurrent
+ *     events (0 to disable resizing which allows to trace workqueues)
  * gc: every gc_period ns, check if there are events older than gc_thresh ns,
  *     close them and pass LATENCY_TRACKER_CB_GC as cb_flag (disabled by
  *     default with 0 and 0).
@@ -127,8 +129,8 @@ struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events, uint64_t gc_period, uint64_t gc_thresh,
-		void *priv);
+		int max_events, int max_resize, uint64_t gc_period,
+		uint64_t gc_thresh, void *priv);
 
 /*
  * Destroy and free a tracker and all the current events in the HT.

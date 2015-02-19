@@ -100,12 +100,19 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		return;
 
 	/*
+	 * Depending on the locking mechanism, we risk deadlocking with
+	 * the resize workqueue. For now, just skip all workqueue threads.
+	 */
+	if ((current->flags & PF_WQ_WORKER) || (p->flags & PF_WQ_WORKER))
+		return;
+
+	/*
 	 * Make sure we won't wait for a process already running on another CPU.
 	 */
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < NR_CPUS; i++)
 		if (current_pid[i] == p->pid)
 			return;
-	}
+
 	key.pid = p->pid;
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
@@ -130,6 +137,13 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	if (!next || !next->pid)
 		return;
 
+	/*
+	 * Depending on the locking mechanism, we risk deadlocking with
+	 * the resize workqueue. For now, just skip all workqueue threads.
+	 */
+	if ((current->flags & PF_WQ_WORKER) || (next->flags & PF_WQ_WORKER))
+		return;
+
 	current_pid[prev->on_cpu] = next->pid;
 
 	key.pid = next->pid;
@@ -141,7 +155,7 @@ int __init sched_latency_tp_init(void)
 {
 	int ret;
 
-	tracker = latency_tracker_create(NULL, NULL, 30, 0, 0,
+	tracker = latency_tracker_create(NULL, NULL, 200, 1000, 0, 0,
 			NULL);
 	if (!tracker)
 		goto error;

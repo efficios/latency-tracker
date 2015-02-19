@@ -176,8 +176,8 @@ struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events, uint64_t gc_period, uint64_t gc_thresh,
-		void *priv)
+		int max_events, int max_resize, uint64_t gc_period,
+		uint64_t gc_thresh, void *priv)
 
 {
 	struct latency_tracker *tracker;
@@ -207,12 +207,15 @@ struct latency_tracker *latency_tracker_create(
 
 	wrapper_ht_init(tracker);
 
+	tracker->max_resize = max_resize;
+	if (max_resize) {
+		tracker->resize_q = create_singlethread_workqueue("resize");
+		INIT_DELAYED_WORK(&tracker->resize_w, wrapper_resize_work);
+	}
+
 	ret = wrapper_freelist_init(tracker, max_events);
 	if (ret < 0)
 		goto error_free_events;
-
-	tracker->resize_q = create_singlethread_workqueue("resize");
-	INIT_WORK(&tracker->resize_w, wrapper_resize_work);
 
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
@@ -248,8 +251,10 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	/*
 	 * Stop and destroy the freelist resize work queue.
 	 */
-	flush_workqueue(tracker->resize_q);
-	destroy_workqueue(tracker->resize_q);
+	if (tracker->max_resize) {
+		flush_workqueue(tracker->resize_q);
+		destroy_workqueue(tracker->resize_q);
+	}
 
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
@@ -312,7 +317,6 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		ret = LATENCY_TRACKER_FULL;
 		goto end;
 	}
-
 	s->hkey = tracker->hash_fct(key, key_len, 0);
 
 	memcpy(s->tkey.key, key, key_len);
@@ -346,6 +350,13 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 #if !defined(LLFREELIST) && !defined(URCUHT)
 	spin_unlock_irqrestore(&tracker->lock, flags);
 #endif
+	if (s->resize_flag &&
+			(tracker->free_list_nelems < tracker->max_resize)) {
+		printk("latency_tracker: starting the resize\n");
+		queue_delayed_work(tracker->resize_q, &tracker->resize_w, 100);
+//		queue_work(tracker->resize_q, &tracker->resize_w);
+	}
+
 	ret = LATENCY_TRACKER_OK;
 
 end:
@@ -434,7 +445,7 @@ int test_tracker(void)
 	int ret, i;
 	struct latency_tracker *tracker;
 
-	tracker = latency_tracker_create(NULL, NULL, 3, 0, 0, NULL);
+	tracker = latency_tracker_create(NULL, NULL, 3, 0, 0, 0, NULL);
 	if (!tracker)
 		goto error;
 

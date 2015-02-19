@@ -270,7 +270,7 @@ int __init block_latency_tp_init(void)
 	/* limit to 1 evt/sec */
 	block_priv->ns_rate_limit = 1000000000;
 
-	tracker = latency_tracker_create(NULL, NULL, 100,
+	tracker = latency_tracker_create(NULL, NULL, 100, 0,
 			usec_gc_threshold * 1000,
 			usec_gc_period * 1000,
 			block_priv);
