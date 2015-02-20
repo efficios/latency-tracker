@@ -181,12 +181,16 @@ module_init(sched_latency_tp_init);
 static
 void __exit sched_latency_tp_exit(void)
 {
+	uint64_t skipped;
+
 	lttng_wrapper_tracepoint_probe_unregister("sched_wakeup",
 			probe_sched_wakeup, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
 	tracepoint_synchronize_unregister();
+	skipped = latency_tracker_skipped_count(tracker);
 	latency_tracker_destroy(tracker);
+	printk("Missed events : %llu\n", skipped);
 	printk("Total sched alerts : %d\n", cnt);
 }
 module_exit(sched_latency_tp_exit);

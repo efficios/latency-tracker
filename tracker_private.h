@@ -24,6 +24,8 @@ struct latency_tracker {
 	int max_resize;
 	/* Flag to trigger the freelist resize work. */
 	int need_to_resize;
+	/* How much event could not be tracked due to an empty free list. */
+	uint64_t skipped_count;
 #ifdef LLFREELIST
 	struct llist_head ll_events_free_list;
 #else

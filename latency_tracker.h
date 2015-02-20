@@ -194,6 +194,11 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 int _latency_tracker_event_out(struct latency_tracker *tracker,
 		void *key, unsigned int key_len, unsigned int id);
 
+/*
+ * Returns the number of skipped events due to an empty free list.
+ */
+uint64_t latency_tracker_skipped_count(struct latency_tracker *tracker);
+
 
 void *latency_tracker_get_priv(struct latency_tracker *tracker);
 
