@@ -37,9 +37,8 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
 		if (!e)
 			goto error;
-		if (tracker->max_resize && (i == max_events/2)) {
+		if (tracker->max_resize && (i == max_events/2))
 			e->resize_flag = 1;
-		}
 		list_add(&e->list, &tracker->events_free_list);
 	}
 
@@ -74,9 +73,8 @@ void wrapper_resize_work(struct work_struct *work)
 		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
 		if (!e)
 			goto error;
-		if (i == max_events/2) {
+		if (i == max_events / 2)
 			e->resize_flag = 1;
-		}
 		list_add(&e->list, &tmp_list);
 	}
 
@@ -88,7 +86,6 @@ void wrapper_resize_work(struct work_struct *work)
 	tracker->free_list_nelems = max_events;
 	spin_unlock_irqrestore(&tracker->lock, flags);
 
-	printk("latency_tracker: resize done\n");
 	goto end;
 
 error:
@@ -96,6 +93,7 @@ error:
 	return;
 
 end:
+	printk("latency_tracker: resize success\n");
 	return;
 }
 
