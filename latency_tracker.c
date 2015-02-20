@@ -327,7 +327,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 #endif
 	if (!s) {
 		ret = LATENCY_TRACKER_FULL;
-		goto end;
+		goto end_unlock;
 	}
 	s->hkey = tracker->hash_fct(key, key_len, 0);
 
@@ -367,6 +367,13 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		tracker->need_to_resize = 1;
 
 	ret = LATENCY_TRACKER_OK;
+
+	goto end;
+
+end_unlock:
+#if !defined(LLFREELIST) && !defined(URCUHT)
+	spin_unlock_irqrestore(&tracker->lock, flags);
+#endif
 
 end:
 	return ret;
@@ -451,29 +458,26 @@ int test_tracker(void)
 {
 	char *k1 = "blablabla1";
 	char *k2 = "bliblibli1";
-	int ret, i;
+	int ret;
 	struct latency_tracker *tracker;
 
 	tracker = latency_tracker_create(NULL, NULL, 3, 0, 0, 0, NULL);
 	if (!tracker)
 		goto error;
 
-	for (i = 0; i < 30; i++) {
-		printk("insert k1\n");
-		ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 6,
-				example_cb, 0, 0, NULL);
-		if (ret)
-			printk("failed\n");
+	printk("insert k1\n");
+	ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 6,
+			example_cb, 0, 0, NULL);
+	if (ret)
+		printk("failed\n");
 
-		printk("insert k2\n");
-		rcu_read_lock_sched_notrace();
-		ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400,
-				example_cb, 0, 0, NULL);
-		rcu_read_unlock_sched_notrace();
-		if (ret)
-			printk("failed\n");
-		yield();
-	}
+	printk("insert k2\n");
+	rcu_read_lock_sched_notrace();
+	ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 400,
+			example_cb, 0, 0, NULL);
+	rcu_read_unlock_sched_notrace();
+	if (ret)
+		printk("failed\n");
 
 	printk("lookup k1\n");
 	latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0);
