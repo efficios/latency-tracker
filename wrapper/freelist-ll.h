@@ -48,6 +48,12 @@ error:
 	return -1;
 }
 
+/* TODO */
+static
+void wrapper_resize_work(struct work_struct *work)
+{
+}
+
 static inline
 void wrapper_freelist_destroy(struct latency_tracker *tracker)
 {

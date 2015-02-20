@@ -121,7 +121,7 @@ enum latency_tracker_event_in_ret {
  * max_events: expected number of concurrent live events (default: 100)
  * max_resize: allow the freelist to grow up to this number of concurrent
  *     events (0 to disable resizing which allows to trace workqueues)
- * gc: every gc_period ns, check if there are events older than gc_thresh ns,
+ * gc: every timer_period ns, check if there are events older than gc_thresh ns,
  *     close them and pass LATENCY_TRACKER_CB_GC as cb_flag (disabled by
  *     default with 0 and 0).
  */
@@ -129,7 +129,7 @@ struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events, int max_resize, uint64_t gc_period,
+		int max_events, int max_resize, uint64_t timer_period,
 		uint64_t gc_thresh, void *priv);
 
 /*
@@ -146,7 +146,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker);
  */
 void latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
 		uint64_t gc_thres);
-void latency_tracker_set_gc_period(struct latency_tracker *tracker,
+void latency_tracker_set_timer_period(struct latency_tracker *tracker,
 		uint64_t gc_thres);
 
 /*

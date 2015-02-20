@@ -155,7 +155,7 @@ int __init sched_latency_tp_init(void)
 {
 	int ret;
 
-	tracker = latency_tracker_create(NULL, NULL, 200, 1000, 0, 0,
+	tracker = latency_tracker_create(NULL, NULL, 200, 1000, 100000000, 0,
 			NULL);
 	if (!tracker)
 		goto error;

@@ -56,14 +56,12 @@ static
 void wrapper_resize_work(struct work_struct *work)
 {
 	struct latency_tracker *tracker;
-	struct delayed_work *delayed_work;
 	int i, max_events;
 	struct latency_tracker_event *e, *n;
 	struct list_head tmp_list;
 	unsigned long flags;
 
-	delayed_work = container_of(work, struct delayed_work, work);
-	tracker = container_of(delayed_work, struct latency_tracker, resize_w);
+	tracker = container_of(work, struct latency_tracker, resize_w);
 	if (!tracker)
 		return;
 

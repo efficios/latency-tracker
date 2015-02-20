@@ -45,8 +45,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_latency);
 EXPORT_TRACEPOINT_SYMBOL_GPL(net_latency);
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_latency);
 
-static void latency_tracker_enable_gc(struct latency_tracker *tracker);
-static void latency_tracker_gc_cb(unsigned long ptr);
+static void latency_tracker_enable_timer(struct latency_tracker *tracker);
+static void latency_tracker_timer_cb(unsigned long ptr);
 
 /*
  * Function to get the timestamp.
@@ -120,32 +120,44 @@ void latency_tracker_event_destroy(struct latency_tracker *tracker,
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
+/*
+ * The timer handles the garbage collection of the HT and starts
+ * the resize work if needed.
+ */
 static
-void latency_tracker_gc_cb(unsigned long ptr)
+void latency_tracker_timer_cb(unsigned long ptr)
 {
 	struct latency_tracker *tracker = (struct latency_tracker *) ptr;
 	unsigned long flags;
 	u64 now;
 
-	now = trace_clock_monotonic_wrapper();
-	wrapper_ht_gc(tracker, now);
+	if (tracker->gc_thresh) {
+		now = trace_clock_monotonic_wrapper();
+		wrapper_ht_gc(tracker, now);
+	}
+
+	if (tracker->need_to_resize) {
+		tracker->need_to_resize = 0;
+		printk("latency_tracker: starting the resize\n");
+		queue_work(tracker->resize_q, &tracker->resize_w);
+	}
+
 	spin_lock_irqsave(&tracker->lock, flags);
-	latency_tracker_enable_gc(tracker);
+	latency_tracker_enable_timer(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
 /* Must be called with the lock held. */
 static
-void latency_tracker_enable_gc(struct latency_tracker *tracker)
+void latency_tracker_enable_timer(struct latency_tracker *tracker)
 {
 	del_timer(&tracker->timer);
-	if (tracker->gc_period == 0 || tracker->gc_thresh == 0) {
+	if (tracker->timer_period == 0)
 		return;
-	}
 
-	tracker->timer.function = latency_tracker_gc_cb;
+	tracker->timer.function = latency_tracker_timer_cb;
 	tracker->timer.expires = jiffies +
-		wrapper_nsecs_to_jiffies(tracker->gc_period);
+		wrapper_nsecs_to_jiffies(tracker->timer_period);
 	tracker->timer.data = (unsigned long) tracker;
 	add_timer(&tracker->timer);
 }
@@ -157,18 +169,18 @@ void latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	tracker->gc_thresh = gc_thresh;
-	latency_tracker_enable_gc(tracker);
+	latency_tracker_enable_timer(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
-void latency_tracker_set_gc_period(struct latency_tracker *tracker,
-		uint64_t gc_period)
+void latency_tracker_set_timer_period(struct latency_tracker *tracker,
+		uint64_t timer_period)
 {
 	unsigned long flags;
 
 	spin_lock_irqsave(&tracker->lock, flags);
-	tracker->gc_period = gc_period;
-	latency_tracker_enable_gc(tracker);
+	tracker->timer_period = timer_period;
+	latency_tracker_enable_timer(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
@@ -176,7 +188,7 @@ struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events, int max_resize, uint64_t gc_period,
+		int max_events, int max_resize, uint64_t timer_period,
 		uint64_t gc_thresh, void *priv)
 
 {
@@ -196,12 +208,12 @@ struct latency_tracker *latency_tracker_create(
 	}
 	if (!max_events)
 		max_events = DEFAULT_MAX_ALLOC_EVENTS;
-	tracker->gc_period = gc_period;
+	tracker->timer_period = timer_period;
 	tracker->gc_thresh = gc_thresh;
 	tracker->priv = priv;
 
 	init_timer(&tracker->timer);
-	latency_tracker_enable_gc(tracker);
+	latency_tracker_enable_timer(tracker);
 
 	spin_lock_init(&tracker->lock);
 
@@ -210,7 +222,7 @@ struct latency_tracker *latency_tracker_create(
 	tracker->max_resize = max_resize;
 	if (max_resize) {
 		tracker->resize_q = create_singlethread_workqueue("resize");
-		INIT_DELAYED_WORK(&tracker->resize_w, wrapper_resize_work);
+		INIT_WORK(&tracker->resize_w, wrapper_resize_work);
 	}
 
 	ret = wrapper_freelist_init(tracker, max_events);
@@ -351,11 +363,8 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	spin_unlock_irqrestore(&tracker->lock, flags);
 #endif
 	if (s->resize_flag &&
-			(tracker->free_list_nelems < tracker->max_resize)) {
-		printk("latency_tracker: starting the resize\n");
-		queue_delayed_work(tracker->resize_q, &tracker->resize_w, 100);
-//		queue_work(tracker->resize_q, &tracker->resize_w);
-	}
+			(tracker->free_list_nelems < tracker->max_resize))
+		tracker->need_to_resize = 1;
 
 	ret = LATENCY_TRACKER_OK;
 

@@ -22,16 +22,19 @@ struct latency_tracker {
         u32 (*hash_fct) (const void *key, u32 length, u32 initval);
 	int free_list_nelems;
 	int max_resize;
+	/* Flag to trigger the freelist resize work. */
+	int need_to_resize;
 #ifdef LLFREELIST
 	struct llist_head ll_events_free_list;
 #else
 	struct list_head events_free_list;
 #endif
-        uint64_t gc_period;
+        uint64_t timer_period;
         uint64_t gc_thresh;
+	/* GC and resize work */
         struct timer_list timer;
 	struct workqueue_struct *resize_q;
-	struct delayed_work resize_w;
+	struct work_struct resize_w;
         /*
          * Protects the access to the HT, the free_list and the timer.
          */
