@@ -120,7 +120,7 @@ enum latency_tracker_event_in_ret {
  * hash_fct: function to hash a key, if NULL: use jhash
  * max_events: expected number of concurrent live events (default: 100)
  * max_resize: allow the freelist to grow up to this number of concurrent
- *     events (0 to disable resizing which allows to trace workqueues)
+ *     events (0 to disable resizing).
  * gc: every timer_period ns, check if there are events older than gc_thresh ns,
  *     close them and pass LATENCY_TRACKER_CB_GC as cb_flag (disabled by
  *     default with 0 and 0).
