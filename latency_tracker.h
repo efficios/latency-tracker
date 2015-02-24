@@ -38,6 +38,9 @@ enum latency_tracker_cb_flag {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
 #include <linux/rhashtable.h>
 #else
+#ifdef LLFREELIST
+#error LLFREELIST not available before 3.17
+#endif
 struct rhash_head {};
 struct rhashtable {};
 #endif
