@@ -5,106 +5,29 @@ set -e
 dmesg -c >/dev/null
 make clean
 
-echo "default"
-make
-insmod tracker.ko
-insmod sched_latency.ko
-echo -n "testing"
-for i in $(seq 1 10); do
-	echo -n "."
-	sleep 1
-done
-echo ""
-rmmod sched_latency
-rmmod tracker
-dmesg -c
+run() {
+	name=$1
+	flags=$2
+	echo $name
+	make EXTCFLAGS="$flags"
+	insmod tracker.ko
+	insmod sched_latency.ko
+	echo -n "testing"
+	for i in $(seq 1 10); do
+		echo -n "."
+		sleep 1
+	done
+	echo ""
+	rmmod sched_latency
+	rmmod tracker
+	dmesg -c
+}
 
-echo ""
-echo "baseht"
-make EXTCFLAGS=-DBASEHT
-insmod tracker.ko
-insmod sched_latency.ko
-echo -n "testing"
-for i in $(seq 1 10); do
-	echo -n "."
-	sleep 1
-done
-echo ""
-rmmod sched_latency
-rmmod tracker
-dmesg -c
+#run default ""
+#run baseht "-DBASEHT"
+#run rhashtable "-DRHASHTABLE"
+#run rhashtable "-DURCUHT"
+#run "baseht + ll" "-DBASEHT -DLLFREELIST"
+#run "rhashtable + ll" "-DRHASHTABLE -DLLFREELIST"
+run "urcuht + ll" "-DURCUHT -DLLFREELIST"
 
-echo ""
-echo "rhashtable"
-make EXTCFLAGS=-DRHASHTABLE
-insmod tracker.ko
-insmod sched_latency.ko
-echo -n "testing"
-for i in $(seq 1 10); do
-	echo -n "."
-	sleep 1
-done
-echo ""
-rmmod sched_latency
-rmmod tracker
-dmesg -c
-
-echo ""
-echo "urcuht"
-make EXTCFLAGS=-DURCUHT
-insmod tracker.ko
-insmod sched_latency.ko
-echo -n "testing"
-for i in $(seq 1 10); do
-	echo -n "."
-	sleep 1
-done
-echo ""
-rmmod sched_latency
-rmmod tracker
-dmesg -c
-
-echo ""
-echo "baseht + ll"
-make EXTCFLAGS="-DBASEHT -DLLFREELIST"
-insmod tracker.ko
-insmod sched_latency.ko
-echo -n "testing"
-for i in $(seq 1 10); do
-	echo -n "."
-	sleep 1
-done
-echo ""
-rmmod sched_latency
-rmmod tracker
-dmesg -c
-
-echo ""
-echo "rhashtable + ll"
-make EXTCFLAGS="-DRHASHTABLE -DLLFREELIST"
-insmod tracker.ko
-insmod sched_latency.ko
-echo -n "testing"
-for i in $(seq 1 10); do
-	echo -n "."
-	sleep 1
-done
-echo ""
-rmmod sched_latency
-rmmod tracker
-dmesg -c
-
-echo ""
-echo "urcuht + ll"
-make EXTCFLAGS="-DURCUHT -DLLFREELIST"
-insmod tracker.ko
-insmod sched_latency.ko
-echo -n "testing"
-for i in $(seq 1 10); do
-	echo -n "."
-	sleep 1
-done
-echo ""
-rmmod sched_latency
-rmmod tracker
-dmesg -c
