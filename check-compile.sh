@@ -23,11 +23,11 @@ run() {
 	dmesg -c
 }
 
-#run default ""
-#run baseht "-DBASEHT"
-#run rhashtable "-DRHASHTABLE"
-#run rhashtable "-DURCUHT"
-#run "baseht + ll" "-DBASEHT -DLLFREELIST"
-#run "rhashtable + ll" "-DRHASHTABLE -DLLFREELIST"
+run default ""
+run baseht "-DBASEHT"
+run rhashtable "-DRHASHTABLE"
+run rhashtable "-DURCUHT"
+run "baseht + ll" "-DBASEHT -DLLFREELIST"
+run "rhashtable + ll" "-DRHASHTABLE -DLLFREELIST"
 run "urcuht + ll" "-DURCUHT -DLLFREELIST"
 
