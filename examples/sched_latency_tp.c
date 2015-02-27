@@ -90,13 +90,19 @@ void sched_cb(unsigned long ptr)
 	struct task_struct *p;
 	u64 delay = (data->end_ts - data->start_ts) / 1000;
 
+	if (data->cb_flag != LATENCY_TRACKER_CB_NORMAL)
+		return;
+
 	usec_threshold = delay;
+
 	rcu_read_lock();
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
 	if (!p)
 		goto end;
-	printk("sched_latency: %s (%d), %llu us\n", p->comm, key->pid,
-			delay);
+	trace_sched_latency(key->pid, data->end_ts - data->start_ts,
+			data->cb_flag);
+	printk("sched_latency: (%d) %llu, %s (%d), %llu us\n", data->cb_flag,
+			data->end_ts, p->comm, key->pid, delay);
 	cnt++;
 
 end:
