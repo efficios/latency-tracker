@@ -87,12 +87,20 @@ void sched_cb(unsigned long ptr)
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->tkey.key;
+	struct task_struct *p;
 	u64 delay = (data->end_ts - data->start_ts) / 1000;
 
 	usec_threshold = delay;
-	printk("sched_latency: %s (%d), %llu us\n", current->comm, key->pid,
+	rcu_read_lock();
+	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
+	if (!p)
+		goto end;
+	printk("sched_latency: %s (%d), %llu us\n", p->comm, key->pid,
 			delay);
 	cnt++;
+
+end:
+	rcu_read_unlock();
 }
 #else /* SCHEDWORST */
 /*
