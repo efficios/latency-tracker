@@ -76,6 +76,29 @@ static struct latency_tracker *tracker;
 
 static int cnt = 0;
 
+#ifdef SCHEDWORST
+/*
+ * This callback tries to spot the worst possible latency by continuously
+ * increasing the threshold.
+ */
+static
+void sched_cb(unsigned long ptr)
+{
+	struct latency_tracker_event *data =
+		(struct latency_tracker_event *) ptr;
+	struct schedkey *key = (struct schedkey *) data->tkey.key;
+	u64 delay = (data->end_ts - data->start_ts) / 1000;
+
+	usec_threshold = delay;
+	printk("sched_latency: %s (%d), %llu us\n", current->comm, key->pid,
+			delay);
+	cnt++;
+}
+#else /* SCHEDWORST */
+/*
+ * This callback just emit a tracepoint when a latency is higher than the
+ * threshold.
+ */
 static
 void sched_cb(unsigned long ptr)
 {
@@ -87,6 +110,7 @@ void sched_cb(unsigned long ptr)
 			data->cb_flag);
 	cnt++;
 }
+#endif /* SCHEDWORST */
 
 static
 void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
