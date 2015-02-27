@@ -1,18 +1,18 @@
 /*
- * sched_latency_tp.c
+ * wakeup_latency.c
  *
  * Example of usage of latency_tracker with kernel tracepoints.
  *
- * In this example, we call the callback function sched_cb when the delay
+ * In this example, we call the callback function wakeup_cb when the delay
  * between a sched wakeup and its completion (sched_switch) takes more than
- * DEFAULT_USEC_SCHED_LATENCY_THRESH microseconds. Moreover, if the task is
- * still not scheduled after DEFAULT_USEC_SCHED_LATENCY_TIMEOUT microseconds,
+ * DEFAULT_USEC_WAKEUP_LATENCY_THRESH microseconds. Moreover, if the task is
+ * still not scheduled after DEFAULT_USEC_WAKEUP_LATENCY_TIMEOUT microseconds,
  * the callback is called with timeout = 1.
  *
  * The 2 parameters can be controlled at run-time by writing the value in
  * micro-seconds in:
- * /sys/module/sched_latency_tp/parameters/usec_threshold and
- * /sys/module/sched_latency_tp/parameters/usec_timeout
+ * /sys/module/wakeup_latency/parameters/usec_threshold and
+ * /sys/module/wakeup_latency/parameters/usec_timeout
  *
  * It is possible to use nanoseconds, but you have to write manually the value
  * in this source code.
@@ -39,7 +39,7 @@
 #include <linux/dcache.h>
 #include <linux/fs.h>
 #include <linux/sched.h>
-#include "sched_latency_tp.h"
+#include "wakeup_latency.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
 
@@ -48,11 +48,11 @@
 /*
  * Threshold to execute the callback (microseconds).
  */
-#define DEFAULT_USEC_SCHED_LATENCY_THRESH 5 * 1000
+#define DEFAULT_USEC_WAKEUP_LATENCY_THRESH 5 * 1000
 /*
  * Timeout to execute the callback (microseconds).
  */
-#define DEFAULT_USEC_SCHED_LATENCY_TIMEOUT 0
+#define DEFAULT_USEC_WAKEUP_LATENCY_TIMEOUT 0
 
 static pid_t current_pid[NR_CPUS];
 
@@ -60,11 +60,11 @@ static pid_t current_pid[NR_CPUS];
  * microseconds because we can't guarantee the passing of 64-bit
  * arguments to insmod on all architectures.
  */
-static unsigned long usec_threshold = DEFAULT_USEC_SCHED_LATENCY_THRESH;
+static unsigned long usec_threshold = DEFAULT_USEC_WAKEUP_LATENCY_THRESH;
 module_param(usec_threshold, ulong, 0644);
 MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 
-static unsigned long usec_timeout = DEFAULT_USEC_SCHED_LATENCY_TIMEOUT;
+static unsigned long usec_timeout = DEFAULT_USEC_WAKEUP_LATENCY_TIMEOUT;
 module_param(usec_timeout, ulong, 0644);
 MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
@@ -77,7 +77,7 @@ static struct latency_tracker *tracker;
 static int cnt = 0;
 
 static
-void sched_cb(unsigned long ptr)
+void wakeup_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
@@ -97,9 +97,9 @@ void sched_cb(unsigned long ptr)
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
 	if (!p)
 		goto end;
-	trace_sched_latency(key->pid, data->end_ts - data->start_ts,
+	trace_wakeup_latency(key->pid, data->end_ts - data->start_ts,
 			data->cb_flag);
-	printk("sched_latency: (%d) %s (%d), %llu us\n", data->cb_flag,
+	printk("wakeup_latency: (%d) %s (%d), %llu us\n", data->cb_flag,
 			p->comm, key->pid, delay);
 	cnt++;
 
@@ -130,7 +130,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, sched_cb, timeout, 1,
+		thresh, wakeup_cb, timeout, 1,
 		NULL);
 	if (ret == LATENCY_TRACKER_FULL) {
 //		printk("latency_tracker sched: no more free events, consider "
@@ -156,7 +156,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 }
 
 static
-int __init sched_latency_tp_init(void)
+int __init wakeup_latency_init(void)
 {
 	int ret;
 
@@ -181,10 +181,10 @@ error:
 end:
 	return ret;
 }
-module_init(sched_latency_tp_init);
+module_init(wakeup_latency_init);
 
 static
-void __exit sched_latency_tp_exit(void)
+void __exit wakeup_latency_exit(void)
 {
 	uint64_t skipped;
 
@@ -198,7 +198,7 @@ void __exit sched_latency_tp_exit(void)
 	printk("Missed events : %llu\n", skipped);
 	printk("Total sched alerts : %d\n", cnt);
 }
-module_exit(sched_latency_tp_exit);
+module_exit(wakeup_latency_exit);
 
 MODULE_AUTHOR("Julien Desfossez <jdesfossez@efficios.com>");
 MODULE_LICENSE("GPL");

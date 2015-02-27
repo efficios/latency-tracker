@@ -10,8 +10,8 @@ endif
 
 obj-m := tracker.o
 
-sched_latency-objs := examples/sched_latency_tp.o
-obj-m += sched_latency.o
+wakeup_latency-objs := examples/wakeup_latency.o
+obj-m += wakeup_latency.o
 
 block_latency-objs := examples/block_latency_tp.o
 obj-m += block_latency.o

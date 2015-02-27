@@ -9,7 +9,7 @@
 #include <linux/netdevice.h>
 
 TRACE_EVENT(
-	sched_latency,
+	wakeup_latency,
 	TP_PROTO(pid_t pid, u64 delay, unsigned int flag),
 	TP_ARGS(pid, delay, flag),
 	TP_STRUCT__entry(
