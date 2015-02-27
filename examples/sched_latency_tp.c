@@ -76,11 +76,6 @@ static struct latency_tracker *tracker;
 
 static int cnt = 0;
 
-#ifdef SCHEDWORST
-/*
- * This callback tries to spot the worst possible latency by continuously
- * increasing the threshold.
- */
 static
 void sched_cb(unsigned long ptr)
 {
@@ -88,12 +83,15 @@ void sched_cb(unsigned long ptr)
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->tkey.key;
 	struct task_struct *p;
-	u64 delay = (data->end_ts - data->start_ts) / 1000;
+	u64 delay;
 
 	if (data->cb_flag != LATENCY_TRACKER_CB_NORMAL)
 		return;
 
+	delay = (data->end_ts - data->start_ts) / 1000;
+#ifdef SCHEDWORST
 	usec_threshold = delay;
+#endif
 
 	rcu_read_lock();
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
@@ -101,30 +99,13 @@ void sched_cb(unsigned long ptr)
 		goto end;
 	trace_sched_latency(key->pid, data->end_ts - data->start_ts,
 			data->cb_flag);
-	printk("sched_latency: (%d) %llu, %s (%d), %llu us\n", data->cb_flag,
-			data->end_ts, p->comm, key->pid, delay);
+	printk("sched_latency: (%d) %s (%d), %llu us\n", data->cb_flag,
+			p->comm, key->pid, delay);
 	cnt++;
 
 end:
 	rcu_read_unlock();
 }
-#else /* SCHEDWORST */
-/*
- * This callback just emit a tracepoint when a latency is higher than the
- * threshold.
- */
-static
-void sched_cb(unsigned long ptr)
-{
-	struct latency_tracker_event *data =
-		(struct latency_tracker_event *) ptr;
-	struct schedkey *key = (struct schedkey *) data->tkey.key;
-
-	trace_sched_latency(key->pid, data->end_ts - data->start_ts,
-			data->cb_flag);
-	cnt++;
-}
-#endif /* SCHEDWORST */
 
 static
 void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
