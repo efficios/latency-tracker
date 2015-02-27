@@ -138,11 +138,14 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		struct latency_tracker_key *tkey)
 {
 	struct hlist_node *next;
-	unsigned long flags;
 	struct latency_tracker_event *s;
 	u32 k;
 
+#if defined(LLFREELIST)
+	unsigned long flags;
+
 	spin_lock_irqsave(&tracker->lock, flags);
+#endif
 	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
 	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
 		if (s->tkey.key_len != tkey->key_len)
@@ -155,7 +158,9 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		__latency_tracker_event_destroy(tracker, s);
 		break;
 	}
+#if defined(LLFREELIST)
 	spin_unlock_irqrestore(&tracker->lock, flags);
+#endif
 }
 
 #endif /* _LTTNG_WRAPPER_HT_BASEHT_H */

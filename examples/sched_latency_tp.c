@@ -143,7 +143,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, sched_cb, timeout, 0,
+		thresh, sched_cb, timeout, 1,
 		NULL);
 	if (ret == LATENCY_TRACKER_FULL) {
 //		printk("latency_tracker sched: no more free events, consider "
