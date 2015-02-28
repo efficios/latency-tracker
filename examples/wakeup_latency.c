@@ -297,7 +297,7 @@ int __init wakeup_latency_init(void)
 	WARN_ON(ret);
 
 	wakeup_tracker_proc_dentry = proc_create_data("wake_latency",
-			S_IRUSR, NULL, &wakeup_tracker_fops, wakeup_priv);
+			S_IRUSR|S_IRGRP|S_IROTH, NULL, &wakeup_tracker_fops, wakeup_priv);
 
 	if (!wakeup_tracker_proc_dentry) {
 		printk(KERN_ERR "Error creating tracker control file\n");
