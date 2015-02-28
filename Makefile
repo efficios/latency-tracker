@@ -13,6 +13,9 @@ obj-m := tracker.o
 wakeup_latency-objs := examples/wakeup_latency.o
 obj-m += wakeup_latency.o
 
+offcpu-objs := examples/offcpu.o
+obj-m += offcpu.o
+
 block_latency-objs := examples/block_latency_tp.o
 obj-m += block_latency.o
 
