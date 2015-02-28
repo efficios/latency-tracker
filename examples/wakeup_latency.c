@@ -134,7 +134,7 @@ void wakeup_cb(unsigned long ptr)
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
 	if (!p)
 		goto end_unlock;
-	trace_wakeup_latency(key->pid, data->end_ts - data->start_ts,
+	trace_wakeup_latency(p->comm, key->pid, data->end_ts - data->start_ts,
 			data->cb_flag);
 	printk("wakeup_latency: (%d) %s (%d), %llu us\n", data->cb_flag,
 			p->comm, key->pid, delay);

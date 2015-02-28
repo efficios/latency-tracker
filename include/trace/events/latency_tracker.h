@@ -10,20 +10,22 @@
 
 TRACE_EVENT(
 	wakeup_latency,
-	TP_PROTO(pid_t pid, u64 delay, unsigned int flag),
-	TP_ARGS(pid, delay, flag),
+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay, unsigned int flag),
+	TP_ARGS(comm, pid, delay, flag),
 	TP_STRUCT__entry(
+		__array(char, comm, TASK_COMM_LEN)
 		__field(int, pid)
 		__field(u64, delay)
 		__field(unsigned int, flag)
 	),
 	TP_fast_assign(
+		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 		entry->pid = pid;
 		entry->delay = delay;
 		entry->flag = flag;
 	),
-	TP_printk("pid=%d, delay=%llu, flag=%u", __entry->pid,
-		__entry->delay, __entry->flag)
+	TP_printk("comm=%s, pid=%d, delay=%llu, flag=%u", __entry->comm,
+		__entry->pid, __entry->delay, __entry->flag)
    );
 
 TRACE_EVENT(
