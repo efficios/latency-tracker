@@ -56,6 +56,8 @@
  */
 #define DEFAULT_USEC_OFFCPU_TIMEOUT 0
 
+#define MAX_STACK_TXT 256
+
 /*
  * microseconds because we can't guarantee the passing of 64-bit
  * arguments to insmod on all architectures.
@@ -124,7 +126,10 @@ void offcpu_cb(unsigned long ptr)
 	struct task_struct *p;
 	struct stack_trace trace;
 	unsigned long entries[32];
-	int i;
+	char stacktxt[MAX_STACK_TXT];
+	char tmp[48];
+	int i, j;
+	size_t frame_len;
 	u64 delay;
 
 	if (data->cb_flag != LATENCY_TRACKER_CB_NORMAL)
@@ -141,19 +146,25 @@ void offcpu_cb(unsigned long ptr)
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
 	if (!p)
 		goto end;
-	trace_offcpu_latency(p->comm, key->pid, data->end_ts - data->start_ts,
-			data->cb_flag);
 //	printk("offcpu: %s (%d) %llu us\n", p->comm, key->pid, delay);
 	trace.nr_entries = 0;
 	trace.max_entries = ARRAY_SIZE(entries);
 	trace.entries = entries;
 	trace.skip = 0;
 	dump_trace(p, NULL, NULL, 0, &backtrace_ops, &trace);
-//	print_stack_trace(&trace, 0);
+	print_stack_trace(&trace, 0);
 
-	for (i = 0; i < trace.nr_entries; i++)
+	j = 0;
+	for (i = 0; i < trace.nr_entries; i++) {
 		printk("%pS\n", (void *) trace.entries[i]);
+		snprintf(tmp, 48, "%pS ", (void *) trace.entries[i]);
+		frame_len = strlen(tmp);
+		snprintf(stacktxt + j, MAX_STACK_TXT - j, tmp);
+		j += frame_len;
+	}
 	printk("%s\n%llu\n\n", p->comm, delay/1000);
+	trace_offcpu_latency(p->comm, key->pid, data->end_ts - data->start_ts,
+			data->cb_flag, stacktxt);
 	cnt++;
 
 end:
