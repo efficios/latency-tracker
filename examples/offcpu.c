@@ -152,7 +152,7 @@ void offcpu_cb(unsigned long ptr)
 	trace.entries = entries;
 	trace.skip = 0;
 	dump_trace(p, NULL, NULL, 0, &backtrace_ops, &trace);
-	print_stack_trace(&trace, 0);
+//	print_stack_trace(&trace, 0);
 
 	j = 0;
 	for (i = 0; i < trace.nr_entries; i++) {
