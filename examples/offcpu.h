@@ -23,6 +23,48 @@
 
 #include <linux/tracepoint.h>
 #include <linux/blkdev.h>
+#include <linux/irq_work.h>
+#include <linux/poll.h>
+#include "../latency_tracker.h"
+
+enum wake_reason {
+	OFFCPU_TRACKER_WAKE_DATA = 0,
+	OFFCPU_TRACKER_WAIT = 1,
+	OFFCPU_TRACKER_HUP = 2,
+};
+
+struct offcpu_tracker {
+	u64 last_alert_ts;
+	u64 ns_rate_limit;
+	wait_queue_head_t read_wait;
+	enum wake_reason reason;
+	bool got_alert;
+	int readers;
+	struct irq_work w_irq;
+	struct proc_dir_entry *proc_dentry;
+};
+
+static const struct file_operations wakeup_tracker_fops;
+
+int tracker_proc_release(struct inode *inode, struct file *filp);
+int tracker_proc_open(struct inode *inode, struct file *filp);
+ssize_t tracker_proc_read(struct file *filp, char __user *buf, size_t n,
+	loff_t *offset);
+unsigned int tracker_proc_poll(struct file *filp, poll_table *wait);
+struct offcpu_tracker *offcpu_alloc_priv(void);
+int offcpu_setup_priv(struct offcpu_tracker *wakeup_priv);
+void offcpu_destroy_priv(struct offcpu_tracker *wakeup_priv);
+void offcpu_handle_proc(struct offcpu_tracker *wakeup_priv,
+		struct latency_tracker_event *data);
+
+static const
+struct file_operations wakeup_tracker_fops = {
+	.owner = THIS_MODULE,
+	.open = tracker_proc_open,
+	.read = tracker_proc_read,
+	.release = tracker_proc_release,
+	.poll = tracker_proc_poll,
+};
 
 DECLARE_TRACE(sched_switch,
 	TP_PROTO(struct task_struct *prev, struct task_struct *next),

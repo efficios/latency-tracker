@@ -123,6 +123,8 @@ void offcpu_cb(unsigned long ptr)
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->tkey.key;
+	struct offcpu_tracker *offcpu_priv =
+		(struct offcpu_tracker *) data->priv;
 	struct task_struct *p;
 	struct stack_trace trace;
 	unsigned long entries[32];
@@ -166,6 +168,7 @@ void offcpu_cb(unsigned long ptr)
 	trace_offcpu_latency(p->comm, key->pid, data->end_ts - data->start_ts,
 			data->cb_flag, stacktxt);
 	cnt++;
+	offcpu_handle_proc(offcpu_priv, data);
 
 end:
 	rcu_read_unlock();
@@ -188,7 +191,8 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	if (!(prev->flags & PF_KTHREAD)) {
 		key.pid = prev->pid;
 		ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-				thresh, offcpu_cb, timeout, 1, NULL);
+				thresh, offcpu_cb, timeout, 1,
+				latency_tracker_get_priv(tracker));
 	}
 
 	if (!(next->flags & PF_KTHREAD)) {
@@ -202,16 +206,24 @@ static
 int __init offcpu_init(void)
 {
 	int ret;
+	struct offcpu_tracker *offcpu_priv;
+
+	offcpu_priv = offcpu_alloc_priv();
+	if (!offcpu_priv) {
+		ret = -ENOMEM;
+		goto end;
+	}
 
 	tracker = latency_tracker_create(NULL, NULL, 200, 1000, 100000000, 0,
-			NULL);
+			offcpu_priv);
 	if (!tracker)
 		goto error;
 
 	ret = lttng_wrapper_tracepoint_probe_register("sched_switch",
 			probe_sched_switch, NULL);
 	WARN_ON(ret);
-	ret = 0;
+
+	ret = offcpu_setup_priv(offcpu_priv);
 	goto end;
 
 error:
@@ -225,11 +237,14 @@ static
 void __exit offcpu_exit(void)
 {
 	uint64_t skipped;
+	struct offcpu_tracker *offcpu_priv;
 
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
+	offcpu_priv = latency_tracker_get_priv(tracker);
+	offcpu_destroy_priv(offcpu_priv);
 	latency_tracker_destroy(tracker);
 	printk("Missed events : %llu\n", skipped);
 	printk("Total sched alerts : %d\n", cnt);

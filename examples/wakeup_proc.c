@@ -22,7 +22,7 @@
 #include <linux/proc_fs.h>
 #include "wakeup_latency.h"
 
-struct wakeup_tracker *alloc_priv(void)
+struct wakeup_tracker *wakeup_alloc_priv(void)
 {
 	struct wakeup_tracker *wakeup_priv;
 
@@ -37,7 +37,17 @@ end:
 	return wakeup_priv;
 }
 
-int setup_priv(struct wakeup_tracker *wakeup_priv)
+static
+void irq_wake(struct irq_work *entry)
+{
+	struct wakeup_tracker *wakeup_priv = container_of(entry,
+			struct wakeup_tracker, w_irq);
+	wakeup_priv->reason = SCHED_TRACKER_WAKE_DATA;
+	wake_up_interruptible(&wakeup_priv->read_wait);
+	wakeup_priv->got_alert = true;
+}
+
+int wakeup_setup_priv(struct wakeup_tracker *wakeup_priv)
 {
 	int ret;
 
@@ -56,7 +66,7 @@ end:
 	return ret;
 }
 
-void destroy_priv(struct wakeup_tracker *wakeup_priv)
+void wakeup_destroy_priv(struct wakeup_tracker *wakeup_priv)
 {
 	irq_work_sync(&wakeup_priv->w_irq);
 	if (wakeup_priv->proc_dentry)
@@ -65,16 +75,7 @@ void destroy_priv(struct wakeup_tracker *wakeup_priv)
 
 }
 
-void irq_wake(struct irq_work *entry)
-{
-	struct wakeup_tracker *wakeup_priv = container_of(entry,
-			struct wakeup_tracker, w_irq);
-	wakeup_priv->reason = SCHED_TRACKER_WAKE_DATA;
-	wake_up_interruptible(&wakeup_priv->read_wait);
-	wakeup_priv->got_alert = true;
-}
-
-void wakeup_proc(struct wakeup_tracker *wakeup_priv,
+void wakeup_handle_proc(struct wakeup_tracker *wakeup_priv,
 		struct latency_tracker_event *data)
 {
 	/* Rate limiter */

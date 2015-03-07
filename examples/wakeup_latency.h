@@ -23,6 +23,8 @@
 
 #include <linux/tracepoint.h>
 #include <linux/blkdev.h>
+#include <linux/irq_work.h>
+#include <linux/poll.h>
 #include "../latency_tracker.h"
 
 enum wake_reason {
@@ -49,11 +51,11 @@ int tracker_proc_open(struct inode *inode, struct file *filp);
 ssize_t tracker_proc_read(struct file *filp, char __user *buf, size_t n,
 	loff_t *offset);
 unsigned int tracker_proc_poll(struct file *filp, poll_table *wait);
-void irq_wake(struct irq_work *entry);
-struct wakeup_tracker *alloc_priv(void);
-int setup_priv(struct wakeup_tracker *wakeup_priv);
-void destroy_priv(struct wakeup_tracker *wakeup_priv);
-void wakeup_proc(struct wakeup_tracker *wakeup_priv,
+
+struct wakeup_tracker *wakeup_alloc_priv(void);
+int wakeup_setup_priv(struct wakeup_tracker *wakeup_priv);
+void wakeup_destroy_priv(struct wakeup_tracker *wakeup_priv);
+void wakeup_handle_proc(struct wakeup_tracker *wakeup_priv,
 		struct latency_tracker_event *data);
 
 static const

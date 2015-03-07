@@ -40,8 +40,6 @@
 #include <linux/fs.h>
 #include <linux/sched.h>
 #include <linux/proc_fs.h>
-#include <linux/poll.h>
-#include <linux/irq_work.h>
 #include "wakeup_latency.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
@@ -108,7 +106,7 @@ void wakeup_cb(unsigned long ptr)
 			p->comm, key->pid, delay);
 	rcu_read_unlock();
 	cnt++;
-	wakeup_proc(wakeup_priv, data);
+	wakeup_handle_proc(wakeup_priv, data);
 
 	goto end;
 
@@ -172,7 +170,7 @@ int __init wakeup_latency_init(void)
 	int ret;
 	struct wakeup_tracker *wakeup_priv;
 
-	wakeup_priv = alloc_priv();
+	wakeup_priv = wakeup_alloc_priv();
 	if (!wakeup_priv) {
 		ret = -ENOMEM;
 		goto end;
@@ -191,7 +189,7 @@ int __init wakeup_latency_init(void)
 			probe_sched_switch, NULL);
 	WARN_ON(ret);
 
-	ret = setup_priv(wakeup_priv);
+	ret = wakeup_setup_priv(wakeup_priv);
 	goto end;
 
 error:
@@ -214,7 +212,7 @@ void __exit wakeup_latency_exit(void)
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
 	wakeup_priv = latency_tracker_get_priv(tracker);
-	destroy_priv(wakeup_priv);
+	wakeup_destroy_priv(wakeup_priv);
 	latency_tracker_destroy(tracker);
 	printk("Missed events : %llu\n", skipped);
 	printk("Total wakeup alerts : %d\n", cnt);
