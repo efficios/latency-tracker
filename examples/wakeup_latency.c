@@ -75,37 +75,9 @@ struct schedkey {
 	pid_t pid;
 } __attribute__((__packed__));
 
-enum wake_reason {
-	SCHED_TRACKER_WAKE_DATA = 0,
-	SCHED_TRACKER_WAIT = 1,
-	SCHED_TRACKER_HUP = 2,
-};
-
-struct wakeup_tracker {
-	u64 last_alert_ts;
-	u64 ns_rate_limit;
-	wait_queue_head_t read_wait;
-	enum wake_reason reason;
-	bool got_alert;
-	int readers;
-	struct irq_work w_irq;
-};
-
 static struct latency_tracker *tracker;
 
 static int cnt = 0;
-
-static struct proc_dir_entry *wakeup_tracker_proc_dentry;
-static const struct file_operations wakeup_tracker_fops;
-
-void irq_wake(struct irq_work *entry)
-{
-	struct wakeup_tracker *wakeup_priv = container_of(entry,
-			struct wakeup_tracker, w_irq);
-	wakeup_priv->reason = SCHED_TRACKER_WAKE_DATA;
-	wake_up_interruptible(&wakeup_priv->read_wait);
-	wakeup_priv->got_alert = true;
-}
 
 static
 void wakeup_cb(unsigned long ptr)
@@ -119,10 +91,6 @@ void wakeup_cb(unsigned long ptr)
 	u64 delay;
 
 	if (data->cb_flag != LATENCY_TRACKER_CB_NORMAL)
-		return;
-	/* Rate limiter */
-	if ((data->end_ts - wakeup_priv->last_alert_ts) <
-			wakeup_priv->ns_rate_limit)
 		return;
 
 	delay = (data->end_ts - data->start_ts) / 1000;
@@ -140,10 +108,8 @@ void wakeup_cb(unsigned long ptr)
 			p->comm, key->pid, delay);
 	rcu_read_unlock();
 	cnt++;
+	wakeup_proc(wakeup_priv, data);
 
-	if (wakeup_priv->readers > 0)
-		irq_work_queue(&wakeup_priv->w_irq);
-	wakeup_priv->last_alert_ts = data->end_ts;
 	goto end;
 
 end_unlock:
@@ -200,93 +166,22 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
 }
 
-unsigned int tracker_proc_poll(struct file *filp,
-		poll_table *wait)
-{
-	struct wakeup_tracker *wakeup_priv = filp->private_data;
-	unsigned int mask = 0;
-
-	if (filp->f_mode & FMODE_READ) {
-		poll_wait(filp, &wakeup_priv->read_wait, wait);
-		if (wakeup_priv->reason == SCHED_TRACKER_WAKE_DATA)
-			mask |= POLLIN;
-		else
-			mask |= POLLHUP;
-	}
-
-	return mask;
-}
-
-	static
-ssize_t tracker_proc_read(struct file *filp, char __user *buf, size_t n,
-		loff_t *offset)
-{
-	struct wakeup_tracker *wakeup_priv = filp->private_data;
-
-	wait_event_interruptible(wakeup_priv->read_wait,
-			wakeup_priv->got_alert);
-	wakeup_priv->reason = SCHED_TRACKER_WAIT;
-	wakeup_priv->got_alert = false;
-
-	return 0;
-}
-
-	static
-int tracker_proc_open(struct inode *inode, struct file *filp)
-{
-	struct wakeup_tracker *wakeup_priv = PDE_DATA(inode);
-	int ret;
-
-	wakeup_priv->got_alert = false;
-	wakeup_priv->readers++;
-	filp->private_data = wakeup_priv;
-	ret = try_module_get(THIS_MODULE);
-	if (!ret)
-		return -1;
-
-	return 0;
-}
-
-	static
-int tracker_proc_release(struct inode *inode, struct file *filp)
-{
-	struct wakeup_tracker *wakeup_priv = filp->private_data;
-
-	wakeup_priv->readers--;
-	module_put(THIS_MODULE);
-	return 0;
-}
-
-static const
-struct file_operations wakeup_tracker_fops = {
-	.owner = THIS_MODULE,
-	.open = tracker_proc_open,
-	.read = tracker_proc_read,
-	.release = tracker_proc_release,
-	.poll = tracker_proc_poll,
-};
-
 static
 int __init wakeup_latency_init(void)
 {
 	int ret;
 	struct wakeup_tracker *wakeup_priv;
 
-	wakeup_priv = kzalloc(sizeof(struct wakeup_tracker), GFP_KERNEL);
+	wakeup_priv = alloc_priv();
 	if (!wakeup_priv) {
 		ret = -ENOMEM;
 		goto end;
 	}
-	wakeup_priv->reason = SCHED_TRACKER_WAIT;
-	/* limit to 1 evt/sec */
-	wakeup_priv->ns_rate_limit = 1000000000;
 
 	tracker = latency_tracker_create(NULL, NULL, 200, 1000, 100000000, 0,
 			wakeup_priv);
 	if (!tracker)
 		goto error;
-
-	init_irq_work(&wakeup_priv->w_irq, irq_wake);
 
 	ret = lttng_wrapper_tracepoint_probe_register("sched_wakeup",
 			probe_sched_wakeup, NULL);
@@ -296,17 +191,7 @@ int __init wakeup_latency_init(void)
 			probe_sched_switch, NULL);
 	WARN_ON(ret);
 
-	wakeup_tracker_proc_dentry = proc_create_data("wake_latency",
-			S_IRUSR|S_IRGRP|S_IROTH, NULL, &wakeup_tracker_fops, wakeup_priv);
-
-	if (!wakeup_tracker_proc_dentry) {
-		printk(KERN_ERR "Error creating tracker control file\n");
-		ret = -ENOMEM;
-		goto end;
-	}
-	init_waitqueue_head(&wakeup_priv->read_wait);
-
-	ret = 0;
+	ret = setup_priv(wakeup_priv);
 	goto end;
 
 error:
@@ -329,11 +214,8 @@ void __exit wakeup_latency_exit(void)
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
 	wakeup_priv = latency_tracker_get_priv(tracker);
-	irq_work_sync(&wakeup_priv->w_irq);
-	kfree(wakeup_priv);
+	destroy_priv(wakeup_priv);
 	latency_tracker_destroy(tracker);
-	if (wakeup_tracker_proc_dentry)
-		remove_proc_entry("wake_latency", NULL);
 	printk("Missed events : %llu\n", skipped);
 	printk("Total wakeup alerts : %d\n", cnt);
 }

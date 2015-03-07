@@ -10,7 +10,7 @@ endif
 
 obj-m := tracker.o
 
-wakeup_latency-objs := examples/wakeup_latency.o
+wakeup_latency-objs := examples/wakeup_latency.o examples/wakeup_proc.o
 obj-m += wakeup_latency.o
 
 offcpu-objs := examples/offcpu.o
