@@ -51,18 +51,15 @@ error:
 }
 
 static
-void wrapper_resize_work(struct work_struct *work)
+void wrapper_resize_work(struct latency_tracker *tracker)
 {
-	struct latency_tracker *tracker;
 	int i, max_events;
 	struct latency_tracker_event *e;
 
-	tracker = container_of(work, struct latency_tracker, resize_w);
-	if (!tracker)
-		return;
-
-	max_events = min(tracker->free_list_nelems * 2, tracker->max_resize);
-	printk("latency_tracker: increasing LL to %d\n", max_events);
+	max_events = min(tracker->free_list_nelems * 2,
+			tracker->max_resize - tracker->free_list_nelems);
+	printk("latency_tracker: increasing to %d (adding %d)\n",
+			tracker->free_list_nelems + max_events, max_events);
 
 	for (i = 0; i < max_events; i++) {
 		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
@@ -70,9 +67,13 @@ void wrapper_resize_work(struct work_struct *work)
 			goto error;
 		if (i == max_events / 2)
 			e->resize_flag = 1;
+		/*
+		 * FIXME: add should be at the tail, we will resize too
+		 * much.
+		 */
 		llist_add(&e->llist, &tracker->ll_events_free_list);
 	}
-	tracker->free_list_nelems = max_events;
+	tracker->free_list_nelems += max_events;
 	goto end;
 
 error:
@@ -89,11 +90,14 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 {
 	struct latency_tracker_event *e, *n;
 	struct llist_node *list;
+	int cnt = 0;
 
 	list = llist_del_all(&tracker->ll_events_free_list);
 	llist_for_each_entry_safe(e, n, list, llist) {
 		kfree(e);
+		cnt++;
 	}
+	printk("latency_tracker LL freed %d events\n", cnt);
 }
 
 static inline

@@ -48,6 +48,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(block_latency);
 
 static void latency_tracker_enable_timer(struct latency_tracker *tracker);
 static void latency_tracker_timer_cb(unsigned long ptr);
+static void latency_tracker_timeout_cb(struct latency_tracker_event *data,
+		int flush);
 
 /*
  * Function to get the timestamp.
@@ -94,31 +96,65 @@ void discard_event(struct latency_tracker *tracker,
  * Must be called with proper locking.
  */
 static
-void __latency_tracker_event_destroy(struct latency_tracker *tracker,
-		struct latency_tracker_event *s)
+void __latency_tracker_event_destroy(struct kref *kref)
 {
-	int ret;
+	struct latency_tracker *tracker;
+	struct latency_tracker_event *s;
 
-	ret = wrapper_ht_del(tracker, s);
-	if (ret) {
-		/* Has already been removed concurrently, we do not own it. */
-		return;
-	}
-	if (s->timeout > 0)
-		del_timer_sync(&s->timer);
-
+	s = container_of(kref, struct latency_tracker_event, refcount);
+	tracker = s->tracker;
 	discard_event(tracker, s);
 }
 
 static
-void latency_tracker_event_destroy(struct latency_tracker *tracker,
-		struct latency_tracker_event *s)
+void latency_tracker_event_destroy(struct kref *kref)
 {
 	unsigned long flags;
+	struct latency_tracker *tracker;
+	struct latency_tracker_event *s;
+
+	s = container_of(kref, struct latency_tracker_event, refcount);
+	tracker = s->tracker;
 
 	spin_lock_irqsave(&tracker->lock, flags);
-	__latency_tracker_event_destroy(tracker, s);
+	__latency_tracker_event_destroy(kref);
 	spin_unlock_irqrestore(&tracker->lock, flags);
+}
+
+static
+void latency_tracker_handle_timeouts(struct latency_tracker *tracker, int flush)
+{
+	struct cds_wfcq_node *qnode;
+	struct latency_tracker_event *s;
+	u64 now;
+
+	if (unlikely(flush))
+		now = -1ULL;
+	else
+		now = trace_clock_monotonic_wrapper();
+
+	for (;;) {
+		if (cds_wfcq_empty(&tracker->timeout_head, &tracker->timeout_tail))
+			break;
+		if (likely(!flush)) {
+			/* Check before dequeue. */
+			qnode = &tracker->timeout_head.node;
+			if (!qnode->next)
+				break;
+			s = caa_container_of(qnode->next,
+					struct latency_tracker_event, timeout_node);
+			if (atomic_read(&s->refcount.refcount) > 1 && s->timeout > now)
+				break;
+		}
+
+		qnode = __cds_wfcq_dequeue_nonblocking(&tracker->timeout_head,
+				&tracker->timeout_tail);
+		if (!qnode)
+			break;
+		s = caa_container_of(qnode, struct latency_tracker_event,
+				timeout_node);
+		latency_tracker_timeout_cb(s, flush);
+	}
 }
 
 /*
@@ -137,11 +173,7 @@ void latency_tracker_timer_cb(unsigned long ptr)
 		wrapper_ht_gc(tracker, now);
 	}
 
-	if (tracker->need_to_resize) {
-		tracker->need_to_resize = 0;
-		printk("latency_tracker: starting the resize\n");
-		queue_work(tracker->resize_q, &tracker->resize_w);
-	}
+	queue_work(tracker->resize_q, &tracker->resize_w);
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	latency_tracker_enable_timer(tracker);
@@ -170,7 +202,7 @@ void latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	tracker->gc_thresh = gc_thresh;
-	latency_tracker_enable_timer(tracker);
+	//latency_tracker_enable_timer(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
@@ -181,8 +213,24 @@ void latency_tracker_set_timer_period(struct latency_tracker *tracker,
 
 	spin_lock_irqsave(&tracker->lock, flags);
 	tracker->timer_period = timer_period;
-	latency_tracker_enable_timer(tracker);
+	//latency_tracker_enable_timer(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
+}
+
+static
+void latency_tracker_workqueue(struct work_struct *work)
+{
+	struct latency_tracker *tracker;
+
+	tracker = container_of(work, struct latency_tracker, resize_w);
+	if (!tracker)
+		return;
+	latency_tracker_handle_timeouts(tracker, 0);
+	if (tracker->need_to_resize) {
+		tracker->need_to_resize = 0;
+		printk("latency_tracker: starting the resize\n");
+		wrapper_resize_work(tracker);
+	}
 }
 
 struct latency_tracker *latency_tracker_create(
@@ -221,14 +269,17 @@ struct latency_tracker *latency_tracker_create(
 	wrapper_ht_init(tracker);
 
 	tracker->max_resize = max_resize;
-	if (max_resize) {
-		tracker->resize_q = create_singlethread_workqueue("resize");
-		INIT_WORK(&tracker->resize_w, wrapper_resize_work);
+	if (timer_period) {
+		tracker->resize_q = create_singlethread_workqueue("latency_tracker");
+		INIT_WORK(&tracker->resize_w, latency_tracker_workqueue);
 	}
 
 	ret = wrapper_freelist_init(tracker, max_events);
 	if (ret < 0)
 		goto error_free_events;
+
+	if (tracker->timer_period)
+		cds_wfcq_init(&tracker->timeout_head, &tracker->timeout_tail);
 
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
@@ -264,14 +315,16 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	/*
 	 * Stop and destroy the freelist resize work queue.
 	 */
-	if (tracker->max_resize) {
+	if (tracker->timer_period) {
 		flush_workqueue(tracker->resize_q);
 		destroy_workqueue(tracker->resize_q);
 	}
+	del_timer_sync(&tracker->timer);
 
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
 
+	latency_tracker_handle_timeouts(tracker, 1);
 	/*
 	 * Wait for all call_rcu_sched issued within wrapper_ht_clear to have
 	 * completed.
@@ -286,16 +339,31 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 EXPORT_SYMBOL_GPL(latency_tracker_destroy);
 
 static
-void latency_tracker_timeout_cb(unsigned long ptr)
+void latency_tracker_timeout_cb(struct latency_tracker_event *data, int flush)
 {
-	struct latency_tracker_event *data = (struct latency_tracker_event *) ptr;
+	int ret;
 
-	del_timer(&data->timer);
 	data->cb_flag = LATENCY_TRACKER_CB_TIMEOUT;
 	data->timeout = 0;
+	data->end_ts = trace_clock_monotonic_wrapper();
 
-	/* Run the user-provided callback. */
-	data->cb(ptr);
+	if (unlikely(flush)) {
+#if !defined(LLFREELIST)
+		latency_tracker_event_destroy(&data->refcount);
+#else
+		__latency_tracker_event_destroy(&data->refcount);
+#endif
+		return;
+	}
+
+#if !defined(LLFREELIST)
+	ret = kref_put(&data->refcount, latency_tracker_event_destroy);
+#else
+	ret = kref_put(&data->refcount, __latency_tracker_event_destroy);
+#endif
+	/* Run the user-provided callback if it has never been run. */
+	if (!ret)
+		data->cb((unsigned long) data);
 }
 
 enum latency_tracker_event_in_ret _latency_tracker_event_in(
@@ -338,17 +406,20 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	s->tracker = tracker;
 	s->start_ts = trace_clock_monotonic_wrapper();
 	s->thresh = thresh;
-	s->timeout = timeout;
 	s->cb = cb;
 	s->priv = priv;
+	kref_init(&s->refcount);
 
 	if (timeout > 0) {
-		init_timer(&s->timer);
-		s->timer.function = latency_tracker_timeout_cb;
-		s->timer.expires = jiffies +
-			wrapper_nsecs_to_jiffies(timeout);
-		s->timer.data = (unsigned long) s;
-		add_timer(&s->timer);
+		if (!tracker->timer_period) {
+			/* Need the tracker timer to handle the timeout. */
+			ret = LATENCY_TRACKER_ERR_TIMEOUT;
+			goto end_unlock;
+		}
+		s->timeout = s->start_ts + timeout;
+		kref_get(&s->refcount);
+		cds_wfcq_enqueue(&tracker->timeout_head,
+				&tracker->timeout_tail, &s->timeout_node);
 	}
 
 	/*
@@ -457,8 +528,8 @@ void example_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data = (struct latency_tracker_event *) ptr;
 
-	printk("cb called for key %s with %p, cb_flag = %d\n", (char *) data->tkey.key,
-			data->priv, data->cb_flag);
+	printk("cb called for %p key %s with %p, cb_flag = %d\n", data,
+			(char *) data->tkey.key, data->priv, data->cb_flag);
 }
 
 static
@@ -466,18 +537,21 @@ int test_tracker(void)
 {
 	char *k1 = "blablabla1";
 	char *k2 = "bliblibli1";
-	int ret;
+	int ret, i;
 	struct latency_tracker *tracker;
 
-	tracker = latency_tracker_create(NULL, NULL, 3, 0, 0, 0, NULL);
+	tracker = latency_tracker_create(NULL, NULL, 300, 0, 100*1000*1000, 0, NULL);
 	if (!tracker)
 		goto error;
 
+	for (i = 0; i < 10; i++) {
 	printk("insert k1\n");
 	ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 6,
-			example_cb, 0, 0, NULL);
+			example_cb, 1000, 0, NULL);
 	if (ret)
 		printk("failed\n");
+	udelay(10000);
+	}
 
 	printk("insert k2\n");
 	rcu_read_lock_sched_notrace();

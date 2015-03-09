@@ -9,6 +9,7 @@
 
 #include "wrapper/ht.h"
 #include "rculfhash-internal.h"
+#include "urcu/wfcqueue.h"
 
 struct latency_tracker {
 	/*  basic kernel HT */
@@ -37,6 +38,9 @@ struct latency_tracker {
         struct timer_list timer;
 	struct workqueue_struct *resize_q;
 	struct work_struct resize_w;
+	/* For timeout on events (on timer_period) */
+	struct cds_wfcq_head timeout_head;
+	struct cds_wfcq_tail timeout_tail;
         /*
          * Protects the access to the HT, the free_list and the timer.
          */
@@ -46,10 +50,8 @@ struct latency_tracker {
 
 struct latency_tracker_event;
 static
-void latency_tracker_event_destroy(struct latency_tracker *tracker,
-		struct latency_tracker_event *s);
+void latency_tracker_event_destroy(struct kref *kref);
 static
-void __latency_tracker_event_destroy(struct latency_tracker *tracker,
-		struct latency_tracker_event *s);
+void __latency_tracker_event_destroy(struct kref *kref);
 
 #endif /* _TRACKER_PRIVATE_H */

@@ -20,8 +20,8 @@
  * Boehm-Demers-Weiser conservative garbage collector.
  */
 
-#include "urcu-compiler.h"
-#include "urcu-system.h"
+#include "compiler.h"
+#include "system.h"
 
 #define UATOMIC_HAS_ATOMIC_BYTE
 #define UATOMIC_HAS_ATOMIC_SHORT

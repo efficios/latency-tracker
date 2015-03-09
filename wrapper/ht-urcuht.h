@@ -24,7 +24,7 @@
  */
 
 #include <linux/hashtable.h>
-#include "../urcu-compiler.h"
+#include "../urcu/compiler.h"
 
 /*
  * return 1 on match.
@@ -96,7 +96,7 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 
 	rcu_read_lock_sched_notrace();
 	cds_lfht_for_each_entry(tracker->urcu_ht, &iter, s, urcunode) {
-		__latency_tracker_event_destroy(tracker, s);
+		kref_put(&s->refcount, __latency_tracker_event_destroy);
 		nb++;
 	}
 	rcu_read_unlock_sched_notrace();
@@ -118,7 +118,7 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
-		__latency_tracker_event_destroy(tracker, s);
+		kref_put(&s->refcount, __latency_tracker_event_destroy);
 	}
 	rcu_read_unlock_sched_notrace();
 }
@@ -144,7 +144,8 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
-		__latency_tracker_event_destroy(tracker, s);
+		wrapper_ht_del(tracker, s);
+		kref_put(&s->refcount, __latency_tracker_event_destroy);
 		found = 1;
 	}
 	rcu_read_unlock_sched_notrace();

@@ -260,7 +260,7 @@
 #include <linux/rcupdate.h>
 #include "rculfhash.h"
 #include "rculfhash-internal.h"
-#include "uatomic-x86.h"
+#include "urcu/uatomic-x86.h"
 
 /*
  * Split-counters lazily update the global counter each 1024
