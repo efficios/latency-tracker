@@ -53,6 +53,24 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
+	syscall_latency,
+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay),
+	TP_ARGS(comm, pid, delay),
+	TP_STRUCT__entry(
+		__array(char, comm, TASK_COMM_LEN)
+		__field(int, pid)
+		__field(u64, delay)
+		),
+	TP_fast_assign(
+		memcpy(__entry->comm, comm, TASK_COMM_LEN);
+		entry->pid = pid;
+		entry->delay = delay;
+		),
+	TP_printk("comm=%s, pid=%d, delay=%llu",
+		__entry->comm, __entry->pid, __entry->delay)
+   );
+
+TRACE_EVENT(
 	block_latency,
 	TP_PROTO(dev_t dev, sector_t sector, u64 delay),
 	TP_ARGS(dev, sector, delay),
