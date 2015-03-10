@@ -11,14 +11,15 @@ run() {
 	echo $name
 	make EXTCFLAGS="$flags"
 	insmod tracker.ko
+	insmod wakeup_latency.ko
 	insmod offcpu.ko
 	echo -n "testing"
-#	for i in $(seq 1 10); do
-#		echo -n "."
-#		sleep 1
-#	done
+	for i in $(seq 1 10); do
+		echo -n "."
+		sleep 1
+	done
 	echo ""
-	hackbench -l 10000
+	rmmod wakeup_latency
 	rmmod offcpu
 	rmmod tracker
 	dmesg -c
