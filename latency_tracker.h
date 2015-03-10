@@ -24,6 +24,7 @@
  */
 
 #include <linux/version.h>
+#include <linux/kref.h>
 #define LATENCY_TRACKER_MAX_KEY_SIZE 128
 
 struct latency_tracker;
@@ -45,6 +46,7 @@ struct rhash_head {};
 struct rhashtable {};
 #endif
 #include "rculfhash-internal.h"
+#include "urcu/wfcqueue.h"
 
 struct latency_tracker_key {
 	size_t key_len;
@@ -100,6 +102,16 @@ struct latency_tracker_event {
 	 */
 	int resize_flag;
 	/*
+	 * wfcqueue node if using the timeout.
+	 */
+	struct cds_wfcq_node timeout_node;
+	/*
+	 * Reclaim the event when the refcount == 0.
+	 * If we use the timeout, the refcount is set to 2 (one for the
+	 * timeout list and the other for the normal exit (or GC)).
+	 */
+	struct kref refcount;
+	/*
 	 * Pointer set a event creation by the caller and kept as is up
 	 * to the event destruction. The memory management is left entirely
 	 * to the caller.
@@ -111,9 +123,10 @@ struct latency_tracker_event {
  * Return code when adding an event to a tracker.
  */
 enum latency_tracker_event_in_ret {
-	LATENCY_TRACKER_OK	= 0,
-	LATENCY_TRACKER_FULL	= 1,
-	LATENCY_TRACKER_ERR	= 2,
+	LATENCY_TRACKER_OK		= 0,
+	LATENCY_TRACKER_FULL		= 1,
+	LATENCY_TRACKER_ERR		= 2,
+	LATENCY_TRACKER_ERR_TIMEOUT	= 3,
 };
 
 /*

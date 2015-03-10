@@ -21,8 +21,8 @@
  * Boehm-Demers-Weiser conservative garbage collector.
  */
 
-#include "urcu-compiler.h"
-#include "urcu-system.h"
+#include "compiler.h"
+#include "system.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -101,7 +101,7 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 	for (i = 0; i < tbl->size; i++) {
 		rht_for_each_entry_safe(s, next, tbl->buckets[i],
 				&tracker->rht, node) {
-			latency_tracker_event_destroy(tracker, s);
+			kref_put(&s->refcount, latency_tracker_event_destroy);
 			nb++;
 		}
 	}
@@ -128,7 +128,7 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 				if (s->cb)
 					s->cb((unsigned long) s);
 			}
-			latency_tracker_event_destroy(tracker, s);
+			kref_put(&s->refcount, latency_tracker_event_destroy);
 		}
 	}
 	rcu_read_unlock_sched_notrace();
@@ -159,7 +159,8 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
-		latency_tracker_event_destroy(tracker, s);
+		wrapper_ht_del(tracker, s);
+		kref_put(&s->refcount, latency_tracker_event_destroy);
 		found = 1;
 	} while (s);
 	rcu_read_unlock_sched_notrace();
@@ -187,7 +188,8 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
 		if (s->cb)
 			s->cb((unsigned long) s);
-		latency_tracker_event_destroy(tracker, s);
+		wrapper_ht_del(tracker, s);
+		kref_put(&s->refcount, latency_tracker_event_destroy);
 		break;
 	} while (s);
 	rcu_read_unlock_sched_notrace();

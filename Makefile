@@ -1,6 +1,6 @@
-ccflags-y += -I$(PWD)/include $(EXTCFLAGS)
+ccflags-y += -I$(PWD)/include $(EXTCFLAGS) -g
 
-tracker-objs := latency_tracker.o rculfhash.o rculfhash-mm-chunk.o
+tracker-objs := latency_tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o
 
 ifneq ($(KERNELRELEASE),)
 tracker-objs += $(shell \
