@@ -19,6 +19,7 @@
 
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
+#include <linux/uaccess.h>
 
 #include "syscalls_abi.h"
 

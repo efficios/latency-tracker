@@ -35,6 +35,8 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/sched.h>
+#include <linux/stacktrace.h>
+#include <asm/stacktrace.h>
 #include "syscalls.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
@@ -46,6 +48,17 @@
  * Threshold to execute the callback (microseconds).
  */
 #define DEFAULT_USEC_SYSCALL_THRESH 1 * 1000 * 1000
+/*
+ * Timeout to execute the callback (microseconds).
+ */
+#define DEFAULT_USEC_SYSCALL_TIMEOUT 500 * 1000
+/*
+ * Select whether we track latencies for all processes or only
+ * for register ones (through the /proc file).
+ */
+#define DEFAULT_WATCH_ALL_PROCESSES 1
+
+#define MAX_STACK_TXT 256
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -54,6 +67,14 @@
 static unsigned long usec_threshold = DEFAULT_USEC_SYSCALL_THRESH;
 module_param(usec_threshold, ulong, 0644);
 MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
+
+static unsigned long usec_timeout = DEFAULT_USEC_SYSCALL_TIMEOUT;
+module_param(usec_timeout, ulong, 0644);
+MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
+
+static unsigned long watch_all = DEFAULT_WATCH_ALL_PROCESSES;
+module_param(watch_all, ulong, 0644);
+MODULE_PARM_DESC(watch_all, "Watch all processes or just registered one");
 
 static int cnt = 0;
 
@@ -74,6 +95,40 @@ struct process_val_t {
 };
 
 static DEFINE_HASHTABLE(process_map, 3);
+
+static int print_trace_stack(void *data, char *name)
+{
+        return 0;
+}
+
+static void
+__save_stack_address(void *data, unsigned long addr, bool reliable, bool nosched)
+{
+        struct stack_trace *trace = data;
+#ifdef CONFIG_FRAME_POINTER
+        if (!reliable)
+                return;
+#endif
+        if (nosched && in_sched_functions(addr))
+                return;
+        if (trace->skip > 0) {
+                trace->skip--;
+                return;
+        }
+        if (trace->nr_entries < trace->max_entries)
+                trace->entries[trace->nr_entries++] = addr;
+}
+
+static void save_stack_address(void *data, unsigned long addr, int reliable)
+{
+        return __save_stack_address(data, addr, reliable, false);
+}
+
+static const struct stacktrace_ops backtrace_ops = {
+        .stack                  = print_trace_stack,
+        .address                = save_stack_address,
+        .walk_stack             = print_context_stack,
+};
 
 static void free_process_val_rcu(struct rcu_head *rcu)
 {
@@ -136,27 +191,83 @@ void process_unregister(pid_t tgid)
 }
 
 static
+void get_stack_txt(char *stacktxt, struct task_struct *p)
+{
+	struct stack_trace trace;
+	unsigned long entries[32];
+	char tmp[48];
+	int i, j;
+	size_t frame_len;
+
+	trace.nr_entries = 0;
+	trace.max_entries = ARRAY_SIZE(entries);
+	trace.entries = entries;
+	trace.skip = 0;
+	dump_trace(p, NULL, NULL, 0, &backtrace_ops, &trace);
+
+	j = 0;
+	for (i = 0; i < trace.nr_entries; i++) {
+		snprintf(tmp, 48, "%pS\n", (void *) trace.entries[i]);
+		frame_len = strlen(tmp);
+		snprintf(stacktxt + j, MAX_STACK_TXT - j, tmp);
+		j += frame_len;
+	}
+}
+
+static
 void syscall_cb(unsigned long ptr)
 {
-  struct latency_tracker_event *data =
-    (struct latency_tracker_event *) ptr;
-  u32 hash;
-  struct process_key_t process_key;
-  struct task_struct* task = current;
+	struct latency_tracker_event *data =
+		(struct latency_tracker_event *) ptr;
+	struct process_key_t process_key;
+	struct sched_key_t *key = (struct sched_key_t *) data->tkey.key;
+	struct task_struct* task;
+	char stacktxt[MAX_STACK_TXT];
+	int send_sig = 0;
+	u32 hash;
 
-  process_key.tgid = task->tgid;
-  hash = jhash(&process_key, sizeof(process_key), 0);
+	rcu_read_lock();
+	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
+		task = pid_task(find_vpid(key->pid), PIDTYPE_PID);
+		if (!task)
+			goto end_unlock;
+	} else if (data->cb_flag == LATENCY_TRACKER_CB_NORMAL) {
+		task = current;
+	} else {
+		goto end_unlock;
+	}
+	process_key.tgid = task->tgid;
+	hash = jhash(&process_key, sizeof(process_key), 0);
 
-  if (find_process(&process_key, hash) == NULL)
-  {
-    trace_syscall_latency(task->comm, task->pid, data->end_ts - data->start_ts);
-  }
-  else
-  {
-    send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
-  }
+	if (find_process(&process_key, hash) == NULL) {
+		if (!watch_all)
+			goto end_unlock;
+	} else {
+		send_sig = 1;
+	}
 
-  ++cnt;
+	/* On timeout take the stack, on normal cb just the basic event. */
+	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
+		get_stack_txt(stacktxt, task);
+		trace_syscall_latency_stack(task->comm, task->pid,
+				data->end_ts - data->start_ts,
+				data->cb_flag, stacktxt);
+	} else {
+		trace_syscall_latency(task->comm, task->pid,
+				data->end_ts - data->start_ts);
+	}
+	if (send_sig)
+		send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
+	rcu_read_unlock();
+
+	++cnt;
+	goto end;
+
+end_unlock:
+	rcu_read_unlock();
+
+end:
+	return;
 }
 
 static
@@ -167,7 +278,7 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 
   sched_key.pid = current->pid;
   thresh = usec_threshold * 1000;
-  timeout = 0;
+  timeout = usec_timeout * 1000;
 
   latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
         thresh, syscall_cb, timeout, 1, NULL);
