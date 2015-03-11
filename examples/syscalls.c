@@ -41,6 +41,7 @@
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/vmalloc.h"
+#include "../wrapper/syscall_name.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -223,7 +224,8 @@ void syscall_cb(unsigned long ptr)
 	struct sched_key_t *key = (struct sched_key_t *) data->tkey.key;
 	struct task_struct* task;
 	char stacktxt[MAX_STACK_TXT];
-	int send_sig = 0;
+	char syscall_name[KSYM_SYMBOL_LEN];
+	int send_sig = 0, ret;
 	u32 hash;
 
 	rcu_read_lock();
@@ -245,15 +247,20 @@ void syscall_cb(unsigned long ptr)
 	} else {
 		send_sig = 1;
 	}
+	ret = wrapper_get_syscall_name((unsigned long) data->priv,
+			syscall_name);
+	if (ret < 0)
+		snprintf(syscall_name, KSYM_SYMBOL_LEN, "%s", "unknown");
 
 	/* On timeout take the stack, on normal cb just the basic event. */
 	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
 		get_stack_txt(stacktxt, task);
-		trace_syscall_latency_stack(task->comm, task->pid,
+		trace_syscall_latency_stack(syscall_name,
+				task->comm, task->pid,
 				data->end_ts - data->start_ts,
 				data->cb_flag, stacktxt);
 	} else {
-		trace_syscall_latency(task->comm, task->pid,
+		trace_syscall_latency(syscall_name, task->comm, task->pid,
 				data->end_ts - data->start_ts);
 	}
 	if (send_sig)
@@ -281,7 +288,7 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
   timeout = usec_timeout * 1000;
 
   latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
-        thresh, syscall_cb, timeout, 1, NULL);
+        thresh, syscall_cb, timeout, 1, (void *) id);
 }
 
 static
