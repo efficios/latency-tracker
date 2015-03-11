@@ -57,7 +57,7 @@
  * Select whether we track latencies for all processes or only
  * for register ones (through the /proc file).
  */
-#define DEFAULT_WATCH_ALL_PROCESSES 1
+#define DEFAULT_WATCH_ALL_PROCESSES 0
 
 #define MAX_STACK_TXT 256
 
@@ -262,9 +262,12 @@ void syscall_cb(unsigned long ptr)
 	} else {
 		trace_syscall_latency(syscall_name, task->comm, task->pid,
 				data->end_ts - data->start_ts);
+
+    if (send_sig)
+      send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
+    else
+      syscall_tracker_handle_proc(latency_tracker_get_priv(tracker));
 	}
-	if (send_sig)
-		send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
 	rcu_read_unlock();
 
 	++cnt;
@@ -312,11 +315,18 @@ static
 int __init syscalls_init(void)
 {
   int ret;
+  struct syscall_tracker *tracker_priv;
 
   wrapper_vmalloc_sync_all();
 
+  tracker_priv = syscall_tracker_alloc_priv();
+  if (!tracker_priv) {
+    ret = -ENOMEM;
+    goto end;
+  }
+
   tracker = latency_tracker_create(NULL, NULL, 200, 5000, 100000000, 0,
-      NULL);
+      tracker_priv);
   if (!tracker)
     goto error;
 
@@ -330,7 +340,7 @@ int __init syscalls_init(void)
       "sched_process_exit", probe_sched_process_exit, NULL);
   WARN_ON(ret);
 
-  ret = syscall_tracker_setup_proc_priv();
+  ret = syscall_tracker_setup_proc_priv(tracker_priv);
 
   goto end;
 
@@ -347,8 +357,7 @@ void __exit syscalls_exit(void)
   struct process_val_t *process_val;
   int bkt;
   uint64_t skipped;
-
-  syscall_tracker_destroy_proc_priv();
+  struct syscall_tracker *tracker_priv;
 
   lttng_wrapper_tracepoint_probe_unregister(
       "sys_enter", probe_syscall_enter, NULL);
@@ -367,7 +376,11 @@ void __exit syscalls_exit(void)
   synchronize_rcu();
 
   skipped = latency_tracker_skipped_count(tracker);
+
+  tracker_priv = latency_tracker_get_priv(tracker);
+  syscall_tracker_destroy_proc_priv(tracker_priv);
   latency_tracker_destroy(tracker);
+
   printk("Missed events : %llu\n", skipped);
   printk("Total syscall alerts : %d\n", cnt);
 }
