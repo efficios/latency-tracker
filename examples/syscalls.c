@@ -224,8 +224,7 @@ void syscall_cb(unsigned long ptr)
 	struct sched_key_t *key = (struct sched_key_t *) data->tkey.key;
 	struct task_struct* task;
 	char stacktxt[MAX_STACK_TXT];
-	char syscall_name[KSYM_SYMBOL_LEN];
-	int send_sig = 0, ret;
+	int send_sig = 0;
 	u32 hash;
 
 	rcu_read_lock();
@@ -238,31 +237,24 @@ void syscall_cb(unsigned long ptr)
 	} else {
 		goto end_unlock;
 	}
+
 	process_key.tgid = task->tgid;
 	hash = jhash(&process_key, sizeof(process_key), 0);
 
-	if (find_process(&process_key, hash) == NULL) {
-		if (!watch_all)
-			goto end_unlock;
-	} else {
+	if (find_process(&process_key, hash) != NULL) {
 		send_sig = 1;
 	}
-	ret = wrapper_get_syscall_name((unsigned long) data->priv,
-			syscall_name);
-	if (ret < 0)
-		snprintf(syscall_name, KSYM_SYMBOL_LEN, "%s", "unknown");
 
 	/* On timeout take the stack, on normal cb just the basic event. */
 	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
 		get_stack_txt(stacktxt, task);
-		trace_syscall_latency_stack(syscall_name,
+		trace_syscall_latency_stack(
 				task->comm, task->pid,
 				data->end_ts - data->start_ts,
 				data->cb_flag, stacktxt);
 	} else {
-		trace_syscall_latency(syscall_name, task->comm, task->pid,
+		trace_syscall_latency(task->comm, task->pid,
 				data->end_ts - data->start_ts);
-
     if (send_sig)
       send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
     else
@@ -283,10 +275,26 @@ end:
 static
 void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 {
+  struct task_struct* task = current;
+  struct process_key_t process_key;
+  u32 hash;
   struct sched_key_t sched_key;
   u64 thresh, timeout;
 
-  sched_key.pid = current->pid;
+  if (!watch_all)
+  {
+    process_key.tgid = task->tgid;
+    hash = jhash(&process_key, sizeof(process_key), 0);
+
+    rcu_read_lock();
+    if (find_process(&process_key, hash) == NULL) {
+      rcu_read_unlock();
+      return;
+    }
+    rcu_read_unlock();
+  }
+
+  sched_key.pid = task->pid;
   thresh = usec_threshold * 1000;
   timeout = usec_timeout * 1000;
 
