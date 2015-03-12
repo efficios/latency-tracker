@@ -57,7 +57,7 @@
  * Select whether we track latencies for all processes or only
  * for register ones (through the /proc file).
  */
-#define DEFAULT_WATCH_ALL_PROCESSES 1
+#define DEFAULT_WATCH_ALL_PROCESSES 0
 
 #define MAX_STACK_TXT 256
 
@@ -224,8 +224,7 @@ void syscall_cb(unsigned long ptr)
 	struct sched_key_t *key = (struct sched_key_t *) data->tkey.key;
 	struct task_struct* task;
 	char stacktxt[MAX_STACK_TXT];
-	char syscall_name[KSYM_SYMBOL_LEN];
-	int send_sig = 0, ret;
+	int send_sig = 0;
 	u32 hash;
 
 	rcu_read_lock();
@@ -238,33 +237,29 @@ void syscall_cb(unsigned long ptr)
 	} else {
 		goto end_unlock;
 	}
+
 	process_key.tgid = task->tgid;
 	hash = jhash(&process_key, sizeof(process_key), 0);
 
-	if (find_process(&process_key, hash) == NULL) {
-		if (!watch_all)
-			goto end_unlock;
-	} else {
+	if (find_process(&process_key, hash) != NULL) {
 		send_sig = 1;
 	}
-	ret = wrapper_get_syscall_name((unsigned long) data->priv,
-			syscall_name);
-	if (ret < 0)
-		snprintf(syscall_name, KSYM_SYMBOL_LEN, "%s", "unknown");
 
 	/* On timeout take the stack, on normal cb just the basic event. */
 	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
 		get_stack_txt(stacktxt, task);
-		trace_syscall_latency_stack(syscall_name,
+		trace_syscall_latency_stack(
 				task->comm, task->pid,
 				data->end_ts - data->start_ts,
 				data->cb_flag, stacktxt);
 	} else {
-		trace_syscall_latency(syscall_name, task->comm, task->pid,
+		trace_syscall_latency(task->comm, task->pid,
 				data->end_ts - data->start_ts);
+    if (send_sig)
+      send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
+    else
+      syscall_tracker_handle_proc(latency_tracker_get_priv(tracker));
 	}
-	if (send_sig)
-		send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
 	rcu_read_unlock();
 
 	++cnt;
@@ -280,10 +275,26 @@ end:
 static
 void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 {
+  struct task_struct* task = current;
+  struct process_key_t process_key;
+  u32 hash;
   struct sched_key_t sched_key;
   u64 thresh, timeout;
 
-  sched_key.pid = current->pid;
+  if (!watch_all)
+  {
+    process_key.tgid = task->tgid;
+    hash = jhash(&process_key, sizeof(process_key), 0);
+
+    rcu_read_lock();
+    if (find_process(&process_key, hash) == NULL) {
+      rcu_read_unlock();
+      return;
+    }
+    rcu_read_unlock();
+  }
+
+  sched_key.pid = task->pid;
   thresh = usec_threshold * 1000;
   timeout = usec_timeout * 1000;
 
@@ -312,11 +323,18 @@ static
 int __init syscalls_init(void)
 {
   int ret;
+  struct syscall_tracker *tracker_priv;
 
   wrapper_vmalloc_sync_all();
 
+  tracker_priv = syscall_tracker_alloc_priv();
+  if (!tracker_priv) {
+    ret = -ENOMEM;
+    goto end;
+  }
+
   tracker = latency_tracker_create(NULL, NULL, 200, 5000, 100000000, 0,
-      NULL);
+      tracker_priv);
   if (!tracker)
     goto error;
 
@@ -330,7 +348,7 @@ int __init syscalls_init(void)
       "sched_process_exit", probe_sched_process_exit, NULL);
   WARN_ON(ret);
 
-  ret = syscall_tracker_setup_proc_priv();
+  ret = syscall_tracker_setup_proc_priv(tracker_priv);
 
   goto end;
 
@@ -347,8 +365,7 @@ void __exit syscalls_exit(void)
   struct process_val_t *process_val;
   int bkt;
   uint64_t skipped;
-
-  syscall_tracker_destroy_proc_priv();
+  struct syscall_tracker *tracker_priv;
 
   lttng_wrapper_tracepoint_probe_unregister(
       "sys_enter", probe_syscall_enter, NULL);
@@ -367,7 +384,11 @@ void __exit syscalls_exit(void)
   synchronize_rcu();
 
   skipped = latency_tracker_skipped_count(tracker);
+
+  tracker_priv = latency_tracker_get_priv(tracker);
+  syscall_tracker_destroy_proc_priv(tracker_priv);
   latency_tracker_destroy(tracker);
+
   printk("Missed events : %llu\n", skipped);
   printk("Total syscall alerts : %d\n", cnt);
 }
