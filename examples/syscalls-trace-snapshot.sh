@@ -1,7 +1,20 @@
 #!/bin/bash
 
+destroy()
+{
+	lttng stop
+	lttng destroy
+	echo "You can now launch the analyses scripts on /$TRACEPATH"
+	exit 0
+}
+
 #lttng-sessiond --extra-kmod-probes=latency_tracker -d
-lttng create --snapshot
+lttng create --snapshot >/tmp/lttngout
+[[ $? != 0 ]] && exit 2
+export TRACEPATH=$(grep Default /tmp/lttngout | cut -d'/' -f2-)
+#rm /tmp/lttngout
+
+trap "destroy" SIGINT SIGTERM
 
 lttng enable-channel k -k
 lttng enable-event -c k -k syscall_latency
@@ -18,6 +31,3 @@ while true; do
     echo 'Recording snapshot...'
     lttng snapshot record
 done
-
-lttng stop
-lttng destroy
