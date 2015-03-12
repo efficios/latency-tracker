@@ -42,6 +42,7 @@
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/vmalloc.h"
 #include "../wrapper/syscall_name.h"
+#include "../wrapper/trace-clock.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -90,7 +91,9 @@ struct process_key_t {
 } __attribute__((__packed__));
 
 struct process_val_t {
+  u64 syscall_start_ts;
   pid_t tgid;
+  int take_stack_dump;
   struct hlist_node hlist;
   struct rcu_head rcu;
 };
@@ -222,8 +225,8 @@ void syscall_cb(unsigned long ptr)
 		(struct latency_tracker_event *) ptr;
 	struct process_key_t process_key;
 	struct sched_key_t *key = (struct sched_key_t *) data->tkey.key;
+	struct process_val_t *val;
 	struct task_struct* task;
-	char stacktxt[MAX_STACK_TXT];
 	int send_sig = 0;
 	u32 hash;
 
@@ -241,17 +244,16 @@ void syscall_cb(unsigned long ptr)
 	process_key.tgid = task->tgid;
 	hash = jhash(&process_key, sizeof(process_key), 0);
 
-	if (find_process(&process_key, hash) != NULL) {
+	val = find_process(&process_key, hash);
+	if (val)
 		send_sig = 1;
-	}
 
 	/* On timeout take the stack, on normal cb just the basic event. */
 	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
-		get_stack_txt(stacktxt, task);
-		trace_syscall_latency_stack(
-				task->comm, task->pid,
-				data->end_ts - data->start_ts,
-				data->cb_flag, stacktxt);
+		if (val) {
+			val->syscall_start_ts = data->start_ts;
+			val->take_stack_dump = 1;
+		}
 	} else {
 		trace_syscall_latency(task->comm, task->pid,
 				data->end_ts - data->start_ts);
@@ -320,6 +322,40 @@ void probe_sched_process_exit(void *__data, struct task_struct *p)
 }
 
 static
+void probe_sched_switch(void *ignore, struct task_struct *prev,
+		struct task_struct *next)
+{
+  struct task_struct* task = next;
+  struct process_key_t process_key;
+  struct process_val_t *val;
+  char stacktxt[MAX_STACK_TXT];
+  u64 now;
+  u32 hash;
+
+  rcu_read_lock();
+  process_key.tgid = task->tgid;
+  hash = jhash(&process_key, sizeof(process_key), 0);
+
+  val = find_process(&process_key, hash);
+  if (!val)
+    goto end_unlock;
+  if (!val->take_stack_dump)
+    goto end_unlock;
+
+  now = trace_clock_read64();
+  get_stack_txt(stacktxt, task);
+  trace_syscall_latency_stack(
+		  task->comm, task->pid,
+		  now - val->syscall_start_ts, 0, stacktxt);
+  val->take_stack_dump = 0;
+  val->syscall_start_ts = 0;
+
+end_unlock:
+  rcu_read_unlock();
+  return;
+}
+
+static
 int __init syscalls_init(void)
 {
   int ret;
@@ -333,7 +369,7 @@ int __init syscalls_init(void)
     goto end;
   }
 
-  tracker = latency_tracker_create(NULL, NULL, 200, 5000, 100000000, 0,
+  tracker = latency_tracker_create(NULL, NULL, 200000, 500000, 100000000, 0,
       tracker_priv);
   if (!tracker)
     goto error;
@@ -346,6 +382,9 @@ int __init syscalls_init(void)
   WARN_ON(ret);
   ret = lttng_wrapper_tracepoint_probe_register(
       "sched_process_exit", probe_sched_process_exit, NULL);
+  WARN_ON(ret);
+  ret = lttng_wrapper_tracepoint_probe_register(
+      "sched_switch", probe_sched_switch, NULL);
   WARN_ON(ret);
 
   ret = syscall_tracker_setup_proc_priv(tracker_priv);
@@ -373,6 +412,8 @@ void __exit syscalls_exit(void)
       "sys_exit", probe_syscall_exit, NULL);
   lttng_wrapper_tracepoint_probe_unregister(
       "sched_process_exit", probe_sched_process_exit, NULL);
+  lttng_wrapper_tracepoint_probe_unregister(
+      "sched_switch", probe_sched_switch, NULL);
   tracepoint_synchronize_unregister();
 
   rcu_read_lock();
