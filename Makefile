@@ -16,7 +16,7 @@ obj-m += wakeup_latency.o
 offcpu-objs := examples/offcpu.o examples/offcpu_proc.o
 obj-m += offcpu.o
 
-syscalls-objs := examples/syscalls.o examples/syscalls_proc.o
+syscalls-objs := examples/syscalls.o examples/syscalls_proc.o wrapper/trace-clock.o
 obj-m += syscalls.o
 
 block_latency-objs := examples/block_latency_tp.o
