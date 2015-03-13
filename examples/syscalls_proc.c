@@ -68,8 +68,7 @@ int syscall_tracker_setup_proc_priv(struct syscall_tracker *tracker_priv)
   init_waitqueue_head(&tracker_priv->read_wait);
   ret = 0;
 
-  printk("Syscalls tracker module loaded successfully.");
-  return ret;
+  printk("Syscalls tracker module loaded successfully\n");
 
 error:
   return ret;

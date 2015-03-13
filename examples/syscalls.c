@@ -52,6 +52,9 @@
 #define DEFAULT_USEC_SYSCALL_THRESH 1 * 1000 * 1000
 /*
  * Timeout to execute the callback (microseconds).
+ * We are not using the latency_tracker timeout (timer-based), instead we
+ * are just looking at every sched_switch if a syscall has been waiting for
+ * more than usec_timeout and take its stack dump.
  */
 #define DEFAULT_USEC_SYSCALL_TIMEOUT 500 * 1000
 /*
@@ -215,6 +218,8 @@ void get_stack_txt(char *stacktxt, struct task_struct *p)
 		frame_len = strlen(tmp);
 		snprintf(stacktxt + j, MAX_STACK_TXT - j, tmp);
 		j += frame_len;
+		if (MAX_STACK_TXT - j < 0)
+			return;
 	}
 }
 
@@ -281,7 +286,7 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
   struct process_key_t process_key;
   u32 hash;
   struct sched_key_t sched_key;
-  u64 thresh, timeout;
+  u64 thresh;
 
   if (!watch_all)
   {
@@ -298,10 +303,9 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 
   sched_key.pid = task->pid;
   thresh = usec_threshold * 1000;
-  timeout = usec_timeout * 1000;
 
   latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
-        thresh, syscall_cb, timeout, 1, (void *) id);
+        thresh, syscall_cb, 0, 1, (void *) id);
 }
 
 static
@@ -325,34 +329,30 @@ static
 void probe_sched_switch(void *ignore, struct task_struct *prev,
 		struct task_struct *next)
 {
-  struct task_struct* task = next;
-  struct process_key_t process_key;
-  struct process_val_t *val;
-  char stacktxt[MAX_STACK_TXT];
-  u64 now;
-  u32 hash;
+	struct task_struct* task = next;
+	struct sched_key_t sched_key;
+	struct latency_tracker_event *s;
+	char stacktxt[MAX_STACK_TXT];
+	u64 now, delta;
 
-  rcu_read_lock();
-  process_key.tgid = task->tgid;
-  hash = jhash(&process_key, sizeof(process_key), 0);
+	if (!task)
+		goto end;
+	sched_key.pid = task->pid;
+	s = latency_tracker_get_event(tracker, &sched_key, sizeof(sched_key));
+	if (!s)
+		goto end;
+	now = trace_clock_read64();
+	delta = now - s->start_ts;
+	if (delta > (usec_threshold * 1000)) {
+		get_stack_txt(stacktxt, task);
+		trace_syscall_latency_stack(
+				task->comm, task->pid,
+				delta, 0, stacktxt);
+	}
+	latency_tracker_put_event(s);
 
-  val = find_process(&process_key, hash);
-  if (!val)
-    goto end_unlock;
-  if (!val->take_stack_dump)
-    goto end_unlock;
-
-  now = trace_clock_read64();
-  get_stack_txt(stacktxt, task);
-  trace_syscall_latency_stack(
-		  task->comm, task->pid,
-		  now - val->syscall_start_ts, 0, stacktxt);
-  val->take_stack_dump = 0;
-  val->syscall_start_ts = 0;
-
-end_unlock:
-  rcu_read_unlock();
-  return;
+end:
+	return;
 }
 
 static
@@ -369,7 +369,7 @@ int __init syscalls_init(void)
     goto end;
   }
 
-  tracker = latency_tracker_create(NULL, NULL, 200000, 500000, 100000000, 0,
+  tracker = latency_tracker_create(NULL, NULL, 1000, 20000, 100000000, 0,
       tracker_priv);
   if (!tracker)
     goto error;

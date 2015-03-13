@@ -105,7 +105,8 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 		kfree(e);
 		cnt++;
 	}
-	printk("latency_tracker: freed %d events\n", cnt);
+	printk("latency_tracker: freed %d events (%lu bytes)\n", cnt,
+			cnt * sizeof(struct latency_tracker_event));
 }
 
 static inline
