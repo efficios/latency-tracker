@@ -135,6 +135,38 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 }
 
 static inline
+struct latency_tracker_event *wrapper_ht_get_event(
+		struct latency_tracker *tracker,
+		struct latency_tracker_key *tkey)
+{
+	struct hlist_node *next;
+	struct latency_tracker_event *s;
+	u32 k;
+
+#if defined(LLFREELIST)
+	unsigned long flags;
+
+	spin_lock_irqsave(&tracker->lock, flags);
+#endif
+	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
+	hash_for_each_possible_safe(tracker->ht, s, next, hlist, k){
+		if (s->tkey.key_len != tkey->key_len)
+			continue;
+		if (tracker->match_fct(tkey->key, s->tkey.key, tkey->key_len))
+			continue;
+		kref_get(&s->refcount);
+		goto end;
+	}
+	s = NULL;
+
+end:
+#if defined(LLFREELIST)
+	spin_unlock_irqrestore(&tracker->lock, flags);
+#endif
+	return s;
+}
+
+static inline
 void wrapper_ht_unique_check(struct latency_tracker *tracker,
 		struct latency_tracker_key *tkey)
 {

@@ -514,6 +514,34 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_event_out);
 
+struct latency_tracker_event *latency_tracker_get_event(
+		struct latency_tracker *tracker, void *key,
+		unsigned int key_len)
+{
+	struct latency_tracker_event *s;
+	struct latency_tracker_key tkey;
+
+	tkey.key_len = key_len;
+	memcpy(tkey.key, key, key_len);
+
+	s = wrapper_ht_get_event(tracker, &tkey);
+
+	return s;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_get_event);
+
+void latency_tracker_put_event(struct latency_tracker_event *event)
+{
+	if (!event)
+		return;
+#if !defined(LLFREELIST)
+	kref_put(&event->refcount, latency_tracker_event_destroy);
+#else
+	kref_put(&event->refcount, __latency_tracker_event_destroy);
+#endif
+}
+EXPORT_SYMBOL_GPL(latency_tracker_put_event);
+
 void *latency_tracker_get_priv(struct latency_tracker *tracker)
 {
 	return tracker->priv;

@@ -124,6 +124,30 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 }
 
 static inline
+struct latency_tracker_event *wrapper_ht_get_event(
+		struct latency_tracker *tracker,
+		struct latency_tracker_key *tkey)
+{
+	struct latency_tracker_event *s;
+	u32 k;
+	struct cds_lfht_iter iter;
+
+	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
+
+	rcu_read_lock_sched_notrace();
+	cds_lfht_for_each_entry_duplicate(tracker->urcu_ht, k,
+			urcu_match, tkey, &iter, s, urcunode) {
+		kref_get(&s->refcount);
+		goto end;
+	}
+	s = NULL;
+end:
+	rcu_read_unlock_sched_notrace();
+	return s;
+}
+
+
+static inline
 int wrapper_ht_check_event(struct latency_tracker *tracker,
 		struct latency_tracker_key *tkey, unsigned int id, u64 now)
 {

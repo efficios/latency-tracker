@@ -211,6 +211,23 @@ int _latency_tracker_event_out(struct latency_tracker *tracker,
 		void *key, unsigned int key_len, unsigned int id);
 
 /*
+ * Lookup if the key is in the tracker HT and return the associated event if
+ * available, returns NULL if not found. An event is "findable" as long as the
+ * event_out on the key has not been performed. The structure returned is
+ * guaranteed to be valid even after the event_out and until the put_event is
+ * not done.
+ */
+struct latency_tracker_event *latency_tracker_get_event(
+		struct latency_tracker *tracker, void *key,
+		unsigned int key_len);
+
+/*
+ * Release the reference on an event (to allow freeing the memory associated
+ * with it).
+ */
+void latency_tracker_put_event(struct latency_tracker_event *event);
+
+/*
  * Returns the number of skipped events due to an empty free list.
  */
 uint64_t latency_tracker_skipped_count(struct latency_tracker *tracker);
