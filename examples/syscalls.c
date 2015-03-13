@@ -229,7 +229,6 @@ void syscall_cb(unsigned long ptr)
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
 	struct process_key_t process_key;
-	struct sched_key_t *key = (struct sched_key_t *) data->tkey.key;
 	struct process_val_t *val;
 	struct task_struct* task;
 	int send_sig = 0;
@@ -237,9 +236,7 @@ void syscall_cb(unsigned long ptr)
 
 	rcu_read_lock();
 	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
-		task = pid_task(find_vpid(key->pid), PIDTYPE_PID);
-		if (!task)
-			goto end_unlock;
+		goto end_unlock;
 	} else if (data->cb_flag == LATENCY_TRACKER_CB_NORMAL) {
 		task = current;
 	} else {
@@ -253,20 +250,12 @@ void syscall_cb(unsigned long ptr)
 	if (val)
 		send_sig = 1;
 
-	/* On timeout take the stack, on normal cb just the basic event. */
-	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
-		if (val) {
-			val->syscall_start_ts = data->start_ts;
-			val->take_stack_dump = 1;
-		}
-	} else {
-		trace_syscall_latency(task->comm, task->pid,
-				data->end_ts - data->start_ts);
-    if (send_sig)
-      send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
-    else
-      syscall_tracker_handle_proc(latency_tracker_get_priv(tracker));
-	}
+	trace_syscall_latency(task->comm, task->pid,
+			data->end_ts - data->start_ts);
+	if (send_sig)
+		send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
+	else
+		syscall_tracker_handle_proc(latency_tracker_get_priv(tracker));
 	rcu_read_unlock();
 
 	++cnt;
@@ -337,13 +326,15 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 
 	if (!task)
 		goto end;
+	if (!usec_timeout)
+		goto end;
 	sched_key.pid = task->pid;
 	s = latency_tracker_get_event(tracker, &sched_key, sizeof(sched_key));
 	if (!s)
 		goto end;
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
-	if (delta > (usec_threshold * 1000)) {
+	if (delta > (usec_timeout * 1000)) {
 		get_stack_txt(stacktxt, task);
 		trace_syscall_latency_stack(
 				task->comm, task->pid,
