@@ -51,12 +51,10 @@
  */
 #define DEFAULT_USEC_SYSCALL_THRESH 1 * 1000 * 1000
 /*
- * Timeout to execute the callback (microseconds).
- * We are not using the latency_tracker timeout (timer-based), instead we
- * are just looking at every sched_switch if a syscall has been waiting for
- * more than usec_timeout and take its stack dump.
+ * At threshold/2 start taking the kernel stack at every
+ * sched_switch of the process until the syscall is completed.
  */
-#define DEFAULT_USEC_SYSCALL_TIMEOUT 500 * 1000
+#define DEFAULT_TAKE_KERNEL_STACK 1
 /*
  * Select whether we track latencies for all processes or only
  * for register ones (through the /proc file).
@@ -73,9 +71,9 @@ static unsigned long usec_threshold = DEFAULT_USEC_SYSCALL_THRESH;
 module_param(usec_threshold, ulong, 0644);
 MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 
-static unsigned long usec_timeout = DEFAULT_USEC_SYSCALL_TIMEOUT;
-module_param(usec_timeout, ulong, 0644);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
+static unsigned long take_kernel_stack = DEFAULT_TAKE_KERNEL_STACK;
+module_param(take_kernel_stack, ulong, 0644);
+MODULE_PARM_DESC(take_kernel_stack, "Extract kernel stack at timeout/2");
 
 static unsigned long watch_all = DEFAULT_WATCH_ALL_PROCESSES;
 module_param(watch_all, ulong, 0644);
@@ -326,7 +324,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 
 	if (!task)
 		goto end;
-	if (!usec_timeout)
+	if (!take_kernel_stack)
 		goto end;
 	sched_key.pid = task->pid;
 	s = latency_tracker_get_event(tracker, &sched_key, sizeof(sched_key));
@@ -334,7 +332,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 		goto end;
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
-	if (delta > (usec_timeout * 1000)) {
+	if (delta > ((usec_threshold * 1000)/2)) {
 		get_stack_txt(stacktxt, task);
 		trace_syscall_latency_stack(
 				task->comm, task->pid,
