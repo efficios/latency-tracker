@@ -29,5 +29,7 @@ lttng start
 while true; do
     cat /proc/syscalls
     echo 'Recording snapshot...'
+    lttng stop
     lttng snapshot record
+    lttng start
 done

@@ -8,7 +8,9 @@ lttng start
 
 while true; do
 	cat /proc/wake_latency
+	lttng stop
 	lttng snapshot record
+	lttng start
 done
 
 lttng stop

@@ -9,7 +9,9 @@ lttng start
 
 while true; do
 	cat /proc/block_tracker
+	lttng stop
 	lttng snapshot record
+	lttng start
 done
 
 lttng stop
