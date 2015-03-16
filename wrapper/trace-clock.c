@@ -25,5 +25,4 @@
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
 DEFINE_PER_CPU(local_t, lttng_last_tsc);
-EXPORT_PER_CPU_SYMBOL(lttng_last_tsc);
 #endif /* #else #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)) */
