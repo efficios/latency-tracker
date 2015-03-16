@@ -109,7 +109,7 @@ To get a callback for all I/O requests that take more than 5 usec to complete:
 
 This example is implemented in [`examples/block_latency_tp.c`](examples/block_latency_tp.c).
 You can also change dynamically the threshold and timeout parameters by writing the
-value in `/sys/module/block_latency_tp/parameters/usec_treshold` and `/sys/module/block_latency_tp/parameters/usec_timeout`
+value in `/sys/module/latency_tracker_block/parameters/usec_treshold` and `/sys/module/latency_tracker_block/parameters/usec_timeout`
 
 ### Scheduler latency
 To get a callback if a task takes more than 5 usec to be scheduled in after a wakeup and get a notification if after 6 usec
@@ -120,18 +120,18 @@ it is still not scheduled in:
   - if the delay between the event_in and out for the same pid is longer than 5 usec, your callback is called, if after 6 usec the process is still not scheduled in, the callback is called with `timeout = 1`.
 
 You can also change dynamically the threshold and timeout parameters by writing the
-value in `/sys/module/sched_latency_tp/parameters/usec_treshold` and `/sys/module/sched_latency_tp/parameters/usec_timeout`
+value in `/sys/module/latency_tracker_wakeup/parameters/usec_treshold` and `/sys/module/latency_tracker_wakeup/parameters/usec_timeout`
 
-This example is implemented in [`examples/sched_latency_tp.c`](examples/sched_latency_tp.c).
+This example is implemented in [`examples/wakeup_latency.c`](examples/wakeup_latency.c).
 
 Loading the modules
 -------------------
 For example to load two examples provided:
 
 ```
-insmod tracker.ko
-insmod sched_latency.ko
-insmod block_latency.ko
+insmod latency_tracker.ko
+insmod latency_tracker_wakeup.ko
+insmod latency_tracker_block.ko
 ```
 
 Reading the output with Ftrace
@@ -139,7 +139,7 @@ Reading the output with Ftrace
 
 ```
 cd /sys/kernel/debug/tracing/
-echo 1 > events/latency_tracker/sched_latency/enable
+echo 1 > events/latency_tracker/wakeup_latency/enable
 echo 1 > events/latency_tracker/block_latency/enable
 echo 1 > tracing_on
 cat trace_pipe
@@ -161,12 +161,12 @@ Reading the output with LTTng
 To use the tracepoints provided by this module with LTTng, you first have to
 connect LTTng probes to them. A patch ready to be applied to the last
 lttng-modules is provided in [`extras/`](extras/). When installed, compiled, load the
-new probe module with `modprobe lttng-probe-sched_latency`. Then you can configure
+new probe module with `modprobe lttng-probe-latency_tracker`. Then you can configure
 your LTTng session as you would usually do:
 
 ```
 lttng create
-lttng enable-event -k sched_latency,block_latency
+lttng enable-event -k wakeup_latency,block_latency
 lttng enable-event -k ..... # connect the other tracepoints you want
 lttng start
 # do stuff
@@ -178,7 +178,7 @@ lttng destroy
 Example output:
 
 ```
-[16:04:02.378122496] (+0.000030737) trusty sched_latency: { cpu_id = 1 }, { pid = 7, delay = 21239915, timeout = 0 }
+[16:04:02.378122496] (+0.000030737) trusty wakeup_latency: { cpu_id = 1 }, { pid = 7, delay = 21239915, timeout = 0 }
 [16:04:13.029794374] (+10.651671878) trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7668496, delay = 6486352 }
 [16:04:13.029836068] (+0.000041694) trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7669504, delay = 6531005 }
 ```

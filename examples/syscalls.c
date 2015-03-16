@@ -9,7 +9,7 @@
  *
  * The parameter can be controlled at run-time by writing the value in
  * micro-seconds in:
- * /sys/module/syscalls/parameters/usec_threshold
+ * /sys/module/latency_tracker_syscalls/parameters/usec_threshold
  *
  * It is possible to use nanoseconds, but you have to write manually the value
  * in this source code.
