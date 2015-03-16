@@ -1,29 +1,29 @@
 ccflags-y += -I$(PWD)/include $(EXTCFLAGS) -g
 
-tracker-objs := latency_tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o
+latency_tracker-objs := tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o
 
 ifneq ($(KERNELRELEASE),)
-tracker-objs += $(shell \
+latency_tracker-objs += $(shell \
 	if [ $(VERSION) -eq 3 -a $(PATCHLEVEL) -ge 15 -a $(SUBLEVEL) -ge 0 ] ; then \
 	echo "lttng-tracepoint.o" ; fi;)
 endif
 
-obj-m := tracker.o
+obj-m := latency_tracker.o
 
-wakeup_latency-objs := examples/wakeup_latency.o examples/wakeup_proc.o
-obj-m += wakeup_latency.o
+latency_tracker_wakeup-objs := examples/wakeup_latency.o examples/wakeup_proc.o
+obj-m += latency_tracker_wakeup.o
 
-offcpu-objs := examples/offcpu.o examples/offcpu_proc.o
-obj-m += offcpu.o
+latency_tracker_offcpu-objs := examples/offcpu.o examples/offcpu_proc.o
+obj-m += latency_tracker_offcpu.o
 
-syscalls-objs := examples/syscalls.o examples/syscalls_proc.o wrapper/trace-clock.o
-obj-m += syscalls.o
+latency_tracker_syscalls-objs := examples/syscalls.o examples/syscalls_proc.o wrapper/trace-clock.o
+obj-m += latency_tracker_syscalls.o
 
-block_latency-objs := examples/block_latency_tp.o
-obj-m += block_latency.o
+latency_tracker_block-objs := examples/block_latency_tp.o
+obj-m += latency_tracker_block.o
 
-network_stack_latency-objs := examples/network_stack_latency.o
-obj-m += network_stack_latency.o
+latency_tracker_network_stack-objs := examples/network_stack_latency.o
+obj-m += latency_tracker_network_stack.o
 
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
