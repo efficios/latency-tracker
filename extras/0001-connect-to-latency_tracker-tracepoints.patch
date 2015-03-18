@@ -1,26 +1,26 @@
-From 13ec58c97ac39a7a07849538fa937d35dcc05834 Mon Sep 17 00:00:00 2001
+From b5a253dbd410ead6c0eb5f21e123f75c3092b087 Mon Sep 17 00:00:00 2001
 From: Francois Doray <francois.pierre-doray@polymtl.ca>
-Date: Wed, 11 Mar 2015 15:19:27 -0400
+Date: Tue, 17 Mar 2015 19:36:15 -0400
 Subject: [PATCH] [MODULES PATCH] connect to latency_tracker tracepoints
 
 Signed-off-by: Francois Doray <francois.pierre-doray@polymtl.ca>
 Signed-off-by: Julien Desfossez <jdesfossez@efficios.com>
 ---
- .../events/lttng-module/latency_tracker.h          | 143 +++++++++++++++++++++
- instrumentation/events/mainline/latency_tracker.h  | 143 +++++++++++++++++++++
+ .../events/lttng-module/latency_tracker.h          | 147 ++++++++++++++++++++
+ instrumentation/events/mainline/latency_tracker.h  | 148 +++++++++++++++++++++
  probes/Makefile                                    |   2 +
- probes/lttng-probe-latency_tracker.c               |  22 ++++
- 4 files changed, 310 insertions(+)
+ probes/lttng-probe-latency_tracker.c               |  22 +++
+ 4 files changed, 319 insertions(+)
  create mode 100644 instrumentation/events/lttng-module/latency_tracker.h
  create mode 100644 instrumentation/events/mainline/latency_tracker.h
  create mode 100644 probes/lttng-probe-latency_tracker.c
 
 diff --git a/instrumentation/events/lttng-module/latency_tracker.h b/instrumentation/events/lttng-module/latency_tracker.h
 new file mode 100644
-index 0000000..56af7ee
+index 0000000..489013f
 --- /dev/null
 +++ b/instrumentation/events/lttng-module/latency_tracker.h
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,147 @@
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
 +
@@ -77,31 +77,34 @@ index 0000000..56af7ee
 +LTTNG_TRACEPOINT_EVENT(
 +	syscall_latency,
 +	TP_PROTO(char comm[TASK_COMM_LEN],
-+		pid_t pid, u64 delay),
-+	TP_ARGS(comm, pid, delay),
++		pid_t pid, u64 start_ts, u64 delay),
++	TP_ARGS(comm, pid, start_ts, delay),
 +	TP_STRUCT__entry(
 +		__array_text(char, comm, TASK_COMM_LEN)
 +		__field(int, pid)
++		__field(u64, start_ts)
 +		__field(u64, delay)
 +	),
 +	TP_fast_assign(
 +		tp_memcpy(comm, comm, TASK_COMM_LEN)
 +		tp_assign(pid, pid)
++		tp_assign(start_ts, start_ts)
 +		tp_assign(delay, delay)
 +	),
-+	TP_printk("comm=%s, pid=%d, delay=%llu",
++	TP_printk("comm=%s, pid=%d, start_ts=%llu, delay=%llu",
 +		__entry->comm, __entry->pid,
-+		__entry->delay)
++		__entry->start_ts, __entry->delay)
 +   )
 +
 +LTTNG_TRACEPOINT_EVENT(
 +	syscall_latency_stack,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid,
-+		u64 delay, unsigned int flag, char stack[256]),
-+	TP_ARGS(comm, pid, delay, flag, stack),
++		u64 start_ts, u64 delay, unsigned int flag, char stack[256]),
++	TP_ARGS(comm, pid, start_ts, delay, flag, stack),
 +	TP_STRUCT__entry(
 +		__array_text(char, comm, TASK_COMM_LEN)
 +		__field(int, pid)
++		__field(u64, start_ts)
 +		__field(u64, delay)
 +		__field(unsigned int, flag)
 +		__array_text(char, stack, 256)
@@ -109,13 +112,14 @@ index 0000000..56af7ee
 +	TP_fast_assign(
 +		tp_memcpy(comm, comm, TASK_COMM_LEN)
 +		tp_assign(pid, pid)
++		tp_assign(start_ts, start_ts)
 +		tp_assign(delay, delay)
 +		tp_assign(flag, flag)
 +		tp_memcpy(stack, stack, 256)
 +	),
-+	TP_printk("comm=%s, pid=%d, delay=%llu, flag=%u, stack=%s",
-+		__entry->comm, __entry->pid, __entry->delay,
-+		__entry->flag, __entry->stack)
++	TP_printk("comm=%s, pid=%d, start_ts=%llu, delay=%llu, flag=%u, stack=%s",
++		__entry->comm, __entry->pid, __entry->start_ts,
++		__entry->delay, __entry->flag, __entry->stack)
 +   )
 +
 +LTTNG_TRACEPOINT_EVENT(
@@ -166,10 +170,10 @@ index 0000000..56af7ee
 +#include "../../../probes/define_trace.h"
 diff --git a/instrumentation/events/mainline/latency_tracker.h b/instrumentation/events/mainline/latency_tracker.h
 new file mode 100644
-index 0000000..6b9f035
+index 0000000..2003e66
 --- /dev/null
 +++ b/instrumentation/events/mainline/latency_tracker.h
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,148 @@
 +/* subsystem name is "latency_tracker" */
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
@@ -226,12 +230,13 @@ index 0000000..6b9f035
 +
 +TRACE_EVENT(
 +	syscall_latency_stack,
-+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 start_ts, u64 delay,
 +		unsigned int flag, char stack[256]),
-+	TP_ARGS(comm, pid, delay, flag, stack),
++	TP_ARGS(comm, pid, start_ts, delay, flag, stack),
 +	TP_STRUCT__entry(
 +		__array(char, comm, TASK_COMM_LEN)
 +		__field(int, pid)
++		__field(u64, start_ts)
 +		__field(u64, delay)
 +		__field(unsigned int, flag)
 +		__array(char, stack, 256)
@@ -239,31 +244,35 @@ index 0000000..6b9f035
 +	TP_fast_assign(
 +		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 +		entry->pid = pid;
++		entry->start_ts = start_ts;
 +		entry->delay = delay;
 +		entry->flag = flag;
 +		memcpy(__entry->stack, stack, 256);
 +		),
-+	TP_printk("comm=%s, pid=%d, delay=%llu flag=%u, stack=%s",
-+		 __entry->comm, __entry->pid, __entry->delay,
-+		__entry->flag, __entry->stack)
++	TP_printk("comm=%s, pid=%d, start_ts=%llu, delay=%llu flag=%u, stack=%s",
++		 __entry->comm, __entry->pid, __entry->start_ts,
++		 __entry->delay, __entry->flag, __entry->stack)
 +   );
 +
 +TRACE_EVENT(
 +	syscall_latency,
-+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay),
-+	TP_ARGS(comm, pid, delay),
++	TP_PROTO(char comm[TASK_COMM_LEN],
++		pid_t pid, u64 start_ts, u64 delay),
++	TP_ARGS(comm, pid, start_ts, delay),
 +	TP_STRUCT__entry(
 +		__array(char, comm, TASK_COMM_LEN)
 +		__field(int, pid)
++		__field(u64, start_ts)
 +		__field(u64, delay)
 +		),
 +	TP_fast_assign(
 +		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 +		entry->pid = pid;
++		entry->start_ts = start_ts;
 +		entry->delay = delay;
 +		),
-+	TP_printk("comm=%s, pid=%d, delay=%llu",
-+		__entry->comm, __entry->pid, __entry->delay)
++	TP_printk("comm=%s, pid=%d, start_ts=%llu, delay=%llu",
++		__entry->comm, __entry->pid, __entry->start_ts, __entry->delay)
 +   );
 +
 +TRACE_EVENT(

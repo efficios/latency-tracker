@@ -54,12 +54,13 @@ TRACE_EVENT(
 
 TRACE_EVENT(
 	syscall_latency_stack,
-	TP_PROTO(char comm[TASK_COMM_LEN],
-		pid_t pid, u64 delay, unsigned int flag, char stack[256]),
-	TP_ARGS(comm, pid, delay, flag, stack),
+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 start_ts, u64 delay,
+		unsigned int flag, char stack[256]),
+	TP_ARGS(comm, pid, start_ts, delay, flag, stack),
 	TP_STRUCT__entry(
 		__array(char, comm, TASK_COMM_LEN)
 		__field(int, pid)
+		__field(u64, start_ts)
 		__field(u64, delay)
 		__field(unsigned int, flag)
 		__array(char, stack, 256)
@@ -67,32 +68,35 @@ TRACE_EVENT(
 	TP_fast_assign(
 		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 		entry->pid = pid;
+		entry->start_ts = start_ts;
 		entry->delay = delay;
 		entry->flag = flag;
 		memcpy(__entry->stack, stack, 256);
 		),
-	TP_printk("comm=%s, pid=%d, delay=%llu flag=%u, stack=%s",
-		__entry->comm, __entry->pid, __entry->delay,
-		__entry->flag, __entry->stack)
+	TP_printk("comm=%s, pid=%d, start_ts=%llu, delay=%llu flag=%u, stack=%s",
+		 __entry->comm, __entry->pid, __entry->start_ts,
+		 __entry->delay, __entry->flag, __entry->stack)
    );
 
 TRACE_EVENT(
 	syscall_latency,
 	TP_PROTO(char comm[TASK_COMM_LEN],
-		pid_t pid, u64 delay),
-	TP_ARGS(comm, pid, delay),
+		pid_t pid, u64 start_ts, u64 delay),
+	TP_ARGS(comm, pid, start_ts, delay),
 	TP_STRUCT__entry(
 		__array(char, comm, TASK_COMM_LEN)
 		__field(int, pid)
+		__field(u64, start_ts)
 		__field(u64, delay)
 		),
 	TP_fast_assign(
 		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 		entry->pid = pid;
+		entry->start_ts = start_ts;
 		entry->delay = delay;
 		),
-	TP_printk("comm=%s, pid=%d, delay=%llu",
-		__entry->comm, __entry->pid, __entry->delay)
+	TP_printk("comm=%s, pid=%d, start_ts=%llu, delay=%llu",
+		__entry->comm, __entry->pid, __entry->start_ts, __entry->delay)
    );
 
 TRACE_EVENT(
