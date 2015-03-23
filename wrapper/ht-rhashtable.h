@@ -159,7 +159,7 @@ struct latency_tracker_event *wrapper_ht_get_event(
 
 end:
 	rcu_read_unlock_sched_notrace();
-	return found;
+	return s;
 }
 
 static inline
@@ -193,7 +193,7 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 	} while (s);
 	rcu_read_unlock_sched_notrace();
 
-	return s;
+	return found;
 }
 
 static inline
