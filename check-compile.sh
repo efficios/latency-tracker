@@ -10,18 +10,18 @@ run() {
 	flags=$2
 	echo $name
 	make EXTCFLAGS="$flags"
-	insmod tracker.ko
-	insmod wakeup_latency.ko
-	insmod offcpu.ko
+	insmod latency_tracker.ko
+	insmod latency_tracker_wakeup.ko
+	insmod latency_tracker_offcpu.ko
 	echo -n "testing"
 	for i in $(seq 1 10); do
 		echo -n "."
 		sleep 1
 	done
 	echo ""
-	rmmod wakeup_latency
-	rmmod offcpu
-	rmmod tracker
+	rmmod latency_tracker_wakeup
+	rmmod latency_tracker_offcpu
+	rmmod latency_tracker
 	dmesg -c
 }
 
