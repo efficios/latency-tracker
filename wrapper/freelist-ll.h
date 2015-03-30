@@ -74,6 +74,7 @@ void wrapper_resize_work(struct latency_tracker *tracker)
 		llist_add(&e->llist, &tracker->ll_events_free_list);
 	}
 	tracker->free_list_nelems += max_events;
+	wrapper_vmalloc_sync_all();
 	goto end;
 
 error:

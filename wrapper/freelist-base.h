@@ -81,6 +81,7 @@ void wrapper_resize_work(struct latency_tracker *tracker)
 		list_add_tail(&e->list, &tracker->events_free_list);
 	}
 	tracker->free_list_nelems += max_events;
+	wrapper_vmalloc_sync_all();
 	spin_unlock_irqrestore(&tracker->lock, flags);
 
 	goto end;
