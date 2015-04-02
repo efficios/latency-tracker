@@ -118,6 +118,34 @@ static const struct stacktrace_ops backtrace_ops = {
 };
 
 static
+void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay)
+{
+	struct stack_trace trace;
+	unsigned long entries[32];
+	char tmp[48];
+	int i, j;
+	size_t frame_len;
+
+	//	printk("offcpu: %s (%d) %llu us\n", p->comm, key->pid, delay);
+	trace.nr_entries = 0;
+	trace.max_entries = ARRAY_SIZE(entries);
+	trace.entries = entries;
+	trace.skip = 0;
+	dump_trace(p, NULL, NULL, 0, &backtrace_ops, &trace);
+	//	print_stack_trace(&trace, 0);
+
+	j = 0;
+	for (i = 0; i < trace.nr_entries; i++) {
+		printk("%pS\n", (void *) trace.entries[i]);
+		snprintf(tmp, 48, "%pS ", (void *) trace.entries[i]);
+		frame_len = strlen(tmp);
+		snprintf(stacktxt + j, MAX_STACK_TXT - j, tmp);
+		j += frame_len;
+	}
+	printk("%s\n%llu\n\n", p->comm, delay/1000);
+}
+
+static
 void offcpu_cb(unsigned long ptr)
 {
 	struct latency_tracker_event *data =
@@ -126,12 +154,7 @@ void offcpu_cb(unsigned long ptr)
 	struct offcpu_tracker *offcpu_priv =
 		(struct offcpu_tracker *) data->priv;
 	struct task_struct *p;
-	struct stack_trace trace;
-	unsigned long entries[32];
 	char stacktxt[MAX_STACK_TXT];
-	char tmp[48];
-	int i, j;
-	size_t frame_len;
 	u64 delay;
 
 	if (data->cb_flag != LATENCY_TRACKER_CB_NORMAL)
@@ -148,23 +171,7 @@ void offcpu_cb(unsigned long ptr)
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
 	if (!p)
 		goto end;
-//	printk("offcpu: %s (%d) %llu us\n", p->comm, key->pid, delay);
-	trace.nr_entries = 0;
-	trace.max_entries = ARRAY_SIZE(entries);
-	trace.entries = entries;
-	trace.skip = 0;
-	dump_trace(p, NULL, NULL, 0, &backtrace_ops, &trace);
-//	print_stack_trace(&trace, 0);
-
-	j = 0;
-	for (i = 0; i < trace.nr_entries; i++) {
-		printk("%pS\n", (void *) trace.entries[i]);
-		snprintf(tmp, 48, "%pS ", (void *) trace.entries[i]);
-		frame_len = strlen(tmp);
-		snprintf(stacktxt + j, MAX_STACK_TXT - j, tmp);
-		j += frame_len;
-	}
-	printk("%s\n%llu\n\n", p->comm, delay/1000);
+	extract_stack(p, stacktxt, delay);
 	trace_offcpu_latency(p->comm, key->pid, data->end_ts - data->start_ts,
 			data->cb_flag, stacktxt);
 	cnt++;
