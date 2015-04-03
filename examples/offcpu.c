@@ -301,7 +301,7 @@ void __exit offcpu_exit(void)
 	offcpu_destroy_priv(offcpu_priv);
 	latency_tracker_destroy(tracker);
 	printk("Missed events : %llu\n", skipped);
-	printk("Total sched alerts : %d\n", cnt);
+	printk("Total offcpu alerts : %d\n", cnt);
 }
 module_exit(offcpu_exit);
 
