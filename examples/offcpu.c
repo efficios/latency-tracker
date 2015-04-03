@@ -189,6 +189,18 @@ end:
 }
 
 static
+int skip_thread(struct task_struct *p)
+{
+#if defined(URCUHT) || defined(RHASHTABLE)
+	if (p->flags & PF_KTHREAD)
+		return 1;
+	if (p->flags & PF_WQ_WORKER)
+		return 1;
+#endif
+	return 0;
+}
+
+static
 void probe_sched_switch(void *ignore, struct task_struct *prev,
 		struct task_struct *next)
 {
@@ -204,26 +216,18 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-#if defined(URCUHT) || defined(RHASHTABLE)
-	if (!(prev->flags & PF_KTHREAD)) {
-#endif
+	if (!skip_thread(prev)) {
 		key.pid = prev->pid;
 		ret = latency_tracker_event_in(tracker, &key, sizeof(key),
 				thresh, offcpu_cb, timeout, 1,
 				latency_tracker_get_priv(tracker));
-#if defined(URCUHT) || defined(RHASHTABLE)
 	}
-#endif
 
-#if defined(URCUHT) || defined(RHASHTABLE)
-	if (!(next->flags & PF_KTHREAD)) {
-#endif
+	if (!skip_thread(next)) {
 		key.pid = next->pid;
 		latency_tracker_event_out(tracker, &key, sizeof(key),
 				SCHED_EXIT_NORMAL);
-#if defined(URCUHT) || defined(RHASHTABLE)
 	}
-#endif
 end:
 	rcu_read_unlock();
 }
