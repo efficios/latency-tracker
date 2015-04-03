@@ -3,11 +3,8 @@
  *
  * Example of usage of latency_tracker with kernel tracepoints.
  *
- * In this example, we call the callback function offcpu_cb when the delay
- * between a sched wakeup and its completion (sched_switch) takes more than
- * DEFAULT_USEC_OFFCPU_THRESH microseconds. Moreover, if the task is
- * still not scheduled after DEFAULT_USEC_OFFCPU_TIMEOUT microseconds,
- * the callback is called with timeout = 1.
+ * In this example, we call the callback function offcpu_cb when a task has
+ * been scheduled out for longer that DEFAULT_USEC_OFFCPU_THRESH microseconds.
  *
  * The 2 parameters can be controlled at run-time by writing the value in
  * micro-seconds in:
@@ -17,7 +14,7 @@
  * It is possible to use nanoseconds, but you have to write manually the value
  * in this source code.
  *
- * Copyright (C) 2014 Julien Desfossez <jdesfossez@efficios.com>
+ * Copyright (C) 2015 Julien Desfossez <jdesfossez@efficios.com>
  *
  * This library is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published by the
