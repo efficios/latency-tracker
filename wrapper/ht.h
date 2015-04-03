@@ -46,4 +46,17 @@
 #include "ht-urcuht.h"
 #endif /* RHASHTABLE */
 
+#ifdef COMPILEDEBUG
+/* Just debug warnings */
+#ifdef URCUHT
+#warning Compiling with URCU HT
+#endif
+#ifdef RHASHTABLE
+#warning Compiling with RHASHTABLE
+#endif
+#ifdef BASEHT
+#warning Compiling with BASEHT
+#endif
+#endif /* COMPILEDEBUG */
+
 #endif /* _LTTNG_WRAPPER_HT_H */

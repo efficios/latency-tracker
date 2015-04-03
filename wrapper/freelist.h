@@ -33,4 +33,12 @@
 #include "freelist-base.h"
 #endif /* LLFREELIST */
 
+#ifdef COMPILEDEBUG
+#ifdef LLFREELIST
+#warning Compiling with LLFREELIST
+#else
+#warning Compiling with basic linked-list
+#endif
+#endif /* COMPILEDEBUG */
+
 #endif /* _LTTNG_WRAPPER_FREELIST_H */
