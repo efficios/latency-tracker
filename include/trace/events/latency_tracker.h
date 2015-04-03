@@ -78,12 +78,12 @@ TRACE_EVENT(
 		entry->wakee_offcpu_delay = wakee_offcpu_delay;
 		entry->flag = flag;
 		),
-	TP_printk("waker_comm=%s (%d), waker_stack=%s, "
-			"wakee_comm=%s (%d), "
-			"wakee_offcpu_delay=%llu, flag=%u",
-		__entry->waker_comm, __entry->waker_pid, __entry->waker_stack,
+	TP_printk("waker_comm=%s (%d), wakee_comm=%s (%d), wakee_offcpu_delay=%llu, "
+			"flag=%u, waker_stack=%s",
+		__entry->waker_comm, __entry->waker_pid,
 		__entry->wakee_comm, __entry->wakee_pid,
-		__entry->wakee_offcpu_delay, __entry->flag)
+		__entry->wakee_offcpu_delay, __entry->flag,
+		__entry->waker_stack)
    );
 
 TRACE_EVENT(
