@@ -45,6 +45,10 @@
 
 #include <trace/events/latency_tracker.h>
 
+#ifdef URCUHT
+#warning offcpu example buggy with URCUHT for now
+#endif
+
 /*
  * Threshold to execute the callback (microseconds).
  */
