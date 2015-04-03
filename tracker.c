@@ -535,11 +535,13 @@ void latency_tracker_put_event(struct latency_tracker_event *event)
 {
 	if (!event)
 		return;
+	rcu_read_lock_sched_notrace();
 #if !defined(LLFREELIST)
 	kref_put(&event->refcount, latency_tracker_event_destroy);
 #else
 	kref_put(&event->refcount, __latency_tracker_event_destroy);
 #endif
+	rcu_read_unlock_sched_notrace();
 }
 EXPORT_SYMBOL_GPL(latency_tracker_put_event);
 

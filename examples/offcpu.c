@@ -46,7 +46,7 @@
 #include <trace/events/latency_tracker.h>
 
 #ifdef URCUHT
-#warning offcpu example buggy with URCUHT for now
+#warning Compiled with URCUHT, so kernel thread will not be monitored due to a deadlock with call_rcu
 #endif
 
 /*
@@ -196,21 +196,36 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	enum latency_tracker_event_in_ret ret;
 	u64 thresh, timeout;
 
+	rcu_read_lock();
 	if (!next || !prev)
-		return;
+		goto end;
 	current_pid[prev->on_cpu] = next->pid;
 
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-	key.pid = prev->pid;
-	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-			thresh, offcpu_cb, timeout, 1,
-			latency_tracker_get_priv(tracker));
+#ifdef URCUHT
+	if (!(prev->flags & PF_KTHREAD)) {
+#endif
+		key.pid = prev->pid;
+		ret = latency_tracker_event_in(tracker, &key, sizeof(key),
+				thresh, offcpu_cb, timeout, 1,
+				latency_tracker_get_priv(tracker));
+#ifdef URCUHT
+	}
+#endif
 
-	key.pid = next->pid;
-	latency_tracker_event_out(tracker, &key, sizeof(key),
-			SCHED_EXIT_NORMAL);
+#ifdef URCUHT
+	if (!(next->flags & PF_KTHREAD)) {
+#endif
+		key.pid = next->pid;
+		latency_tracker_event_out(tracker, &key, sizeof(key),
+				SCHED_EXIT_NORMAL);
+#ifdef URCUHT
+	}
+#endif
+end:
+	rcu_read_unlock();
 }
 
 static
@@ -230,6 +245,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		if (current_pid[i] == p->pid)
 			return;
 
+	rcu_read_lock();
 	key.pid = p->pid;
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
@@ -237,15 +253,14 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
 	if (delta > (usec_threshold * 1000)) {
-		rcu_read_lock();
 		/* skip our own stack */
 		extract_stack(current, stacktxt_waker, 0, 3);
 		trace_offcpu_sched_wakeup(current, stacktxt_waker, p, delta, 0);
-		rcu_read_unlock();
 	}
 	latency_tracker_put_event(s);
 
 end:
+	rcu_read_unlock();
 	return;
 
 }
