@@ -54,9 +54,9 @@
  */
 #define DEFAULT_USEC_OFFCPU_TIMEOUT 0
 
-static pid_t current_pid[NR_CPUS];
-
 #define MAX_STACK_TXT 256
+
+static pid_t current_pid[NR_CPUS];
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -154,7 +154,7 @@ void offcpu_cb(unsigned long ptr)
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->tkey.key;
 	struct offcpu_tracker *offcpu_priv =
-		(struct offcpu_tracker *) latency_tracker_get_priv(data->tracker);
+		(struct offcpu_tracker *) latency_tracker_get_priv(tracker);
 	struct task_struct *p;
 	char stacktxt[MAX_STACK_TXT];
 	u64 delay;
@@ -233,15 +233,15 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
 	if (delta > (usec_threshold * 1000)) {
-		/* skip our own stack */
 		rcu_read_lock();
+		/* skip our own stack */
 		extract_stack(current, stacktxt_waker, 0, 3);
 		trace_offcpu_sched_wakeup(current, stacktxt_waker, p, delta, 0);
 		rcu_read_unlock();
 	}
+	latency_tracker_put_event(s);
 
 end:
-	latency_tracker_put_event(s);
 	return;
 
 }
