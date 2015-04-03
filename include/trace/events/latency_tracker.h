@@ -29,7 +29,7 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
-	offcpu_latency,
+	offcpu_sched_switch,
 	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
 		unsigned int flag, char stack[256]),
 	TP_ARGS(comm, pid, delay, flag, stack),
@@ -53,12 +53,12 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
-	offcpu_wakeup,
+	offcpu_sched_wakeup,
 	TP_PROTO(struct task_struct *waker, char waker_stack[256],
-		struct task_struct *wakee, char wakee_stack[256],
+		struct task_struct *wakee,
 		u64 wakee_offcpu_delay, unsigned int flag),
 	TP_ARGS(waker, waker_stack,
-		wakee, wakee_stack,
+		wakee,
 		wakee_offcpu_delay, flag),
 	TP_STRUCT__entry(
 		__field(int, waker_pid)
@@ -66,7 +66,6 @@ TRACE_EVENT(
 		__array(char, waker_stack, 256)
 		__field(int, wakee_pid)
 		__array(char, wakee_comm, TASK_COMM_LEN)
-		__array(char, wakee_stack, 256)
 		__field(u64, wakee_offcpu_delay)
 		__field(unsigned int, flag)
 		),
@@ -76,15 +75,14 @@ TRACE_EVENT(
 		memcpy(__entry->waker_stack, waker_stack, 256);
 		entry->wakee_pid = wakee->pid;
 		memcpy(__entry->wakee_comm, wakee->comm, TASK_COMM_LEN);
-		memcpy(__entry->wakee_stack, wakee_stack, 256);
 		entry->wakee_offcpu_delay = wakee_offcpu_delay;
 		entry->flag = flag;
 		),
 	TP_printk("waker_comm=%s (%d), waker_stack=%s, "
-			"wakee_comm=%s (%d), wakee_stack=%s, "
+			"wakee_comm=%s (%d), "
 			"wakee_offcpu_delay=%llu, flag=%u",
 		__entry->waker_comm, __entry->waker_pid, __entry->waker_stack,
-		__entry->wakee_comm, __entry->wakee_pid, __entry->wakee_stack,
+		__entry->wakee_comm, __entry->wakee_pid,
 		__entry->wakee_offcpu_delay, __entry->flag)
    );
 

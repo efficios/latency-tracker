@@ -144,7 +144,7 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int sk
 		if (MAX_STACK_TXT - j < 0)
 			return;
 	}
-	printk("%s\n%llu\n\n", p->comm, delay/1000);
+	//printk("%s\n%llu\n\n", p->comm, delay/1000);
 }
 
 static
@@ -174,11 +174,8 @@ void offcpu_cb(unsigned long ptr)
 	if (!p)
 		goto end;
 //	printk("offcpu: sched_switch %s (%d) %llu us\n", p->comm, key->pid, delay);
-	if (data->priv == (void *) 1)
-		memset(stacktxt, 0, MAX_STACK_TXT);
-	else
-		extract_stack(p, stacktxt, delay, 0);
-	trace_offcpu_latency(p->comm, key->pid, data->end_ts - data->start_ts,
+	extract_stack(p, stacktxt, delay, 0);
+	trace_offcpu_sched_switch(p->comm, key->pid, data->end_ts - data->start_ts,
 			data->cb_flag, stacktxt);
 	cnt++;
 	offcpu_handle_proc(offcpu_priv, data);
@@ -217,7 +214,6 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 {
 	struct schedkey key;
 	char stacktxt_waker[MAX_STACK_TXT];
-	char stacktxt_wakee[MAX_STACK_TXT];
 	struct latency_tracker_event *s;
 	u64 now, delta;
 	int i;
@@ -240,16 +236,8 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		/* skip our own stack */
 		rcu_read_lock();
 		extract_stack(current, stacktxt_waker, 0, 3);
-		extract_stack(p, stacktxt_wakee, delta, 0);
-		trace_offcpu_wakeup(current, stacktxt_waker,
-				p, stacktxt_wakee,
-				delta, 0);
+		trace_offcpu_sched_wakeup(current, stacktxt_waker, p, delta, 0);
 		rcu_read_unlock();
-		/*
-		 * Don't take the stack again when this process gets
-		 * scheduled out later.
-		 */
-		s->priv = (void *) 1;
 	}
 
 end:
@@ -270,7 +258,7 @@ int __init offcpu_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create(NULL, NULL, 200, 1000, 100000000, 0,
+	tracker = latency_tracker_create(NULL, NULL, 2000, 10000, 100000000, 0,
 			offcpu_priv);
 	if (!tracker)
 		goto error;
