@@ -41,6 +41,7 @@
 #include "offcpu.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
+#include "../wrapper/trace-clock.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -52,6 +53,8 @@
  * Timeout to execute the callback (microseconds).
  */
 #define DEFAULT_USEC_OFFCPU_TIMEOUT 0
+
+static pid_t current_pid[NR_CPUS];
 
 #define MAX_STACK_TXT 256
 
@@ -115,7 +118,7 @@ static const struct stacktrace_ops backtrace_ops = {
 };
 
 static
-void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay)
+void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int skip)
 {
 	struct stack_trace trace;
 	unsigned long entries[32];
@@ -123,7 +126,6 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay)
 	int i, j;
 	size_t frame_len;
 
-	//	printk("offcpu: %s (%d) %llu us\n", p->comm, key->pid, delay);
 	trace.nr_entries = 0;
 	trace.max_entries = ARRAY_SIZE(entries);
 	trace.entries = entries;
@@ -133,11 +135,14 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay)
 
 	j = 0;
 	for (i = 0; i < trace.nr_entries; i++) {
-		printk("%pS\n", (void *) trace.entries[i]);
-		snprintf(tmp, 48, "%pS ", (void *) trace.entries[i]);
+		if (i < skip)
+			continue;
+		snprintf(tmp, 48, "%pS\n", (void *) trace.entries[i]);
 		frame_len = strlen(tmp);
 		snprintf(stacktxt + j, MAX_STACK_TXT - j, tmp);
 		j += frame_len;
+		if (MAX_STACK_TXT - j < 0)
+			return;
 	}
 	printk("%s\n%llu\n\n", p->comm, delay/1000);
 }
@@ -149,7 +154,7 @@ void offcpu_cb(unsigned long ptr)
 		(struct latency_tracker_event *) ptr;
 	struct schedkey *key = (struct schedkey *) data->tkey.key;
 	struct offcpu_tracker *offcpu_priv =
-		(struct offcpu_tracker *) data->priv;
+		(struct offcpu_tracker *) latency_tracker_get_priv(data->tracker);
 	struct task_struct *p;
 	char stacktxt[MAX_STACK_TXT];
 	u64 delay;
@@ -168,7 +173,11 @@ void offcpu_cb(unsigned long ptr)
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
 	if (!p)
 		goto end;
-	extract_stack(p, stacktxt, delay);
+//	printk("offcpu: sched_switch %s (%d) %llu us\n", p->comm, key->pid, delay);
+	if (data->priv == (void *) 1)
+		memset(stacktxt, 0, MAX_STACK_TXT);
+	else
+		extract_stack(p, stacktxt, delay, 0);
 	trace_offcpu_latency(p->comm, key->pid, data->end_ts - data->start_ts,
 			data->cb_flag, stacktxt);
 	cnt++;
@@ -188,22 +197,65 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 
 	if (!next || !prev)
 		return;
+	current_pid[prev->on_cpu] = next->pid;
 
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-	if (!(prev->flags & PF_KTHREAD)) {
-		key.pid = prev->pid;
-		ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-				thresh, offcpu_cb, timeout, 1,
-				latency_tracker_get_priv(tracker));
+	key.pid = prev->pid;
+	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
+			thresh, offcpu_cb, timeout, 1,
+			latency_tracker_get_priv(tracker));
+
+	key.pid = next->pid;
+	latency_tracker_event_out(tracker, &key, sizeof(key),
+			SCHED_EXIT_NORMAL);
+}
+
+static
+void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
+{
+	struct schedkey key;
+	char stacktxt_waker[MAX_STACK_TXT];
+	char stacktxt_wakee[MAX_STACK_TXT];
+	struct latency_tracker_event *s;
+	u64 now, delta;
+	int i;
+
+	/*
+	 * Make sure we are not waking up a process already running on
+	 * another CPU.
+	 */
+	for (i = 0; i < NR_CPUS; i++)
+		if (current_pid[i] == p->pid)
+			return;
+
+	key.pid = p->pid;
+	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	if (!s)
+		goto end;
+	now = trace_clock_read64();
+	delta = now - s->start_ts;
+	if (delta > (usec_threshold * 1000)) {
+		/* skip our own stack */
+		rcu_read_lock();
+		extract_stack(current, stacktxt_waker, 0, 3);
+		extract_stack(p, stacktxt_wakee, delta, 0);
+		trace_offcpu_wakeup(current, stacktxt_waker,
+				p, stacktxt_wakee,
+				delta, 0);
+		rcu_read_unlock();
+		/*
+		 * Don't take the stack again when this process gets
+		 * scheduled out later.
+		 */
+		s->priv = (void *) 1;
 	}
 
-	if (!(next->flags & PF_KTHREAD)) {
-		key.pid = next->pid;
-		latency_tracker_event_out(tracker, &key, sizeof(key),
-				SCHED_EXIT_NORMAL);
-	}
+end:
+	latency_tracker_put_event(s);
+	return;
+
 }
 
 static
@@ -227,6 +279,10 @@ int __init offcpu_init(void)
 			probe_sched_switch, NULL);
 	WARN_ON(ret);
 
+	ret = lttng_wrapper_tracepoint_probe_register("sched_wakeup",
+			probe_sched_wakeup, NULL);
+	WARN_ON(ret);
+
 	ret = offcpu_setup_priv(offcpu_priv);
 	goto end;
 
@@ -245,6 +301,8 @@ void __exit offcpu_exit(void)
 
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("sched_wakeup",
+			probe_sched_wakeup, NULL);
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
 	offcpu_priv = latency_tracker_get_priv(tracker);
