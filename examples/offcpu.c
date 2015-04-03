@@ -204,24 +204,24 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-#ifdef URCUHT
+#if defined(URCUHT) || defined(RHASHTABLE)
 	if (!(prev->flags & PF_KTHREAD)) {
 #endif
 		key.pid = prev->pid;
 		ret = latency_tracker_event_in(tracker, &key, sizeof(key),
 				thresh, offcpu_cb, timeout, 1,
 				latency_tracker_get_priv(tracker));
-#ifdef URCUHT
+#if defined(URCUHT) || defined(RHASHTABLE)
 	}
 #endif
 
-#ifdef URCUHT
+#if defined(URCUHT) || defined(RHASHTABLE)
 	if (!(next->flags & PF_KTHREAD)) {
 #endif
 		key.pid = next->pid;
 		latency_tracker_event_out(tracker, &key, sizeof(key),
 				SCHED_EXIT_NORMAL);
-#ifdef URCUHT
+#if defined(URCUHT) || defined(RHASHTABLE)
 	}
 #endif
 end:
