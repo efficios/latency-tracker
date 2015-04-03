@@ -29,6 +29,8 @@
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
 #if !defined(BASEHT)
+#undef URCUHT
+#undef RHASHTABLE
 #define BASEHT
 #endif /* !defined(BASEHT) */
 #endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
