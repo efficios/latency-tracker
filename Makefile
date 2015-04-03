@@ -13,7 +13,7 @@ obj-m := latency_tracker.o
 latency_tracker_wakeup-objs := examples/wakeup_latency.o examples/wakeup_proc.o
 obj-m += latency_tracker_wakeup.o
 
-latency_tracker_offcpu-objs := examples/offcpu.o examples/offcpu_proc.o
+latency_tracker_offcpu-objs := examples/offcpu.o examples/offcpu_proc.o wrapper/trace-clock.o
 obj-m += latency_tracker_offcpu.o
 
 latency_tracker_syscalls-objs := examples/syscalls.o examples/syscalls_proc.o wrapper/trace-clock.o
