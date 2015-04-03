@@ -27,6 +27,13 @@
 #include "../latency_tracker.h"
 #include "../tracker_private.h"
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
+#ifdef LLFREELIST
+#warning lock-less linked-list not supported before 3.17, switching to default linked list
+#undef LLFREELIST
+#endif
+#endif
+
 #ifdef LLFREELIST
 #include "freelist-ll.h"
 #else /* LLFREELIST */
