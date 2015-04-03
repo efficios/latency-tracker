@@ -28,9 +28,11 @@
 #include "../tracker_private.h"
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
-#undef URCUHT
+#ifdef RHASHTABLE
+#warning rhashtable not supported before 3.17, switching to BASEHT
 #undef RHASHTABLE
 #define BASEHT
+#endif
 #endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
 
 #ifdef BASEHT
