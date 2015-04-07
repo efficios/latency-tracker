@@ -8,7 +8,7 @@ destroy()
 	exit 0
 }
 
-trap "destroy" SIGINT SIGTERM
+trap "destroy" SIGINT SIGTERM SIGPIPE SIGHUP
 
 echo 1  >/sys/kernel/debug/tracing/events/latency_tracker/syscall_latency_stack/enable
 echo 1  >/sys/kernel/debug/tracing/events/latency_tracker/syscall_latency/enable 

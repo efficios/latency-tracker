@@ -8,7 +8,7 @@ destroy()
 	exit 0
 }
 
-trap "destroy" SIGINT SIGTERM
+trap "destroy" SIGINT SIGTERM SIGPIPE SIGHUP
 
 echo 1  >/sys/kernel/debug/tracing/events/latency_tracker/offcpu_sched_switch/enable
 echo 1  >/sys/kernel/debug/tracing/events/latency_tracker/offcpu_sched_wakeup/enable
