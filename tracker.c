@@ -101,9 +101,10 @@ void discard_event(struct latency_tracker *tracker,
 	if (was_empty)
 		queue_delayed_work(tracker->tracker_call_rcu_q,
 				&tracker->tracker_call_rcu_w, 100);
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0) */
+#else
 	call_rcu_sched(&s->urcuhead,
 			deferred_latency_tracker_put_event);
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0) */
 #endif
 }
 
