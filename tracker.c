@@ -433,7 +433,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		wrapper_ht_unique_check(tracker, &s->tkey);
 	old_s = wrapper_ht_add(tracker, s);
 	if (old_s) {
-		discard_event(tracker, old_s);
+		kref_put(&old_s->refcount, __latency_tracker_event_destroy);
 	}
 #if !defined(LLFREELIST) && !defined(URCUHT)
 	spin_unlock_irqrestore(&tracker->lock, flags);

@@ -153,7 +153,7 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 {
 	struct latency_tracker_event *s;
 	u32 k;
-	int found = 0;
+	int found = 0, ret;
 	struct cds_lfht_iter iter;
 
 	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
@@ -168,8 +168,9 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 			if (s->cb)
 				s->cb((unsigned long) s);
 		}
-		wrapper_ht_del(tracker, s);
-		kref_put(&s->refcount, __latency_tracker_event_destroy);
+		ret = wrapper_ht_del(tracker, s);
+		if (!ret)
+			kref_put(&s->refcount, __latency_tracker_event_destroy);
 		found = 1;
 	}
 	rcu_read_unlock_sched_notrace();
