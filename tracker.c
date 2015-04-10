@@ -90,10 +90,44 @@ void discard_event(struct latency_tracker *tracker,
 #if defined(BASEHT) && !defined(LLFREELIST)
 	__wrapper_freelist_put_event(tracker, s);
 #else
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
+	/*
+	 * Our own call_rcu because the mainline one causes sched_wakeups
+	 * that we might want to instrument causing deadlocks.
+	 */
+	int was_empty;
+
+	was_empty = llist_add(&s->llist, &tracker->to_release);
+	if (was_empty)
+		queue_delayed_work(tracker->tracker_call_rcu_q,
+				&tracker->tracker_call_rcu_w, 100);
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0) */
 	call_rcu_sched(&s->urcuhead,
 			deferred_latency_tracker_put_event);
 #endif
 }
+
+#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
+static
+void tracker_call_rcu_workqueue(struct work_struct *work)
+{
+       struct latency_tracker *tracker;
+       struct llist_node *list;
+       struct latency_tracker_event *e, *n;
+
+       tracker = container_of(work, struct latency_tracker,
+		       tracker_call_rcu_w.work);
+
+       if (!tracker)
+	       return;
+
+       list = llist_del_all(&tracker->to_release);
+       synchronize_sched();
+       llist_for_each_entry_safe(e, n, list, llist)
+	       wrapper_freelist_put_event(tracker, e);
+}
+#endif
+
 
 /*
  * Must be called with proper locking.
@@ -276,6 +310,10 @@ struct latency_tracker *latency_tracker_create(
 		tracker->resize_q = create_singlethread_workqueue("latency_tracker");
 		INIT_WORK(&tracker->resize_w, latency_tracker_workqueue);
 	}
+#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
+	tracker->tracker_call_rcu_q = create_workqueue("tracker_rcu");
+	INIT_DELAYED_WORK(&tracker->tracker_call_rcu_w, tracker_call_rcu_workqueue);
+#endif
 
 	ret = wrapper_freelist_init(tracker, max_events);
 	if (ret < 0)
@@ -323,6 +361,12 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 		destroy_workqueue(tracker->resize_q);
 	}
 	del_timer_sync(&tracker->timer);
+
+#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
+	cancel_delayed_work(&tracker->tracker_call_rcu_w);
+	flush_workqueue(tracker->tracker_call_rcu_q);
+	destroy_workqueue(tracker->tracker_call_rcu_q);
+#endif
 
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);

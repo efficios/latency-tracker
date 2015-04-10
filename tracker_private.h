@@ -38,6 +38,11 @@ struct latency_tracker {
         struct timer_list timer;
 	struct workqueue_struct *resize_q;
 	struct work_struct resize_w;
+#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
+	struct llist_head to_release;
+	struct workqueue_struct *tracker_call_rcu_q;
+	struct delayed_work tracker_call_rcu_w;
+#endif
 	/* For timeout on events (on timer_period) */
 	struct cds_wfcq_head timeout_head;
 	struct cds_wfcq_tail timeout_tail;
