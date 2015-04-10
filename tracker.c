@@ -287,12 +287,16 @@ struct latency_tracker *latency_tracker_create(
 		printk("latency_tracker: Alloc tracker failed\n");
 		goto error;
 	}
-	if (!hash_fct) {
+	if (!hash_fct)
 		tracker->hash_fct = jhash;
-	}
-	if (!match_fct) {
+	else
+		tracker->hash_fct = hash_fct;
+
+	if (!match_fct)
 		tracker->match_fct = memcmp;
-	}
+	else
+		tracker->match_fct = match_fct;
+
 	if (!max_events)
 		max_events = DEFAULT_MAX_ALLOC_EVENTS;
 	tracker->timer_period = timer_period;
