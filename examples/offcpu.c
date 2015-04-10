@@ -45,10 +45,6 @@
 
 #include <trace/events/latency_tracker.h>
 
-#ifdef URCUHT
-#warning Compiled with URCUHT, so kernel thread will not be monitored due to a deadlock with call_rcu
-#endif
-
 /*
  * Threshold to execute the callback (microseconds).
  */
@@ -76,6 +72,7 @@ MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
 struct schedkey {
 	pid_t pid;
+	unsigned int cpu;
 } __attribute__((__packed__));
 
 enum sched_exitcode {
@@ -189,18 +186,6 @@ end:
 }
 
 static
-int skip_thread(struct task_struct *p)
-{
-#if defined(URCUHT) || defined(RHASHTABLE)
-	if (p->flags & PF_KTHREAD)
-		return 1;
-	if (p->flags & PF_WQ_WORKER)
-		return 1;
-#endif
-	return 0;
-}
-
-static
 void probe_sched_switch(void *ignore, struct task_struct *prev,
 		struct task_struct *next)
 {
@@ -216,18 +201,16 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-	if (!skip_thread(prev)) {
-		key.pid = prev->pid;
-		ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-				thresh, offcpu_cb, timeout, 1,
-				latency_tracker_get_priv(tracker));
-	}
+	key.pid = prev->pid;
+	key.cpu = smp_processor_id();
+	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
+			thresh, offcpu_cb, timeout, 1,
+			latency_tracker_get_priv(tracker));
 
-	if (!skip_thread(next)) {
-		key.pid = next->pid;
-		latency_tracker_event_out(tracker, &key, sizeof(key),
-				SCHED_EXIT_NORMAL);
-	}
+	key.pid = next->pid;
+	key.cpu = smp_processor_id();
+	latency_tracker_event_out(tracker, &key, sizeof(key),
+			SCHED_EXIT_NORMAL);
 end:
 	rcu_read_unlock();
 }
@@ -251,13 +234,14 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 
 	rcu_read_lock();
 	key.pid = p->pid;
+	key.cpu = smp_processor_id();
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
 		goto end;
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
 	if (delta > (usec_threshold * 1000)) {
-		/* skip our own stack */
+		/* skip our own stack (3 levels) */
 		extract_stack(current, stacktxt_waker, 0, 3);
 		trace_offcpu_sched_wakeup(current, stacktxt_waker, p, delta, 0);
 	}
@@ -266,7 +250,27 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 end:
 	rcu_read_unlock();
 	return;
+}
 
+static
+int match_fct(const void *key1, const void *key2, size_t length)
+{
+	struct schedkey *k1, *k2;
+
+	k1 = (struct schedkey *) key1;
+	k2 = (struct schedkey *) key2;
+
+	/*
+	 * There is one PID 0 per cpu, so we have to make sure when
+	 * dealing with PID 0 that it is for the same CPU.
+	 */
+	if (k1->pid == 0 && k2->pid == 0) {
+		if (k1->cpu == k2->cpu)
+			return 0;
+	} else if (k1->pid == k2->pid) {
+		return 0;
+	}
+	return 1;
 }
 
 static
@@ -281,10 +285,13 @@ int __init offcpu_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create(NULL, NULL, 2000, 10000, 100000000, 0,
+	tracker = latency_tracker_create(match_fct, NULL, 2000, 10000, 100000000, 0,
 			offcpu_priv);
 	if (!tracker)
 		goto error;
+
+	ret = offcpu_setup_priv(offcpu_priv);
+	WARN_ON(ret);
 
 	ret = lttng_wrapper_tracepoint_probe_register("sched_switch",
 			probe_sched_switch, NULL);
@@ -294,7 +301,6 @@ int __init offcpu_init(void)
 			probe_sched_wakeup, NULL);
 	WARN_ON(ret);
 
-	ret = offcpu_setup_priv(offcpu_priv);
 	goto end;
 
 error:
