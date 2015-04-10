@@ -29,9 +29,7 @@
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
 #ifdef RHASHTABLE
-#warning rhashtable not supported before 3.17, switching to BASEHT
-#undef RHASHTABLE
-#define BASEHT
+#error rhashtable not supported before 3.17
 #endif
 #endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
 
