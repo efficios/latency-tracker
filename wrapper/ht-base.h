@@ -190,7 +190,6 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 			s->cb((unsigned long) s);
 		wrapper_ht_del(tracker, s);
 		kref_put(&s->refcount, __latency_tracker_event_destroy);
-		break;
 	}
 #if defined(LLFREELIST)
 	spin_unlock_irqrestore(&tracker->lock, flags);

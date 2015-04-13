@@ -34,6 +34,7 @@
 #include <linux/moduleparam.h>
 #include <linux/file.h>
 #include <linux/dcache.h>
+#include <linux/jhash.h>
 #include <linux/fs.h>
 #include <linux/sched.h>
 #include <linux/stacktrace.h>
@@ -253,6 +254,14 @@ end:
 }
 
 static
+u32 hash_fct(const void *key, u32 length, u32 initval)
+{
+	struct schedkey *k = (struct schedkey *) key;
+
+	return jhash((void *) &(k->pid), sizeof(k->pid), 0);
+}
+
+static
 int match_fct(const void *key1, const void *key2, size_t length)
 {
 	struct schedkey *k1, *k2;
@@ -285,7 +294,7 @@ int __init offcpu_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create(match_fct, NULL, 2000, 10000, 100000000, 0,
+	tracker = latency_tracker_create(match_fct, hash_fct, 2000, 10000, 100000000, 0,
 			offcpu_priv);
 	if (!tracker)
 		goto error;
