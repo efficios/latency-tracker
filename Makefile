@@ -1,4 +1,4 @@
-ccflags-y += -I$(PWD)/include $(EXTCFLAGS)
+ccflags-y += -I$(src)/include $(EXTCFLAGS)
 
 latency_tracker-objs := tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o
 
