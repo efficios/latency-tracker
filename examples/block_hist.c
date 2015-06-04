@@ -32,6 +32,7 @@
 #include "block_hist.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
+#include "../wrapper/trace-clock.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -45,6 +46,12 @@
  */
 #define DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD 0
 #define DEFAULT_USEC_BLK_LATENCY_GC_PERIOD 0
+
+#define LATENCY_BUCKETS 20
+#define LATENCY_AGGREGATE 60 /* seconds */
+
+static int requests[100];
+static int nb_rq = 0;
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -96,10 +103,11 @@ static const struct file_operations block_tracker_fops;
 static
 void blk_cb(unsigned long ptr)
 {
+#if 0
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
 	struct blkkey *key = (struct blkkey *) data->tkey.key;
-	struct block_tracker *block_priv =
+	struct block_tracker *block_hist_priv =
 		(struct block_tracker *) data->priv;
 
 	/*
@@ -112,8 +120,8 @@ void blk_cb(unsigned long ptr)
 	/*
 	 * Rate limiter.
 	 */
-	if ((data->end_ts - block_priv->last_alert_ts) <
-			block_priv->ns_rate_limit)
+	if ((data->end_ts - block_hist_priv->last_alert_ts) <
+			block_hist_priv->ns_rate_limit)
 		goto end_ts;
 
 	printk("BLOCK\n");
@@ -121,16 +129,17 @@ void blk_cb(unsigned long ptr)
 			data->end_ts - data->start_ts);
 	cnt++;
 
-	if (block_priv->readers > 0) {
-		block_priv->reason = BLOCK_TRACKER_WAKE_DATA;
-		wake_up_interruptible(&block_priv->read_wait);
-		block_priv->got_alert = true;
+	if (block_hist_priv->readers > 0) {
+		block_hist_priv->reason = BLOCK_TRACKER_WAKE_DATA;
+		wake_up_interruptible(&block_hist_priv->read_wait);
+		block_hist_priv->got_alert = true;
 	}
 
 end_ts:
-	block_priv->last_alert_ts = data->end_ts;
+	block_hist_priv->last_alert_ts = data->end_ts;
 end:
 	return;
+#endif
 }
 
 static
@@ -178,24 +187,43 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		struct request *rq, unsigned int nr_bytes)
 {
 	struct blkkey key;
+	struct latency_tracker_event *s;
+	u64 now;
 
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
 
 	rq_to_key(&key, rq);
+	if (nb_rq >= 100)
+		goto end;
+
+	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	if (!s)
+		goto end;
+	now = trace_clock_read64();
+	requests[nb_rq++] = s->start_ts - now;
+	if (nb_rq == 100) {
+		int i;
+		for (i = 0; i < 100; i++)
+			printk("%d, ", requests[i]);
+	}
+
+end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+	return;
 }
 
+#if 0
 static
 unsigned int tracker_proc_poll(struct file *filp,
 		poll_table *wait)
 {
-	struct block_tracker *block_priv = filp->private_data;
+	struct block_tracker *block_hist_priv = filp->private_data;
 	unsigned int mask = 0;
 
 	if (filp->f_mode & FMODE_READ) {
-		poll_wait(filp, &block_priv->read_wait, wait);
-		if (block_priv->reason == BLOCK_TRACKER_WAKE_DATA)
+		poll_wait(filp, &block_hist_priv->read_wait, wait);
+		if (block_hist_priv->reason == BLOCK_TRACKER_WAKE_DATA)
 			mask |= POLLIN;
 		else
 			mask |= POLLHUP;
@@ -208,12 +236,12 @@ static
 ssize_t tracker_proc_read(struct file *filp, char __user *buf, size_t n,
 		loff_t *offset)
 {
-	struct block_tracker *block_priv = filp->private_data;
+	struct block_tracker *block_hist_priv = filp->private_data;
 
-	wait_event_interruptible(block_priv->read_wait,
-			block_priv->got_alert);
-	block_priv->reason = BLOCK_TRACKER_WAIT;
-	block_priv->got_alert = false;
+	wait_event_interruptible(block_hist_priv->read_wait,
+			block_hist_priv->got_alert);
+	block_hist_priv->reason = BLOCK_TRACKER_WAIT;
+	block_hist_priv->got_alert = false;
 
 	return 0;
 }
@@ -221,13 +249,13 @@ ssize_t tracker_proc_read(struct file *filp, char __user *buf, size_t n,
 static
 int tracker_proc_open(struct inode *inode, struct file *filp)
 {
-	struct block_tracker *block_priv = PDE_DATA(inode);
+	struct block_tracker *block_hist_priv = PDE_DATA(inode);
 	int ret;
 
-	init_waitqueue_head(&block_priv->read_wait);
-	block_priv->got_alert = false;
-	block_priv->readers++;
-	filp->private_data = block_priv;
+	init_waitqueue_head(&block_hist_priv->read_wait);
+	block_hist_priv->got_alert = false;
+	block_hist_priv->readers++;
+	filp->private_data = block_hist_priv;
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
 		return -1;
@@ -238,9 +266,9 @@ int tracker_proc_open(struct inode *inode, struct file *filp)
 static
 int tracker_proc_release(struct inode *inode, struct file *filp)
 {
-	struct block_tracker *block_priv = filp->private_data;
+	struct block_tracker *block_hist_priv = filp->private_data;
 
-	block_priv->readers--;
+	block_hist_priv->readers--;
 	module_put(THIS_MODULE);
 	return 0;
 }
@@ -254,26 +282,27 @@ struct file_operations block_tracker_fops = {
 	.release = tracker_proc_release,
 	.poll = tracker_proc_poll,
 };
+#endif
 
 static
 int __init block_latency_tp_init(void)
 {
 	int ret;
-	struct block_tracker *block_priv;
+	struct block_tracker *block_hist_priv;
 
-	block_priv = kzalloc(sizeof(struct block_tracker), GFP_KERNEL);
-	if (!block_priv) {
+	block_hist_priv = kzalloc(sizeof(struct block_tracker), GFP_KERNEL);
+	if (!block_hist_priv) {
 		ret = -ENOMEM;
 		goto end;
 	}
-	block_priv->reason = BLOCK_TRACKER_WAIT;
+	block_hist_priv->reason = BLOCK_TRACKER_WAIT;
 	/* limit to 1 evt/sec */
-	block_priv->ns_rate_limit = 1000000000;
+	block_hist_priv->ns_rate_limit = 1000000000;
 
 	tracker = latency_tracker_create(NULL, NULL, 100, 0,
 			usec_gc_threshold * 1000,
 			usec_gc_period * 1000,
-			block_priv);
+			block_hist_priv);
 	if (!tracker)
 		goto error;
 
@@ -285,15 +314,16 @@ int __init block_latency_tp_init(void)
 			probe_block_rq_complete, NULL);
 	WARN_ON(ret);
 
+	/*
 	block_tracker_proc_dentry = proc_create_data("block_tracker",
-			S_IRUSR, NULL, &block_tracker_fops, block_priv);
+			S_IRUSR, NULL, &block_tracker_fops, block_hist_priv);
 
 	if (!block_tracker_proc_dentry) {
 		printk(KERN_ERR "Error creating tracker control file\n");
 		ret = -ENOMEM;
 		goto end;
 	}
-
+*/
 
 	ret = 0;
 	goto end;
@@ -308,7 +338,7 @@ module_init(block_latency_tp_init);
 static
 void __exit block_latency_tp_exit(void)
 {
-	struct block_tracker *block_priv;
+	struct block_tracker *block_hist_priv;
 
 	lttng_wrapper_tracepoint_probe_unregister("block_rq_issue",
 			probe_block_rq_issue, NULL);
@@ -316,15 +346,17 @@ void __exit block_latency_tp_exit(void)
 			probe_block_rq_complete, NULL);
 	tracepoint_synchronize_unregister();
 
-	block_priv = latency_tracker_get_priv(tracker);
-	kfree(block_priv);
+	block_hist_priv = latency_tracker_get_priv(tracker);
+	kfree(block_hist_priv);
 
 	latency_tracker_destroy(tracker);
 
 	printk("Total block alerts : %d\n", cnt);
 	printk("Total block requests : %d\n", rq_cnt);
+	/*
 	if (block_tracker_proc_dentry)
 		remove_proc_entry("block_tracker", NULL);
+		*/
 }
 module_exit(block_latency_tp_exit);
 
