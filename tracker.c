@@ -376,7 +376,8 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
 
-	latency_tracker_handle_timeouts(tracker, 1);
+	if (tracker->timer_period)
+		latency_tracker_handle_timeouts(tracker, 1);
 	/*
 	 * Wait for all call_rcu_sched issued within wrapper_ht_clear to have
 	 * completed.
