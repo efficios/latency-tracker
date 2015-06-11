@@ -48,7 +48,7 @@
 #define DEFAULT_USEC_BLK_LATENCY_GC_PERIOD 0
 
 #define LATENCY_BUCKETS 20
-#define LATENCY_AGGREGATE 60 /* seconds */
+#define LATENCY_AGGREGATE 100
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -85,7 +85,9 @@ struct iohist {
 	uint64_t min;
 	uint64_t max;
 	uint64_t steps; /* (max - min)/LATENCY_BUCKETS */
-	uint64_t values[LATENCY_BUCKETS];
+	uint64_t rvalues[LATENCY_BUCKETS];
+	uint64_t wvalues[LATENCY_BUCKETS];
+	uint64_t raw_values[LATENCY_AGGREGATE];
 	int nb_values;
         spinlock_t lock;
 } current_hist;
@@ -208,23 +210,31 @@ int get_bucket(uint64_t v)
 }
 
 static
-void probe_block_rq_complete(void *ignore, struct request_queue *q,
-		struct request *rq, unsigned int nr_bytes)
+void output_hist(void)
 {
-	struct blkkey key;
-	struct latency_tracker_event *s;
+	int i;
+
+	printk("Latency histogram [%llu - %llu] usec:\n", current_hist.min / 1000,
+			current_hist.max / 1000);
+	for(i = 0; i < LATENCY_BUCKETS; i++) {
+		printk("\t[%llu\t%llu]\t",
+				((i * current_hist.steps) + current_hist.min) / 1000,
+				(((i + 1) * current_hist.steps) + current_hist.min - 1) / 1000);
+		printk("%llu read\t%llu write\n", current_hist.rvalues[i],
+				current_hist.wvalues[i]);
+		current_hist.rvalues[i] = 0;
+		current_hist.wvalues[i] = 0;
+	}
+	printk("\n");
+}
+
+static
+void update_hist(struct latency_tracker_event *s, struct request *rq)
+{
 	unsigned long flags;
 	u64 now, delta;
-	int i, bucket;
+	int bucket, i;
 
-	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
-		return;
-
-	rq_to_key(&key, rq);
-
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
-	if (!s)
-		goto end;
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
 
@@ -238,26 +248,43 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		update_step();
 	}
 	bucket = get_bucket(delta);
-	current_hist.values[bucket]++;
+	if (rq->cmd_flags % 2 == 0)
+		current_hist.rvalues[bucket]++;
+	else
+		current_hist.wvalues[bucket]++;
+	current_hist.raw_values[current_hist.nb_values] = delta;
+
 	current_hist.nb_values++;
-//	printk("la %d (bucket : %d)\n", current_hist.nb_values, bucket);
-	if (current_hist.nb_values >= 100) {
-		printk("Latency histogram [%llu - %llu] usec:\n", current_hist.min / 1000,
-				current_hist.max / 1000);
-		for(i = 0; i < LATENCY_BUCKETS; i++) {
-			printk("\t[%llu\t%llu]\t%llu\n",
-					((i * current_hist.steps) + current_hist.min) / 1000,
-					(((i + 1) * current_hist.steps) + current_hist.min - 1) / 1000,
-					current_hist.values[i]);
-			current_hist.values[i] = 0;
-		}
-		printk("\n");
+	if (current_hist.nb_values >= LATENCY_AGGREGATE) {
+		output_hist();
+//		for(i = 0; i < current_hist.nb_values; i++) {
+//			bucket = get_bucket(current_hist.raw_values[i]);
+//			current_hist.rvalues[bucket]++;
+//		}
+//		printk("real values:\n");
+//		output_hist();
+//		printk("real values end\n");
 		current_hist.nb_values = 0;
-//		current_hist.min = current_hist.min +
-//			((current_hist.max - current_hist.min) / 2);
-//		current_hist.max = current_hist.min;
 	}
 	spin_unlock_irqrestore(&current_hist.lock, flags);
+}
+
+static
+void probe_block_rq_complete(void *ignore, struct request_queue *q,
+		struct request *rq, unsigned int nr_bytes)
+{
+	struct blkkey key;
+	struct latency_tracker_event *s;
+
+	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+		return;
+
+	rq_to_key(&key, rq);
+
+	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	if (!s)
+		goto end;
+	update_hist(s, rq);
 	latency_tracker_put_event(s);
 
 end:
