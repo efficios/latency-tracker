@@ -204,7 +204,7 @@ int get_bucket(uint64_t v)
 		if (i * current_hist.steps > v)
 			return i - 1;
 	}
-	return i;
+	return i - 1;
 }
 
 static
@@ -215,7 +215,7 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 	struct latency_tracker_event *s;
 	unsigned long flags;
 	u64 now, delta;
-	int i;
+	int i, bucket;
 
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
@@ -237,9 +237,11 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		current_hist.max = delta;
 		update_step();
 	}
-	current_hist.values[get_bucket(delta)]++;
-	printk("la %d\n", current_hist.nb_values);
-	if (current_hist.nb_values++ > 10) {
+	bucket = get_bucket(delta);
+	current_hist.values[bucket]++;
+	current_hist.nb_values++;
+//	printk("la %d (bucket : %d)\n", current_hist.nb_values, bucket);
+	if (current_hist.nb_values >= 100) {
 		printk("Latency histogram [%llu - %llu] usec:\n", current_hist.min / 1000,
 				current_hist.max / 1000);
 		for(i = 0; i < LATENCY_BUCKETS; i++) {
@@ -251,11 +253,12 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		}
 		printk("\n");
 		current_hist.nb_values = 0;
-		current_hist.min = current_hist.min +
-			((current_hist.max - current_hist.min) / 2);
-		current_hist.max = current_hist.min;
+//		current_hist.min = current_hist.min +
+//			((current_hist.max - current_hist.min) / 2);
+//		current_hist.max = current_hist.min;
 	}
 	spin_unlock_irqrestore(&current_hist.lock, flags);
+	latency_tracker_put_event(s);
 
 end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
@@ -348,7 +351,7 @@ int __init block_hist_latency_tp_init(void)
 	/* limit to 1 evt/sec */
 	block_hist_priv->ns_rate_limit = 1000000000;
 
-	tracker = latency_tracker_create(NULL, NULL, 10000, 0,
+	tracker = latency_tracker_create(NULL, NULL, 100, 0,
 			usec_gc_period * 1000,
 			usec_gc_period * 1000,
 			block_hist_priv);
