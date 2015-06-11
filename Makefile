@@ -1,4 +1,4 @@
-ccflags-y += -I$(src)/include $(EXTCFLAGS)
+ccflags-y += -I$(src)/include $(EXTCFLAGS) -g
 
 latency_tracker-objs := tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o
 
@@ -22,7 +22,7 @@ obj-m += latency_tracker_syscalls.o
 latency_tracker_block-objs := examples/block_latency_tp.o
 obj-m += latency_tracker_block.o
 
-latency_tracker_block_hist-objs := examples/block_hist.o
+latency_tracker_block_hist-objs := examples/block_hist.o wrapper/trace-clock.o
 obj-m += latency_tracker_block_hist.o
 
 latency_tracker_network_stack-objs := examples/network_stack_latency.o

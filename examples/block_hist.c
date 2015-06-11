@@ -50,9 +50,6 @@
 #define LATENCY_BUCKETS 20
 #define LATENCY_AGGREGATE 60 /* seconds */
 
-static int requests[100];
-static int nb_rq = 0;
-
 /*
  * microseconds because we can't guarantee the passing of 64-bit
  * arguments to insmod on all architectures.
@@ -84,7 +81,16 @@ enum wake_reason {
 	BLOCK_TRACKER_HUP = 2,
 };
 
-struct block_tracker {
+struct iohist {
+	uint64_t min;
+	uint64_t max;
+	uint64_t steps; /* (max - min)/LATENCY_BUCKETS */
+	uint64_t values[LATENCY_BUCKETS];
+	int nb_values;
+        spinlock_t lock;
+} current_hist;
+
+struct block_hist_tracker {
 	u64 last_alert_ts;
 	u64 ns_rate_limit;
 	wait_queue_head_t read_wait;
@@ -97,8 +103,8 @@ static struct latency_tracker *tracker;
 static int cnt = 0;
 static int rq_cnt = 0;
 
-static struct proc_dir_entry *block_tracker_proc_dentry;
-static const struct file_operations block_tracker_fops;
+static struct proc_dir_entry *block_hist_tracker_proc_dentry;
+static const struct file_operations block_hist_tracker_fops;
 
 static
 void blk_cb(unsigned long ptr)
@@ -107,8 +113,8 @@ void blk_cb(unsigned long ptr)
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
 	struct blkkey *key = (struct blkkey *) data->tkey.key;
-	struct block_tracker *block_hist_priv =
-		(struct block_tracker *) data->priv;
+	struct block_hist_tracker *block_hist_priv =
+		(struct block_hist_tracker *) data->priv;
 
 	/*
 	 * Don't log garbage collector and unique cleanups.
@@ -125,7 +131,7 @@ void blk_cb(unsigned long ptr)
 		goto end_ts;
 
 	printk("BLOCK\n");
-	trace_block_latency(key->dev, key->sector,
+	trace_block_hist_latency(key->dev, key->sector,
 			data->end_ts - data->start_ts);
 	cnt++;
 
@@ -183,30 +189,73 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 }
 
 static
+void update_step(void)
+{
+	current_hist.steps = (current_hist.max - current_hist.min) / LATENCY_BUCKETS;
+}
+
+static
+int get_bucket(uint64_t v)
+{
+	/* TODO : binary search */
+	int i;
+
+	for(i = 0; i < LATENCY_BUCKETS; i++) {
+		if (i * current_hist.steps > v)
+			return i - 1;
+	}
+	return i;
+}
+
+static
 void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		struct request *rq, unsigned int nr_bytes)
 {
 	struct blkkey key;
 	struct latency_tracker_event *s;
-	u64 now;
+	unsigned long flags;
+	u64 now, delta;
+	int i;
 
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
 
 	rq_to_key(&key, rq);
-	if (nb_rq >= 100)
-		goto end;
 
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
 		goto end;
 	now = trace_clock_read64();
-	requests[nb_rq++] = s->start_ts - now;
-	if (nb_rq == 100) {
-		int i;
-		for (i = 0; i < 100; i++)
-			printk("%d, ", requests[i]);
+	delta = now - s->start_ts;
+
+	spin_lock_irqsave(&current_hist.lock, flags);
+	if (delta < current_hist.min) {
+		current_hist.min = delta;
+		update_step();
 	}
+	if (delta > current_hist.max) {
+		current_hist.max = delta;
+		update_step();
+	}
+	current_hist.values[get_bucket(delta)]++;
+	printk("la %d\n", current_hist.nb_values);
+	if (current_hist.nb_values++ > 10) {
+		printk("Latency histogram [%llu - %llu] usec:\n", current_hist.min / 1000,
+				current_hist.max / 1000);
+		for(i = 0; i < LATENCY_BUCKETS; i++) {
+			printk("\t[%llu\t%llu]\t%llu\n",
+					((i * current_hist.steps) + current_hist.min) / 1000,
+					(((i + 1) * current_hist.steps) + current_hist.min - 1) / 1000,
+					current_hist.values[i]);
+			current_hist.values[i] = 0;
+		}
+		printk("\n");
+		current_hist.nb_values = 0;
+		current_hist.min = current_hist.min +
+			((current_hist.max - current_hist.min) / 2);
+		current_hist.max = current_hist.min;
+	}
+	spin_unlock_irqrestore(&current_hist.lock, flags);
 
 end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
@@ -218,7 +267,7 @@ static
 unsigned int tracker_proc_poll(struct file *filp,
 		poll_table *wait)
 {
-	struct block_tracker *block_hist_priv = filp->private_data;
+	struct block_hist_tracker *block_hist_priv = filp->private_data;
 	unsigned int mask = 0;
 
 	if (filp->f_mode & FMODE_READ) {
@@ -236,7 +285,7 @@ static
 ssize_t tracker_proc_read(struct file *filp, char __user *buf, size_t n,
 		loff_t *offset)
 {
-	struct block_tracker *block_hist_priv = filp->private_data;
+	struct block_hist_tracker *block_hist_priv = filp->private_data;
 
 	wait_event_interruptible(block_hist_priv->read_wait,
 			block_hist_priv->got_alert);
@@ -249,7 +298,7 @@ ssize_t tracker_proc_read(struct file *filp, char __user *buf, size_t n,
 static
 int tracker_proc_open(struct inode *inode, struct file *filp)
 {
-	struct block_tracker *block_hist_priv = PDE_DATA(inode);
+	struct block_hist_tracker *block_hist_priv = PDE_DATA(inode);
 	int ret;
 
 	init_waitqueue_head(&block_hist_priv->read_wait);
@@ -266,7 +315,7 @@ int tracker_proc_open(struct inode *inode, struct file *filp)
 static
 int tracker_proc_release(struct inode *inode, struct file *filp)
 {
-	struct block_tracker *block_hist_priv = filp->private_data;
+	struct block_hist_tracker *block_hist_priv = filp->private_data;
 
 	block_hist_priv->readers--;
 	module_put(THIS_MODULE);
@@ -275,7 +324,7 @@ int tracker_proc_release(struct inode *inode, struct file *filp)
 
 
 static const
-struct file_operations block_tracker_fops = {
+struct file_operations block_hist_tracker_fops = {
 	.owner = THIS_MODULE,
 	.open = tracker_proc_open,
 	.read = tracker_proc_read,
@@ -285,12 +334,12 @@ struct file_operations block_tracker_fops = {
 #endif
 
 static
-int __init block_latency_tp_init(void)
+int __init block_hist_latency_tp_init(void)
 {
 	int ret;
-	struct block_tracker *block_hist_priv;
+	struct block_hist_tracker *block_hist_priv;
 
-	block_hist_priv = kzalloc(sizeof(struct block_tracker), GFP_KERNEL);
+	block_hist_priv = kzalloc(sizeof(struct block_hist_tracker), GFP_KERNEL);
 	if (!block_hist_priv) {
 		ret = -ENOMEM;
 		goto end;
@@ -299,12 +348,16 @@ int __init block_latency_tp_init(void)
 	/* limit to 1 evt/sec */
 	block_hist_priv->ns_rate_limit = 1000000000;
 
-	tracker = latency_tracker_create(NULL, NULL, 100, 0,
-			usec_gc_threshold * 1000,
+	tracker = latency_tracker_create(NULL, NULL, 10000, 0,
+			usec_gc_period * 1000,
 			usec_gc_period * 1000,
 			block_hist_priv);
 	if (!tracker)
 		goto error;
+
+	spin_lock_init(&current_hist.lock);
+	current_hist.min = -1ULL;
+	current_hist.max = 0;
 
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);
@@ -314,16 +367,16 @@ int __init block_latency_tp_init(void)
 			probe_block_rq_complete, NULL);
 	WARN_ON(ret);
 
-	/*
-	block_tracker_proc_dentry = proc_create_data("block_tracker",
-			S_IRUSR, NULL, &block_tracker_fops, block_hist_priv);
+#if 0
+	block_hist_tracker_proc_dentry = proc_create_data("block_hist_tracker",
+			S_IRUSR, NULL, &block_hist_tracker_fops, block_hist_priv);
 
-	if (!block_tracker_proc_dentry) {
+	if (!block_hist_tracker_proc_dentry) {
 		printk(KERN_ERR "Error creating tracker control file\n");
 		ret = -ENOMEM;
 		goto end;
 	}
-*/
+#endif
 
 	ret = 0;
 	goto end;
@@ -333,12 +386,12 @@ error:
 end:
 	return ret;
 }
-module_init(block_latency_tp_init);
+module_init(block_hist_latency_tp_init);
 
 static
-void __exit block_latency_tp_exit(void)
+void __exit block_hist_latency_tp_exit(void)
 {
-	struct block_tracker *block_hist_priv;
+	struct block_hist_tracker *block_hist_priv;
 
 	lttng_wrapper_tracepoint_probe_unregister("block_rq_issue",
 			probe_block_rq_issue, NULL);
@@ -353,12 +406,10 @@ void __exit block_latency_tp_exit(void)
 
 	printk("Total block alerts : %d\n", cnt);
 	printk("Total block requests : %d\n", rq_cnt);
-	/*
-	if (block_tracker_proc_dentry)
-		remove_proc_entry("block_tracker", NULL);
-		*/
+	if (block_hist_tracker_proc_dentry)
+		remove_proc_entry("block_hist_tracker", NULL);
 }
-module_exit(block_latency_tp_exit);
+module_exit(block_hist_latency_tp_exit);
 
 MODULE_AUTHOR("Julien Desfossez <jdesfossez@efficios.com>");
 MODULE_LICENSE("GPL");
