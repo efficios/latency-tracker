@@ -84,6 +84,7 @@ enum wake_reason {
 struct iohist {
 	uint64_t min;
 	uint64_t max;
+	uint64_t last_max;
 	uint64_t steps; /* (max - min)/LATENCY_BUCKETS */
 	uint64_t rvalues[LATENCY_BUCKETS];
 	uint64_t wvalues[LATENCY_BUCKETS];
@@ -233,7 +234,7 @@ void update_hist(struct latency_tracker_event *s, struct request *rq)
 {
 	unsigned long flags;
 	u64 now, delta;
-	int bucket, i;
+	int bucket;
 
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
@@ -247,6 +248,8 @@ void update_hist(struct latency_tracker_event *s, struct request *rq)
 		current_hist.max = delta;
 		update_step();
 	}
+	if (delta > current_hist.last_max)
+		current_hist.last_max = delta;
 	bucket = get_bucket(delta);
 	if (rq->cmd_flags % 2 == 0)
 		current_hist.rvalues[bucket]++;
@@ -264,6 +267,9 @@ void update_hist(struct latency_tracker_event *s, struct request *rq)
 //		printk("real values:\n");
 //		output_hist();
 //		printk("real values end\n");
+		current_hist.max = current_hist.last_max;
+		update_step();
+		current_hist.last_max = 0;
 		current_hist.nb_values = 0;
 	}
 	spin_unlock_irqrestore(&current_hist.lock, flags);
@@ -388,6 +394,7 @@ int __init block_hist_latency_tp_init(void)
 	spin_lock_init(&current_hist.lock);
 	current_hist.min = -1ULL;
 	current_hist.max = 0;
+	current_hist.last_max = 0;
 
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);
