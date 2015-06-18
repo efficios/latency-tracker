@@ -47,8 +47,17 @@
 #define DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD 0
 #define DEFAULT_USEC_BLK_LATENCY_GC_PERIOD 0
 
-#define LATENCY_BUCKETS 20
-#define LATENCY_AGGREGATE 100
+/*
+ * log2 scale, so:
+ * 0-9:   1ns, 2, 4, 8, 16, 32, 64, 128, 256, 512
+ * 10-19: 1us, 2, 4...
+ * 20-29: 1ms, ... 512ms
+ * 30-39: 1s, ... 512s
+ * 40: > 512s
+ * = 41 intervals
+ */
+#define LATENCY_BUCKETS 41
+#define LATENCY_AGGREGATE 200
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -75,20 +84,35 @@ struct blkkey {
 	sector_t sector;
 } __attribute__((__packed__));
 
+struct sched_key_t {
+  pid_t pid;
+} __attribute__((__packed__));
+
 enum wake_reason {
 	BLOCK_TRACKER_WAKE_DATA = 0,
 	BLOCK_TRACKER_WAIT = 1,
 	BLOCK_TRACKER_HUP = 2,
 };
 
+enum io_type {
+	IO_SYSCALL_READ = 0,
+	IO_SYSCALL_WRITE = 1,
+	IO_SYSCALL_RW = 2,
+	IO_SYSCALL_SYNC = 3,
+	IO_SYSCALL_OPEN = 4,
+	IO_SYSCALL_CLOSE = 5,
+
+	IO_BLOCK_READ = 6,
+	IO_BLOCK_WRITE = 7,
+
+	/* must always be the last value in this enum */
+	IO_TYPE_NR = 8,
+};
+
 struct iohist {
 	uint64_t min;
 	uint64_t max;
-	uint64_t last_max;
-	uint64_t steps; /* (max - min)/LATENCY_BUCKETS */
-	uint64_t rvalues[LATENCY_BUCKETS];
-	uint64_t wvalues[LATENCY_BUCKETS];
-	uint64_t raw_values[LATENCY_AGGREGATE];
+	unsigned int values[IO_TYPE_NR][LATENCY_BUCKETS];
 	int nb_values;
         spinlock_t lock;
 } current_hist;
@@ -192,45 +216,61 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 }
 
 static
-void update_step(void)
+unsigned int get_bucket(uint64_t v)
 {
-	current_hist.steps = (current_hist.max - current_hist.min) / LATENCY_BUCKETS;
+	if (v > (1ULL << (LATENCY_BUCKETS - 1)))
+		return LATENCY_BUCKETS;
+	return fls_long(v - 1);
 }
 
 static
-int get_bucket(uint64_t v)
+void output_bucket_value(uint64_t v)
 {
-	/* TODO : binary search */
-	int i;
-
-	for(i = 0; i < LATENCY_BUCKETS; i++) {
-		if (i * current_hist.steps > v)
-			return i - 1;
-	}
-	return i - 1;
+	if (v > (1ULL<<29))
+		printk("%llu s", v >> 30);
+	else if (v > (1ULL<<19))
+		printk("%llu ms", v >> 20);
+	else if (v > (1ULL<<9))
+		printk("%llu us", v >> 10);
+	else
+		printk("%llu ns", v);
 }
 
 static
-void output_hist(void)
+void reset_hist(struct iohist *h)
+{
+	int i, j;
+
+	for (i = 0; i < IO_TYPE_NR; i++)
+		for (j = 0; j < LATENCY_BUCKETS; j++)
+			h->values[i][j] = 0;
+}
+
+
+static
+void output_hist(struct iohist *h)
 {
 	int i;
 
 	printk("Latency histogram [%llu - %llu] usec:\n", current_hist.min / 1000,
 			current_hist.max / 1000);
 	for(i = 0; i < LATENCY_BUCKETS; i++) {
-		printk("\t[%llu\t%llu]\t",
-				((i * current_hist.steps) + current_hist.min) / 1000,
-				(((i + 1) * current_hist.steps) + current_hist.min - 1) / 1000);
-		printk("%llu read\t%llu write\n", current_hist.rvalues[i],
-				current_hist.wvalues[i]);
-		current_hist.rvalues[i] = 0;
-		current_hist.wvalues[i] = 0;
+		printk("\t[");
+		output_bucket_value(1ULL << i);
+		printk(" - ");
+		output_bucket_value(1ULL << (i+1));
+		printk("]\t");
+		printk("%u read\t%u write\t%u syscalls\n",
+				h->values[IO_BLOCK_READ][i],
+				h->values[IO_BLOCK_WRITE][i],
+				h->values[IO_SYSCALL_READ][i]);
 	}
 	printk("\n");
+	reset_hist(h);
 }
 
 static
-void update_hist(struct latency_tracker_event *s, struct request *rq)
+void update_hist(struct latency_tracker_event *s, enum io_type t, struct iohist *h)
 {
 	unsigned long flags;
 	u64 now, delta;
@@ -239,40 +279,27 @@ void update_hist(struct latency_tracker_event *s, struct request *rq)
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
 
-	spin_lock_irqsave(&current_hist.lock, flags);
-	if (delta < current_hist.min) {
-		current_hist.min = delta;
-		update_step();
-	}
-	if (delta > current_hist.max) {
-		current_hist.max = delta;
-		update_step();
-	}
-	if (delta > current_hist.last_max)
-		current_hist.last_max = delta;
+	spin_lock_irqsave(&h->lock, flags);
+	if (delta < h->min)
+		h->min = delta;
+	if (delta > h->max)
+		h->max = delta;
 	bucket = get_bucket(delta);
-	if (rq->cmd_flags % 2 == 0)
-		current_hist.rvalues[bucket]++;
+	if (t == IO_BLOCK_READ)
+		h->values[IO_BLOCK_READ][bucket]++;
+	else if (t == IO_BLOCK_WRITE)
+		h->values[IO_BLOCK_WRITE][bucket]++;
 	else
-		current_hist.wvalues[bucket]++;
-	current_hist.raw_values[current_hist.nb_values] = delta;
+		h->values[IO_SYSCALL_WRITE][bucket]++;
 
-	current_hist.nb_values++;
-	if (current_hist.nb_values >= LATENCY_AGGREGATE) {
-		output_hist();
-//		for(i = 0; i < current_hist.nb_values; i++) {
-//			bucket = get_bucket(current_hist.raw_values[i]);
-//			current_hist.rvalues[bucket]++;
-//		}
-//		printk("real values:\n");
-//		output_hist();
-//		printk("real values end\n");
-		current_hist.max = current_hist.last_max;
-		update_step();
-		current_hist.last_max = 0;
-		current_hist.nb_values = 0;
+	h->nb_values++;
+	if (h->nb_values >= LATENCY_AGGREGATE) {
+		output_hist(h);
+		h->min = -1ULL;
+		h->max = 0;
+		h->nb_values = 0;
 	}
-	spin_unlock_irqrestore(&current_hist.lock, flags);
+	spin_unlock_irqrestore(&h->lock, flags);
 }
 
 static
@@ -290,12 +317,123 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
 		goto end;
-	update_hist(s, rq);
+	if (rq->cmd_flags % 2 == 0)
+		update_hist(s, IO_BLOCK_READ, &current_hist);
+	else
+		update_hist(s, IO_BLOCK_WRITE, &current_hist);
 	latency_tracker_put_event(s);
 
 end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
 	return;
+}
+
+static
+int io_syscall(long id)
+{
+	switch(id) {
+		case __NR_read:
+		case __NR_pread64:
+		case __NR_readv:
+		case __NR_preadv:
+		case __NR_recvfrom:
+		case __NR_recvmsg:
+		case __NR_getdents:
+		case __NR_getdents64:
+		case __NR_statfs:
+		case __NR_fstatfs:
+			return IO_SYSCALL_READ;
+
+		case __NR_write:
+		case __NR_pwrite64:
+		case __NR_writev:
+		case __NR_pwritev:
+		case __NR_sendto:
+		case __NR_sendmsg:
+		case __NR_mkdir:
+		case __NR_mkdirat:
+		case __NR_rmdir:
+		case __NR_creat:
+		case __NR_mknod:
+		case __NR_mknodat:
+		case __NR_vmsplice:
+		case __NR_sendmmsg:
+			return IO_SYSCALL_WRITE;
+
+		case __NR_sendfile:
+		case __NR_splice:
+			return IO_SYSCALL_RW;
+
+		case __NR_fsync:
+		case __NR_fdatasync:
+		case __NR_sync:
+		case __NR_sync_file_range:
+		case __NR_syncfs:
+			return IO_SYSCALL_SYNC;
+
+		case __NR_open:
+		case __NR_pipe:
+		case __NR_pipe2:
+		case __NR_dup2:
+		case __NR_dup3:
+		case __NR_socket:
+		case __NR_connect:
+//		case __NR_accept:
+//		case __NR_accept4:
+		case __NR_execve:
+		case __NR_chdir:
+		case __NR_fchdir:
+		case __NR_mount:
+		case __NR_umount2:
+		case __NR_swapon:
+		case __NR_openat:
+			return IO_SYSCALL_OPEN;
+
+		case __NR_close:
+		case __NR_swapoff:
+		case __NR_shutdown:
+			return IO_SYSCALL_CLOSE;
+
+		default:
+			break;
+	}
+	return -1;
+}
+
+static
+void probe_syscall_enter(void *ignore, struct pt_regs *regs,
+		long id)
+{
+	struct task_struct* task = current;
+	struct sched_key_t sched_key;
+	u64 thresh, timeout;
+
+	if (io_syscall(id) < 0)
+		return;
+
+	sched_key.pid = task->pid;
+	thresh = usec_threshold * 1000;
+	timeout = usec_timeout * 1000;
+
+	latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
+			thresh, blk_cb, timeout, 0, (void *) id);
+}
+
+static
+void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
+{
+	struct sched_key_t key;
+	struct latency_tracker_event *s;
+
+	key.pid = current->pid;
+	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	if (!s)
+		goto end;
+	update_hist(s, IO_SYSCALL_RW, &current_hist);
+	latency_tracker_put_event(s);
+
+end:
+	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
 }
 
 #if 0
@@ -394,7 +532,6 @@ int __init block_hist_latency_tp_init(void)
 	spin_lock_init(&current_hist.lock);
 	current_hist.min = -1ULL;
 	current_hist.max = 0;
-	current_hist.last_max = 0;
 
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);
@@ -402,6 +539,12 @@ int __init block_hist_latency_tp_init(void)
 
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_complete",
 			probe_block_rq_complete, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register(
+			"sys_enter", probe_syscall_enter, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register(
+			"sys_exit", probe_syscall_exit, NULL);
 	WARN_ON(ret);
 
 #if 0
@@ -434,6 +577,10 @@ void __exit block_hist_latency_tp_exit(void)
 			probe_block_rq_issue, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("block_rq_complete",
 			probe_block_rq_complete, NULL);
+	lttng_wrapper_tracepoint_probe_unregister(
+			"sys_enter", probe_syscall_enter, NULL);
+	lttng_wrapper_tracepoint_probe_unregister(
+			"sys_exit", probe_syscall_exit, NULL);
 	tracepoint_synchronize_unregister();
 
 	block_hist_priv = latency_tracker_get_priv(tracker);
