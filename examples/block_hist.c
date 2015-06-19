@@ -57,7 +57,7 @@
  * = 41 intervals
  */
 #define LATENCY_BUCKETS 41
-#define LATENCY_AGGREGATE 200
+#define LATENCY_AGGREGATE 1000
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -112,6 +112,8 @@ enum io_type {
 struct iohist {
 	uint64_t min;
 	uint64_t max;
+	uint64_t ts_begin;
+	uint64_t ts_end;
 	unsigned int values[IO_TYPE_NR][LATENCY_BUCKETS];
 	int nb_values;
         spinlock_t lock;
@@ -224,16 +226,16 @@ unsigned int get_bucket(uint64_t v)
 }
 
 static
-void output_bucket_value(uint64_t v)
+void output_bucket_value(uint64_t v, struct seq_file *m)
 {
 	if (v > (1ULL<<29))
-		printk("%llu s", v >> 30);
+		seq_printf(m, "%llus", v >> 30);
 	else if (v > (1ULL<<19))
-		printk("%llu ms", v >> 20);
+		seq_printf(m, "%llums", v >> 20);
 	else if (v > (1ULL<<9))
-		printk("%llu us", v >> 10);
+		seq_printf(m, "%lluus", v >> 10);
 	else
-		printk("%llu ns", v);
+		seq_printf(m, "%lluns", v);
 }
 
 static
@@ -248,24 +250,31 @@ void reset_hist(struct iohist *h)
 
 
 static
-void output_hist(struct iohist *h)
+void output_hist(struct iohist *h, struct seq_file *m)
 {
-	int i;
+	int i, j;
 
-	printk("Latency histogram [%llu - %llu] usec:\n", current_hist.min / 1000,
-			current_hist.max / 1000);
+//	seq_printf(m, "Latency histogram [%llu - %llu] ns:\n",
+//			current_hist.min, current_hist.max);
+	seq_printf(m, "Range    \t\ts_read\ts_write\ts_rw\ts_sync\t"
+			"s_open\ts_close\tb_read\tb_write\n");
 	for(i = 0; i < LATENCY_BUCKETS; i++) {
-		printk("\t[");
-		output_bucket_value(1ULL << i);
-		printk(" - ");
-		output_bucket_value(1ULL << (i+1));
-		printk("]\t");
-		printk("%u read\t%u write\t%u syscalls\n",
+		seq_printf(m, "[");
+		output_bucket_value(1ULL << i, m);
+		seq_printf(m, ", ");
+		output_bucket_value(1ULL << (i+1), m);
+		seq_printf(m, "[\t");
+		for (j = 0; j < IO_TYPE_NR; j++)
+			seq_printf(m, "\t%u", h->values[j][i]);
+		seq_printf(m, "\n");
+		/*
+		seq_printf(m, "%u read\t%u write\t%u syscalls\n",
 				h->values[IO_BLOCK_READ][i],
 				h->values[IO_BLOCK_WRITE][i],
 				h->values[IO_SYSCALL_READ][i]);
+				*/
 	}
-	printk("\n");
+	seq_printf(m, "\n");
 	reset_hist(h);
 }
 
@@ -285,20 +294,17 @@ void update_hist(struct latency_tracker_event *s, enum io_type t, struct iohist 
 	if (delta > h->max)
 		h->max = delta;
 	bucket = get_bucket(delta);
-	if (t == IO_BLOCK_READ)
-		h->values[IO_BLOCK_READ][bucket]++;
-	else if (t == IO_BLOCK_WRITE)
-		h->values[IO_BLOCK_WRITE][bucket]++;
-	else
-		h->values[IO_SYSCALL_WRITE][bucket]++;
+	h->values[t][bucket]++;
 
 	h->nb_values++;
+	/*
 	if (h->nb_values >= LATENCY_AGGREGATE) {
-		output_hist(h);
+		//output_hist(h);
 		h->min = -1ULL;
 		h->max = 0;
 		h->nb_values = 0;
 	}
+	*/
 	spin_unlock_irqrestore(&h->lock, flags);
 }
 
@@ -429,43 +435,16 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
 		goto end;
-	update_hist(s, IO_SYSCALL_RW, &current_hist);
+	update_hist(s, io_syscall((unsigned long) s->priv), &current_hist);
 	latency_tracker_put_event(s);
 
 end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
 }
 
-#if 0
-static
-unsigned int tracker_proc_poll(struct file *filp,
-		poll_table *wait)
+static int block_hist_show(struct seq_file *m, void *v)
 {
-	struct block_hist_tracker *block_hist_priv = filp->private_data;
-	unsigned int mask = 0;
-
-	if (filp->f_mode & FMODE_READ) {
-		poll_wait(filp, &block_hist_priv->read_wait, wait);
-		if (block_hist_priv->reason == BLOCK_TRACKER_WAKE_DATA)
-			mask |= POLLIN;
-		else
-			mask |= POLLHUP;
-	}
-
-	return mask;
-}
-
-static
-ssize_t tracker_proc_read(struct file *filp, char __user *buf, size_t n,
-		loff_t *offset)
-{
-	struct block_hist_tracker *block_hist_priv = filp->private_data;
-
-	wait_event_interruptible(block_hist_priv->read_wait,
-			block_hist_priv->got_alert);
-	block_hist_priv->reason = BLOCK_TRACKER_WAIT;
-	block_hist_priv->got_alert = false;
-
+	output_hist(&current_hist, m);
 	return 0;
 }
 
@@ -473,39 +452,20 @@ static
 int tracker_proc_open(struct inode *inode, struct file *filp)
 {
 	struct block_hist_tracker *block_hist_priv = PDE_DATA(inode);
-	int ret;
 
-	init_waitqueue_head(&block_hist_priv->read_wait);
-	block_hist_priv->got_alert = false;
-	block_hist_priv->readers++;
 	filp->private_data = block_hist_priv;
-	ret = try_module_get(THIS_MODULE);
-	if (!ret)
-		return -1;
 
-	return 0;
+	return single_open(filp, block_hist_show, NULL);
 }
-
-static
-int tracker_proc_release(struct inode *inode, struct file *filp)
-{
-	struct block_hist_tracker *block_hist_priv = filp->private_data;
-
-	block_hist_priv->readers--;
-	module_put(THIS_MODULE);
-	return 0;
-}
-
 
 static const
 struct file_operations block_hist_tracker_fops = {
 	.owner = THIS_MODULE,
 	.open = tracker_proc_open,
-	.read = tracker_proc_read,
-	.release = tracker_proc_release,
-	.poll = tracker_proc_poll,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
 };
-#endif
 
 static
 int __init block_hist_latency_tp_init(void)
@@ -540,6 +500,7 @@ int __init block_hist_latency_tp_init(void)
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_complete",
 			probe_block_rq_complete, NULL);
 	WARN_ON(ret);
+
 	ret = lttng_wrapper_tracepoint_probe_register(
 			"sys_enter", probe_syscall_enter, NULL);
 	WARN_ON(ret);
@@ -547,16 +508,18 @@ int __init block_hist_latency_tp_init(void)
 			"sys_exit", probe_syscall_exit, NULL);
 	WARN_ON(ret);
 
-#if 0
+	block_hist_tracker_proc_dentry = proc_create("block_hist_tracker",
+			0, NULL, &block_hist_tracker_fops);
+	/*
 	block_hist_tracker_proc_dentry = proc_create_data("block_hist_tracker",
 			S_IRUSR, NULL, &block_hist_tracker_fops, block_hist_priv);
+			*/
 
 	if (!block_hist_tracker_proc_dentry) {
 		printk(KERN_ERR "Error creating tracker control file\n");
 		ret = -ENOMEM;
 		goto end;
 	}
-#endif
 
 	ret = 0;
 	goto end;
