@@ -210,8 +210,8 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 		thresh, blk_cb, timeout, 0,
 		latency_tracker_get_priv(tracker));
 	if (ret == LATENCY_TRACKER_FULL) {
-		printk("latency_tracker block: no more free events, consider "
-				"increasing the max_events parameter\n");
+		//printk("latency_tracker block: no more free events, consider "
+		//		"increasing the max_events parameter\n");
 	} else if (ret) {
 		printk("latency_tracker block: error adding event\n");
 	}
