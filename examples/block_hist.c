@@ -29,10 +29,12 @@
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/poll.h>
+#include <linux/cpu.h>
 #include "block_hist.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
+#include "../wrapper/percpu-defs.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -117,7 +119,11 @@ struct iohist {
 	unsigned int values[IO_TYPE_NR][LATENCY_BUCKETS];
 	int nb_values;
         spinlock_t lock;
-} current_hist;
+};
+
+DECLARE_PER_CPU(struct iohist, current_hist);
+DEFINE_PER_CPU(struct iohist, current_hist);
+struct iohist global_hist;
 
 struct block_hist_tracker {
 	u64 last_alert_ts;
@@ -248,11 +254,34 @@ void reset_hist(struct iohist *h)
 			h->values[i][j] = 0;
 }
 
+static
+void merge_reset_per_cpu_hist(struct iohist *h)
+{
+	int cpu, i, j;
+	struct iohist *c;
+	unsigned long flags;
+
+	get_online_cpus();
+	for_each_online_cpu(cpu) {
+		c = per_cpu_ptr(&current_hist, cpu);
+		spin_lock_irqsave(&c->lock, flags);
+		for (i = 0; i < IO_TYPE_NR; i++) {
+			for (j = 0; j < LATENCY_BUCKETS; j++) {
+				h->values[i][j] += c->values[i][j];
+				c->values[i][j] = 0;
+			}
+		}
+		spin_unlock_irqrestore(&c->lock, flags);
+	}
+	put_online_cpus();
+}
 
 static
-void output_hist(struct iohist *h, struct seq_file *m)
+void output_hist(struct seq_file *m)
 {
 	int i, j;
+
+	merge_reset_per_cpu_hist(&global_hist);
 
 //	seq_printf(m, "Latency histogram [%llu - %llu] ns:\n",
 //			current_hist.min, current_hist.max);
@@ -265,25 +294,21 @@ void output_hist(struct iohist *h, struct seq_file *m)
 		output_bucket_value(1ULL << (i+1), m);
 		seq_printf(m, "[\t");
 		for (j = 0; j < IO_TYPE_NR; j++)
-			seq_printf(m, "\t%u", h->values[j][i]);
+			seq_printf(m, "\t%u",
+					global_hist.values[j][i]);
 		seq_printf(m, "\n");
-		/*
-		seq_printf(m, "%u read\t%u write\t%u syscalls\n",
-				h->values[IO_BLOCK_READ][i],
-				h->values[IO_BLOCK_WRITE][i],
-				h->values[IO_SYSCALL_READ][i]);
-				*/
 	}
 	seq_printf(m, "\n");
-	reset_hist(h);
+	reset_hist(&global_hist);
 }
 
 static
-void update_hist(struct latency_tracker_event *s, enum io_type t, struct iohist *h)
+void update_hist(struct latency_tracker_event *s, enum io_type t,
+		struct iohist *h)
 {
-	unsigned long flags;
 	u64 now, delta;
 	int bucket;
+	unsigned long flags;
 
 	now = trace_clock_read64();
 	delta = now - s->start_ts;
@@ -324,9 +349,11 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 	if (!s)
 		goto end;
 	if (rq->cmd_flags % 2 == 0)
-		update_hist(s, IO_BLOCK_READ, &current_hist);
+		update_hist(s, IO_BLOCK_READ,
+				lttng_this_cpu_ptr(&current_hist));
 	else
-		update_hist(s, IO_BLOCK_WRITE, &current_hist);
+		update_hist(s, IO_BLOCK_WRITE,
+				lttng_this_cpu_ptr(&current_hist));
 	latency_tracker_put_event(s);
 
 end:
@@ -435,7 +462,8 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
 		goto end;
-	update_hist(s, io_syscall((unsigned long) s->priv), &current_hist);
+	update_hist(s, io_syscall((unsigned long) s->priv),
+			lttng_this_cpu_ptr(&current_hist));
 	latency_tracker_put_event(s);
 
 end:
@@ -444,7 +472,7 @@ end:
 
 static int block_hist_show(struct seq_file *m, void *v)
 {
-	output_hist(&current_hist, m);
+	output_hist(m);
 	return 0;
 }
 
@@ -470,7 +498,7 @@ struct file_operations block_hist_tracker_fops = {
 static
 int __init block_hist_latency_tp_init(void)
 {
-	int ret;
+	int ret, cpu;
 	struct block_hist_tracker *block_hist_priv;
 
 	block_hist_priv = kzalloc(sizeof(struct block_hist_tracker), GFP_KERNEL);
@@ -489,9 +517,13 @@ int __init block_hist_latency_tp_init(void)
 	if (!tracker)
 		goto error;
 
-	spin_lock_init(&current_hist.lock);
-	current_hist.min = -1ULL;
-	current_hist.max = 0;
+	lttng_this_cpu_ptr(&current_hist)->min = -1ULL;
+	lttng_this_cpu_ptr(&current_hist)->max = 0;
+	for_each_possible_cpu(cpu) {
+		struct iohist *c;
+		c = per_cpu_ptr(&current_hist, cpu);
+		spin_lock_init(&c->lock);
+	}
 
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);
@@ -510,10 +542,6 @@ int __init block_hist_latency_tp_init(void)
 
 	block_hist_tracker_proc_dentry = proc_create("block_hist_tracker",
 			0, NULL, &block_hist_tracker_fops);
-	/*
-	block_hist_tracker_proc_dentry = proc_create_data("block_hist_tracker",
-			S_IRUSR, NULL, &block_hist_tracker_fops, block_hist_priv);
-			*/
 
 	if (!block_hist_tracker_proc_dentry) {
 		printk(KERN_ERR "Error creating tracker control file\n");
