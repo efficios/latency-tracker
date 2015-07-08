@@ -35,6 +35,7 @@
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/percpu-defs.h"
+#include "../wrapper/jiffies.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -121,9 +122,15 @@ struct iohist {
         spinlock_t lock;
 };
 
+DECLARE_PER_CPU(struct iohist, live_hist);
+DEFINE_PER_CPU(struct iohist, live_hist);
+
 DECLARE_PER_CPU(struct iohist, current_hist);
 DEFINE_PER_CPU(struct iohist, current_hist);
-struct iohist global_hist;
+
+struct iohist global_live_hist;
+
+#define AGGREGATES 15
 
 struct block_hist_tracker {
 	u64 last_alert_ts;
@@ -132,6 +139,12 @@ struct block_hist_tracker {
 	enum wake_reason reason;
 	bool got_alert;
 	int readers;
+        struct timer_list timer;
+	/* array of 1 minute aggregates */
+	struct iohist latency_history[AGGREGATES];
+	/* index in latency_history % AGGREGATES */
+	int current_min;
+
 };
 
 static struct latency_tracker *tracker;
@@ -140,6 +153,8 @@ static int rq_cnt = 0;
 
 static struct proc_dir_entry *block_hist_tracker_proc_dentry;
 static const struct file_operations block_hist_tracker_fops;
+
+static void enable_hist_timer(struct block_hist_tracker *b);
 
 static
 void blk_cb(unsigned long ptr)
@@ -255,7 +270,7 @@ void reset_hist(struct iohist *h)
 }
 
 static
-void merge_reset_per_cpu_hist(struct iohist *h)
+void merge_reset_per_cpu_live_hist(struct iohist *h)
 {
 	int cpu, i, j;
 	struct iohist *c;
@@ -263,7 +278,7 @@ void merge_reset_per_cpu_hist(struct iohist *h)
 
 	get_online_cpus();
 	for_each_online_cpu(cpu) {
-		c = per_cpu_ptr(&current_hist, cpu);
+		c = per_cpu_ptr(&live_hist, cpu);
 		spin_lock_irqsave(&c->lock, flags);
 		for (i = 0; i < IO_TYPE_NR; i++) {
 			for (j = 0; j < LATENCY_BUCKETS; j++) {
@@ -277,14 +292,12 @@ void merge_reset_per_cpu_hist(struct iohist *h)
 }
 
 static
-void output_hist(struct seq_file *m)
+void output_live_hist(struct seq_file *m)
 {
 	int i, j;
 
-	merge_reset_per_cpu_hist(&global_hist);
+	merge_reset_per_cpu_live_hist(&global_live_hist);
 
-//	seq_printf(m, "Latency histogram [%llu - %llu] ns:\n",
-//			current_hist.min, current_hist.max);
 	seq_printf(m, "Range    \t\ts_read\ts_write\ts_rw\ts_sync\t"
 			"s_open\ts_close\tb_read\tb_write\n");
 	for(i = 0; i < LATENCY_BUCKETS; i++) {
@@ -295,11 +308,11 @@ void output_hist(struct seq_file *m)
 		seq_printf(m, "[\t");
 		for (j = 0; j < IO_TYPE_NR; j++)
 			seq_printf(m, "\t%u",
-					global_hist.values[j][i]);
+					global_live_hist.values[j][i]);
 		seq_printf(m, "\n");
 	}
 	seq_printf(m, "\n");
-	reset_hist(&global_hist);
+	reset_hist(&global_live_hist);
 }
 
 static
@@ -322,14 +335,6 @@ void update_hist(struct latency_tracker_event *s, enum io_type t,
 	h->values[t][bucket]++;
 
 	h->nb_values++;
-	/*
-	if (h->nb_values >= LATENCY_AGGREGATE) {
-		//output_hist(h);
-		h->min = -1ULL;
-		h->max = 0;
-		h->nb_values = 0;
-	}
-	*/
 	spin_unlock_irqrestore(&h->lock, flags);
 }
 
@@ -348,12 +353,17 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
 		goto end;
-	if (rq->cmd_flags % 2 == 0)
+	if (rq->cmd_flags % 2 == 0) {
+		update_hist(s, IO_BLOCK_READ,
+				lttng_this_cpu_ptr(&live_hist));
 		update_hist(s, IO_BLOCK_READ,
 				lttng_this_cpu_ptr(&current_hist));
-	else
+	} else {
+		update_hist(s, IO_BLOCK_WRITE,
+				lttng_this_cpu_ptr(&live_hist));
 		update_hist(s, IO_BLOCK_WRITE,
 				lttng_this_cpu_ptr(&current_hist));
+	}
 	latency_tracker_put_event(s);
 
 end:
@@ -463,6 +473,8 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 	if (!s)
 		goto end;
 	update_hist(s, io_syscall((unsigned long) s->priv),
+			lttng_this_cpu_ptr(&live_hist));
+	update_hist(s, io_syscall((unsigned long) s->priv),
 			lttng_this_cpu_ptr(&current_hist));
 	latency_tracker_put_event(s);
 
@@ -472,7 +484,7 @@ end:
 
 static int block_hist_show(struct seq_file *m, void *v)
 {
-	output_hist(m);
+	output_live_hist(m);
 	return 0;
 }
 
@@ -496,9 +508,78 @@ struct file_operations block_hist_tracker_fops = {
 };
 
 static
+void init_histograms(void)
+{
+	int cpu;
+
+	lttng_this_cpu_ptr(&live_hist)->min = -1ULL;
+	lttng_this_cpu_ptr(&live_hist)->max = 0;
+
+	lttng_this_cpu_ptr(&current_hist)->min = -1ULL;
+	lttng_this_cpu_ptr(&current_hist)->max = 0;
+	for_each_possible_cpu(cpu) {
+		struct iohist *c;
+
+		c = per_cpu_ptr(&live_hist, cpu);
+		spin_lock_init(&c->lock);
+		c = per_cpu_ptr(&current_hist, cpu);
+		spin_lock_init(&c->lock);
+	}
+}
+
+static
+void merge_reset_per_cpu_current_hist(struct iohist *h)
+{
+	int cpu, i, j;
+	struct iohist *c;
+	unsigned long flags;
+
+	get_online_cpus();
+	for_each_online_cpu(cpu) {
+		c = per_cpu_ptr(&current_hist, cpu);
+		spin_lock_irqsave(&c->lock, flags);
+		for (i = 0; i < IO_TYPE_NR; i++) {
+			for (j = 0; j < LATENCY_BUCKETS; j++) {
+				h->values[i][j] += c->values[i][j];
+				c->values[i][j] = 0;
+			}
+		}
+		spin_unlock_irqrestore(&c->lock, flags);
+	}
+	put_online_cpus();
+}
+
+
+static
+void timer_cb(unsigned long ptr)
+{
+	struct block_hist_tracker *b = (struct block_hist_tracker *) ptr;
+
+	b->current_min = (b->current_min + 1) % AGGREGATES;
+	merge_reset_per_cpu_current_hist(&b->latency_history[b->current_min]);
+
+	enable_hist_timer(b);
+}
+
+static
+void enable_hist_timer(struct block_hist_tracker *b)
+{
+	del_timer(&b->timer);
+
+	b->timer.function = timer_cb;
+	/* 60 seconds */
+	//b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(60000000000);
+	/* 10 seconds */
+	//b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(10000000000);
+	b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(1000000000);
+	b->timer.data = (unsigned long) b;
+	add_timer(&b->timer);
+}
+
+static
 int __init block_hist_latency_tp_init(void)
 {
-	int ret, cpu;
+	int ret;
 	struct block_hist_tracker *block_hist_priv;
 
 	block_hist_priv = kzalloc(sizeof(struct block_hist_tracker), GFP_KERNEL);
@@ -517,13 +598,10 @@ int __init block_hist_latency_tp_init(void)
 	if (!tracker)
 		goto error;
 
-	lttng_this_cpu_ptr(&current_hist)->min = -1ULL;
-	lttng_this_cpu_ptr(&current_hist)->max = 0;
-	for_each_possible_cpu(cpu) {
-		struct iohist *c;
-		c = per_cpu_ptr(&current_hist, cpu);
-		spin_lock_init(&c->lock);
-	}
+	init_histograms();
+	init_timer(&block_hist_priv->timer);
+	block_hist_priv->current_min = 0;
+	enable_hist_timer(block_hist_priv);
 
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);
@@ -575,6 +653,7 @@ void __exit block_hist_latency_tp_exit(void)
 	tracepoint_synchronize_unregister();
 
 	block_hist_priv = latency_tracker_get_priv(tracker);
+	del_timer_sync(&block_hist_priv->timer);
 	kfree(block_hist_priv);
 
 	latency_tracker_destroy(tracker);
