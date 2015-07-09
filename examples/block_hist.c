@@ -60,7 +60,6 @@
  * = 41 intervals
  */
 #define LATENCY_BUCKETS 41
-#define LATENCY_AGGREGATE 1000
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -144,7 +143,7 @@ struct block_hist_tracker {
 	struct iohist latency_history[AGGREGATES];
 	/* index in latency_history % AGGREGATES */
 	int current_min;
-
+	struct iohist tmp_display;
 };
 
 static struct latency_tracker *tracker;
@@ -153,6 +152,9 @@ static int rq_cnt = 0;
 
 static struct proc_dir_entry *block_hist_tracker_proc_dentry;
 static const struct file_operations block_hist_tracker_fops;
+
+static struct proc_dir_entry *block_hist_tracker_history_proc_dentry;
+static const struct file_operations block_hist_tracker_history_fops;
 
 static void enable_hist_timer(struct block_hist_tracker *b);
 
@@ -327,6 +329,8 @@ void update_hist(struct latency_tracker_event *s, enum io_type t,
 	delta = now - s->start_ts;
 
 	spin_lock_irqsave(&h->lock, flags);
+	if (h->ts_begin == 0)
+		h->ts_begin = trace_clock_read64();
 	if (delta < h->min)
 		h->min = delta;
 	if (delta > h->max)
@@ -489,13 +493,93 @@ static int block_hist_show(struct seq_file *m, void *v)
 }
 
 static
+void output_history_hist(struct seq_file *m, struct iohist *h)
+{
+	int i, j;
+
+	seq_printf(m, "Range    \t\ts_read\ts_write\ts_rw\ts_sync\t"
+		"s_open\ts_close\tb_read\tb_write\n");
+	for(i = 0; i < LATENCY_BUCKETS; i++) {
+		seq_printf(m, "[");
+		output_bucket_value(1ULL << i, m);
+		seq_printf(m, ", ");
+		output_bucket_value(1ULL << (i+1), m);
+		seq_printf(m, "[\t");
+		for (j = 0; j < IO_TYPE_NR; j++)
+			seq_printf(m, "\t%u", h->values[j][i]);
+		seq_printf(m, "\n");
+	}
+	seq_printf(m, "\n");
+}
+
+static inline
+int get_index(struct block_hist_tracker *b, int minus)
+{
+	int diff = (b->current_min - minus) % AGGREGATES;
+
+	if (diff >= 0)
+		return diff;
+	return AGGREGATES + diff;
+}
+
+static int block_hist_show_history(struct seq_file *m, void *v)
+{
+	struct block_hist_tracker *b = (struct block_hist_tracker *) m->private;
+	int index, i, j, k;
+	struct iohist *tmp;
+	uint64_t begin, end;
+
+	index = get_index(b, 1);
+	seq_printf(m, "1 minute\n");
+	if (b->latency_history[index].ts_end != 0)
+		output_history_hist(m, &b->latency_history[index]);
+
+	memset(&b->tmp_display, 0, sizeof(b->tmp_display));
+	for (i = 1; i < 6; i++) {
+		tmp = &b->latency_history[get_index(b, i)];
+		for (j = 0; j < IO_TYPE_NR; j++) {
+			for (k = 0; k < LATENCY_BUCKETS; k++) {
+				b->tmp_display.values[j][k] += tmp->values[j][k];
+			}
+		}
+	}
+	seq_printf(m, "5 min %p\n", b);
+	output_history_hist(m, &b->tmp_display);
+
+	memset(&b->tmp_display, 0, sizeof(b->tmp_display));
+	for (i = 1; i < 16; i++) {
+		tmp = &b->latency_history[get_index(b, i)];
+		for (j = 0; j < IO_TYPE_NR; j++) {
+			for (k = 0; k < LATENCY_BUCKETS; k++) {
+				b->tmp_display.values[j][k] += tmp->values[j][k];
+			}
+		}
+	}
+	seq_printf(m, "15 min\n");
+	output_history_hist(m, &b->tmp_display);
+	seq_printf(m, "1 min %p\n", b->latency_history[index]);
+	output_history_hist(m);
+	return 0;
+}
+
+static
 int tracker_proc_open(struct inode *inode, struct file *filp)
 {
 	struct block_hist_tracker *block_hist_priv = PDE_DATA(inode);
 
 	filp->private_data = block_hist_priv;
 
-	return single_open(filp, block_hist_show, NULL);
+	return single_open(filp, block_hist_show, block_hist_priv);
+}
+
+static
+int tracker_history_proc_open(struct inode *inode, struct file *filp)
+{
+	struct block_hist_tracker *block_hist_priv = PDE_DATA(inode);
+
+//	filp->private_data = block_hist_priv;
+
+	return single_open(filp, block_hist_show_history, block_hist_priv);
 }
 
 static const
@@ -507,10 +591,20 @@ struct file_operations block_hist_tracker_fops = {
 	.release = single_release,
 };
 
+static const
+struct file_operations block_hist_tracker_history_fops = {
+	.owner = THIS_MODULE,
+	.open = tracker_history_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 static
 void init_histograms(void)
 {
 	int cpu;
+	struct iohist *c;
 
 	lttng_this_cpu_ptr(&live_hist)->min = -1ULL;
 	lttng_this_cpu_ptr(&live_hist)->max = 0;
@@ -518,8 +612,6 @@ void init_histograms(void)
 	lttng_this_cpu_ptr(&current_hist)->min = -1ULL;
 	lttng_this_cpu_ptr(&current_hist)->max = 0;
 	for_each_possible_cpu(cpu) {
-		struct iohist *c;
-
 		c = per_cpu_ptr(&live_hist, cpu);
 		spin_lock_init(&c->lock);
 		c = per_cpu_ptr(&current_hist, cpu);
@@ -537,6 +629,10 @@ void merge_reset_per_cpu_current_hist(struct iohist *h)
 	get_online_cpus();
 	for_each_online_cpu(cpu) {
 		c = per_cpu_ptr(&current_hist, cpu);
+		if (h->ts_begin == 0)
+			h->ts_begin = c->ts_begin;
+		else if (c->ts_begin < h->ts_begin)
+			h->ts_begin = c->ts_begin;
 		spin_lock_irqsave(&c->lock, flags);
 		for (i = 0; i < IO_TYPE_NR; i++) {
 			for (j = 0; j < LATENCY_BUCKETS; j++) {
@@ -544,9 +640,11 @@ void merge_reset_per_cpu_current_hist(struct iohist *h)
 				c->values[i][j] = 0;
 			}
 		}
+		c->ts_begin = 0;
 		spin_unlock_irqrestore(&c->lock, flags);
 	}
 	put_online_cpus();
+	h->ts_end = trace_clock_read64();
 }
 
 
@@ -555,8 +653,8 @@ void timer_cb(unsigned long ptr)
 {
 	struct block_hist_tracker *b = (struct block_hist_tracker *) ptr;
 
-	b->current_min = (b->current_min + 1) % AGGREGATES;
 	merge_reset_per_cpu_current_hist(&b->latency_history[b->current_min]);
+	b->current_min = (b->current_min + 1) % AGGREGATES;
 
 	enable_hist_timer(b);
 }
@@ -568,10 +666,10 @@ void enable_hist_timer(struct block_hist_tracker *b)
 
 	b->timer.function = timer_cb;
 	/* 60 seconds */
-	//b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(60000000000);
+	b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(60000000000);
 	/* 10 seconds */
 	//b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(10000000000);
-	b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(1000000000);
+	//b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(1000000000);
 	b->timer.data = (unsigned long) b;
 	add_timer(&b->timer);
 }
@@ -627,6 +725,15 @@ int __init block_hist_latency_tp_init(void)
 		goto end;
 	}
 
+	block_hist_tracker_history_proc_dentry = proc_create_data("block_hist_tracker_history",
+			0, NULL, &block_hist_tracker_history_fops, block_hist_priv);
+
+	if (!block_hist_tracker_history_proc_dentry) {
+		printk(KERN_ERR "Error creating tracker control file\n");
+		ret = -ENOMEM;
+		goto end;
+	}
+
 	ret = 0;
 	goto end;
 
@@ -662,6 +769,8 @@ void __exit block_hist_latency_tp_exit(void)
 	printk("Total block requests : %d\n", rq_cnt);
 	if (block_hist_tracker_proc_dentry)
 		remove_proc_entry("block_hist_tracker", NULL);
+	if (block_hist_tracker_history_proc_dentry)
+		remove_proc_entry("block_hist_tracker_history", NULL);
 }
 module_exit(block_hist_latency_tp_exit);
 
