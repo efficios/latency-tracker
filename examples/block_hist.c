@@ -527,7 +527,7 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 	struct block_hist_tracker *b = (struct block_hist_tracker *) m->private;
 	int index, i, j, k;
 	struct iohist *tmp;
-	uint64_t begin, end;
+//	uint64_t begin, end;
 
 	index = get_index(b, 1);
 	seq_printf(m, "1 minute\n");
@@ -557,8 +557,6 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 	}
 	seq_printf(m, "15 min\n");
 	output_history_hist(m, &b->tmp_display);
-	seq_printf(m, "1 min %p\n", b->latency_history[index]);
-	output_history_hist(m);
 	return 0;
 }
 
