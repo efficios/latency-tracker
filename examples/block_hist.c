@@ -540,34 +540,40 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 			b->latency_history[index].ts_end);
 	output_history_hist(m, &b->latency_history[index]);
 
+	end = 0;
+	begin = -1ULL;
 	memset(&b->tmp_display, 0, sizeof(b->tmp_display));
 	for (i = 1; i < 6; i++) {
 		tmp = &b->latency_history[get_index(b, i)];
-		if (i == 1)
+		if (tmp->ts_begin != 0 && tmp->ts_begin < begin)
 			begin = tmp->ts_begin;
+		if (tmp->ts_end != 0 && tmp->ts_end > end)
+			end = tmp->ts_end;
 		for (j = 0; j < IO_TYPE_NR; j++) {
 			for (k = 0; k < LATENCY_BUCKETS; k++) {
 				b->tmp_display.values[j][k] += tmp->values[j][k];
 			}
 		}
 	}
-	end = tmp->ts_end;
-	seq_printf(m, "5 min [%llu, %llu]\n", begin, end);
+	seq_printf(m, "5 min [%llu, %llu] %llu\n", begin, end, ((end - begin)/1000000000)/60);
 	output_history_hist(m, &b->tmp_display);
 
+	end = 0;
+	begin = -1ULL;
 	memset(&b->tmp_display, 0, sizeof(b->tmp_display));
 	for (i = 1; i < 16; i++) {
 		tmp = &b->latency_history[get_index(b, i)];
-		if (i == 1)
+		if (tmp->ts_begin != 0 && tmp->ts_begin < begin)
 			begin = tmp->ts_begin;
+		if (tmp->ts_end != 0 && tmp->ts_end > end)
+			end = tmp->ts_end;
 		for (j = 0; j < IO_TYPE_NR; j++) {
 			for (k = 0; k < LATENCY_BUCKETS; k++) {
 				b->tmp_display.values[j][k] += tmp->values[j][k];
 			}
 		}
 	}
-	end = tmp->ts_end;
-	seq_printf(m, "15 min [%llu, %llu]\n", begin, end);
+	seq_printf(m, "15 min [%llu, %llu] %llu\n", begin, end, ((end - begin)/1000000000)/60);
 	output_history_hist(m, &b->tmp_display);
 	return 0;
 }
@@ -663,6 +669,7 @@ void timer_cb(unsigned long ptr)
 {
 	struct block_hist_tracker *b = (struct block_hist_tracker *) ptr;
 
+	memset(&b->latency_history[b->current_min], 0, sizeof(struct iohist));
 	merge_reset_per_cpu_current_hist(&b->latency_history[b->current_min]);
 	b->current_min = (b->current_min + 1) % AGGREGATES;
 
@@ -676,9 +683,9 @@ void enable_hist_timer(struct block_hist_tracker *b)
 
 	b->timer.function = timer_cb;
 	/* 60 seconds */
-	//b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(60000000000);
+	b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(60000000000);
 	/* 10 seconds */
-	b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(10000000000);
+	//b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(10000000000);
 	//b->timer.expires = jiffies + wrapper_nsecs_to_jiffies(1000000000);
 	b->timer.data = (unsigned long) b;
 	add_timer(&b->timer);
