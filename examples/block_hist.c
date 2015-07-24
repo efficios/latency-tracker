@@ -149,6 +149,7 @@ struct block_hist_tracker {
 static struct latency_tracker *tracker;
 static int cnt = 0;
 static int rq_cnt = 0;
+static int skip_cnt = 0;
 
 static struct proc_dir_entry *block_hist_tracker_proc_dentry;
 static const struct file_operations block_hist_tracker_fops;
@@ -233,6 +234,7 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 		thresh, blk_cb, timeout, 0,
 		latency_tracker_get_priv(tracker));
 	if (ret == LATENCY_TRACKER_FULL) {
+		skip_cnt++;
 		//printk("latency_tracker block: no more free events, consider "
 		//		"increasing the max_events parameter\n");
 	} else if (ret) {
@@ -245,7 +247,7 @@ unsigned int get_bucket(uint64_t v)
 {
 	if (v > (1ULL << (LATENCY_BUCKETS - 1)))
 		return LATENCY_BUCKETS;
-	return fls_long(v - 1);
+	return fls_long(v - 1) - 1;
 }
 
 static
@@ -699,7 +701,7 @@ int __init block_hist_latency_tp_init(void)
 	/* limit to 1 evt/sec */
 	block_hist_priv->ns_rate_limit = 1000000000;
 
-	tracker = latency_tracker_create(NULL, NULL, 100, 0,
+	tracker = latency_tracker_create(NULL, NULL, 100000, 0,
 			usec_gc_period * 1000,
 			usec_gc_period * 1000,
 			block_hist_priv);
@@ -777,6 +779,7 @@ void __exit block_hist_latency_tp_exit(void)
 
 	printk("Total block alerts : %d\n", cnt);
 	printk("Total block requests : %d\n", rq_cnt);
+	printk("Skipped : %d\n", skip_cnt);
 	if (block_hist_tracker_proc_dentry)
 		remove_proc_entry("block_hist_tracker", NULL);
 	if (block_hist_tracker_history_proc_dentry)
