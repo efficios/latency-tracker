@@ -110,8 +110,6 @@ struct latency_tracker_event *wrapper_freelist_get_event(
 	struct llist_node *node;
 	
 	rcu_read_lock_sched_notrace();
-	if (llist_empty(&tracker->ll_events_free_list))
-		goto error;
 	node = llist_del_first(&tracker->ll_events_free_list);
 	rcu_read_unlock_sched_notrace();
 	if (!node)

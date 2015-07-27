@@ -97,7 +97,7 @@ void discard_event(struct latency_tracker *tracker,
 	 */
 	int was_empty;
 
-	was_empty = llist_add(&s->llist, &tracker->to_release);
+	was_empty = llist_add(&s->release_llist, &tracker->to_release);
 	if (was_empty)
 		queue_delayed_work(tracker->tracker_call_rcu_q,
 				&tracker->tracker_call_rcu_w, 100);
@@ -124,7 +124,7 @@ void tracker_call_rcu_workqueue(struct work_struct *work)
 
        list = llist_del_all(&tracker->to_release);
        synchronize_sched();
-       llist_for_each_entry_safe(e, n, list, llist)
+       llist_for_each_entry_safe(e, n, list, release_llist)
 	       wrapper_freelist_put_event(tracker, e);
 }
 #endif
