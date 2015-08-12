@@ -62,7 +62,11 @@ static
 struct kretprobe probe_new_sync_write = {
 	.entry_handler = entry_new_sync_write,
 	.handler = exit_new_sync_write,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,18,0))
+	.kp.symbol_name = "do_sync_write",
+#else
 	.kp.symbol_name = "new_sync_write",
+#endif
 };
 
 static
@@ -117,7 +121,11 @@ static
 struct kretprobe probe_new_sync_read = {
 	.entry_handler = entry_new_sync_read,
 	.handler = exit_new_sync_read,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,18,0))
+	.kp.symbol_name = "do_sync_read",
+#else
 	.kp.symbol_name = "new_sync_read",
+#endif
 };
 
 int setup_kprobes(void)
