@@ -22,7 +22,8 @@ obj-m += latency_tracker_syscalls.o
 latency_tracker_block-objs := examples/block_latency_tp.o
 obj-m += latency_tracker_block.o
 
-latency_tracker_block_hist-objs := examples/block_hist.o wrapper/trace-clock.o
+latency_tracker_block_hist-objs := examples/block_hist.o examples/block_hist_kprobes.o \
+	wrapper/trace-clock.o
 obj-m += latency_tracker_block_hist.o
 
 latency_tracker_network_stack-objs := examples/network_stack_latency.o

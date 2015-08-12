@@ -31,6 +31,7 @@
 #include <linux/poll.h>
 #include <linux/cpu.h>
 #include "block_hist.h"
+#include "block_hist_kprobes.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
@@ -40,116 +41,30 @@
 #include <trace/events/latency_tracker.h>
 
 /*
- * Threshold to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_BLK_LATENCY_THRESHOLD 5 * 1000
-#define DEFAULT_USEC_BLK_LATENCY_TIMEOUT 0
-/*
- * Garbage collector parameters (microseconds).
- */
-#define DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD 0
-#define DEFAULT_USEC_BLK_LATENCY_GC_PERIOD 0
-
-/*
- * log2 scale, so:
- * 0-9:   1ns, 2, 4, 8, 16, 32, 64, 128, 256, 512
- * 10-19: 1us, 2, 4...
- * 20-29: 1ms, ... 512ms
- * 30-39: 1s, ... 512s
- * 40: > 512s
- * = 41 intervals
- */
-#define LATENCY_BUCKETS 41
-
-/*
  * microseconds because we can't guarantee the passing of 64-bit
  * arguments to insmod on all architectures.
  */
-static unsigned long usec_threshold = DEFAULT_USEC_BLK_LATENCY_THRESHOLD;
+unsigned long usec_threshold = DEFAULT_USEC_BLK_LATENCY_THRESHOLD;
+unsigned long usec_timeout = DEFAULT_USEC_BLK_LATENCY_TIMEOUT;
+unsigned long usec_gc_threshold = DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD;
+unsigned long usec_gc_period = DEFAULT_USEC_BLK_LATENCY_GC_PERIOD;
+
 module_param(usec_threshold, ulong, 0644);
 MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 
-static unsigned long usec_timeout = DEFAULT_USEC_BLK_LATENCY_TIMEOUT;
 module_param(usec_timeout, ulong, 0644);
 MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
-static unsigned long usec_gc_threshold = DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD;
 module_param(usec_gc_threshold, ulong, 0644);
 MODULE_PARM_DESC(usec_gc_threshold, "Garbage collector threshold in microseconds");
 
-static unsigned long usec_gc_period = DEFAULT_USEC_BLK_LATENCY_GC_PERIOD;
 module_param(usec_gc_period, ulong, 0644);
 MODULE_PARM_DESC(usec_gc_period, "Garbage collector period in microseconds");
 
-struct blkkey {
-	dev_t dev;
-	sector_t sector;
-} __attribute__((__packed__));
-
-struct sched_key_t {
-  pid_t pid;
-} __attribute__((__packed__));
-
-enum wake_reason {
-	BLOCK_TRACKER_WAKE_DATA = 0,
-	BLOCK_TRACKER_WAIT = 1,
-	BLOCK_TRACKER_HUP = 2,
-};
-
-enum io_type {
-	IO_SYSCALL_READ = 0,
-	IO_SYSCALL_WRITE = 1,
-	IO_SYSCALL_RW = 2,
-	IO_SYSCALL_SYNC = 3,
-	IO_SYSCALL_OPEN = 4,
-	IO_SYSCALL_CLOSE = 5,
-
-	IO_BLOCK_READ = 6,
-	IO_BLOCK_WRITE = 7,
-
-	/* must always be the last value in this enum */
-	IO_TYPE_NR = 8,
-};
-
-struct iohist {
-	uint64_t min;
-	uint64_t max;
-	uint64_t ts_begin;
-	uint64_t ts_end;
-	unsigned int values[IO_TYPE_NR][LATENCY_BUCKETS];
-	int nb_values;
-        spinlock_t lock;
-};
-
-DECLARE_PER_CPU(struct iohist, live_hist);
 DEFINE_PER_CPU(struct iohist, live_hist);
-
-DECLARE_PER_CPU(struct iohist, current_hist);
 DEFINE_PER_CPU(struct iohist, current_hist);
 
 struct iohist global_live_hist;
-
-#define AGGREGATES 15
-
-struct block_hist_tracker {
-	u64 last_alert_ts;
-	u64 ns_rate_limit;
-	wait_queue_head_t read_wait;
-	enum wake_reason reason;
-	bool got_alert;
-	int readers;
-        struct timer_list timer;
-	/* array of 1 minute aggregates */
-	struct iohist latency_history[AGGREGATES];
-	/* index in latency_history % AGGREGATES */
-	int current_min;
-	struct iohist tmp_display;
-};
-
-static struct latency_tracker *tracker;
-static int cnt = 0;
-static int rq_cnt = 0;
-static int skip_cnt = 0;
 
 static struct proc_dir_entry *block_hist_tracker_proc_dentry;
 static const struct file_operations block_hist_tracker_fops;
@@ -159,13 +74,18 @@ static const struct file_operations block_hist_tracker_history_fops;
 
 static void enable_hist_timer(struct block_hist_tracker *b);
 
-static
+int cnt;
+int rq_cnt;
+int skip_cnt;
+
+struct latency_tracker *tracker;
+
 void blk_cb(unsigned long ptr)
 {
 #if 0
 	struct latency_tracker_event *data =
 		(struct latency_tracker_event *) ptr;
-	struct blkkey *key = (struct blkkey *) data->tkey.key;
+	struct blk_key_t *key = (struct blk_key_t *) data->tkey.key;
 	struct block_hist_tracker *block_hist_priv =
 		(struct block_hist_tracker *) data->priv;
 
@@ -202,20 +122,21 @@ end:
 }
 
 static
-void rq_to_key(struct blkkey *key, struct request *rq)
+void rq_to_key(struct blk_key_t *key, struct request *rq)
 {
 	if (!key || !rq)
 		return;
 
 	key->sector = blk_rq_pos(rq);
 	key->dev = rq->rq_disk ? disk_devt(rq->rq_disk) : 0;
+	key->type = KEY_BLOCK;
 }
 
 static
 void probe_block_rq_issue(void *ignore, struct request_queue *q,
 		struct request *rq)
 {
-	struct blkkey key;
+	struct blk_key_t key;
 	u64 thresh, timeout;
 	enum latency_tracker_event_in_ret ret;
 
@@ -302,8 +223,9 @@ void output_live_hist(struct seq_file *m)
 
 	merge_reset_per_cpu_live_hist(&global_live_hist);
 
-	seq_printf(m, "Range    \t\ts_read\ts_write\ts_rw\ts_sync\t"
-			"s_open\ts_close\tb_read\tb_write\n");
+	seq_printf(m, "Range    \t\tsys_rd\tsys_wrt\tsys_rw\tsys_snc\t"
+			"sys_opn\tsys_cls\tfs_rd\tfs_wrt\t"
+			"b_rd\tb_wrt\n");
 	for(i = 0; i < LATENCY_BUCKETS; i++) {
 		seq_printf(m, "[");
 		output_bucket_value(1ULL << i, m);
@@ -319,7 +241,6 @@ void output_live_hist(struct seq_file *m)
 	reset_hist(&global_live_hist);
 }
 
-static
 void update_hist(struct latency_tracker_event *s, enum io_type t,
 		struct iohist *h)
 {
@@ -348,7 +269,7 @@ static
 void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		struct request *rq, unsigned int nr_bytes)
 {
-	struct blkkey key;
+	struct blk_key_t key;
 	struct latency_tracker_event *s;
 
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
@@ -454,27 +375,37 @@ void probe_syscall_enter(void *ignore, struct pt_regs *regs,
 		long id)
 {
 	struct task_struct* task = current;
-	struct sched_key_t sched_key;
+	struct syscall_key_t syscall_key;
+	enum latency_tracker_event_in_ret ret;
 	u64 thresh, timeout;
 
 	if (io_syscall(id) < 0)
 		return;
 
-	sched_key.pid = task->pid;
+	syscall_key.pid = task->pid;
+	syscall_key.type = KEY_SYSCALL;
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
-	latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
+	ret = latency_tracker_event_in(tracker, &syscall_key, sizeof(syscall_key),
 			thresh, blk_cb, timeout, 0, (void *) id);
+	if (ret == LATENCY_TRACKER_FULL) {
+		skip_cnt++;
+		//printk("latency_tracker block: no more free events, consider "
+		//		"increasing the max_events parameter\n");
+	} else if (ret) {
+		printk("latency_tracker block: error adding event\n");
+	}
 }
 
 static
 void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 {
-	struct sched_key_t key;
+	struct syscall_key_t key;
 	struct latency_tracker_event *s;
 
 	key.pid = current->pid;
+	key.type = KEY_SYSCALL;
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
 		goto end;
@@ -699,6 +630,7 @@ int __init block_hist_latency_tp_init(void)
 	int ret;
 	struct block_hist_tracker *block_hist_priv;
 
+	cnt = rq_cnt = skip_cnt = 0;
 	block_hist_priv = kzalloc(sizeof(struct block_hist_tracker), GFP_KERNEL);
 	if (!block_hist_priv) {
 		ret = -ENOMEM;
@@ -733,6 +665,9 @@ int __init block_hist_latency_tp_init(void)
 	WARN_ON(ret);
 	ret = lttng_wrapper_tracepoint_probe_register(
 			"sys_exit", probe_syscall_exit, NULL);
+	WARN_ON(ret);
+
+	ret = setup_kprobes();
 	WARN_ON(ret);
 
 	block_hist_tracker_proc_dentry = proc_create("block_hist_tracker",
@@ -777,6 +712,7 @@ void __exit block_hist_latency_tp_exit(void)
 	lttng_wrapper_tracepoint_probe_unregister(
 			"sys_exit", probe_syscall_exit, NULL);
 	tracepoint_synchronize_unregister();
+	remove_kprobes();
 
 	block_hist_priv = latency_tracker_get_priv(tracker);
 	del_timer_sync(&block_hist_priv->timer);
