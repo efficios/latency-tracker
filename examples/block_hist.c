@@ -279,23 +279,38 @@ void merge_reset_per_cpu_live_hist(struct iohist *h)
 static
 void output_live_hist(struct seq_file *m)
 {
-	int i, j;
+	int i;
 
 	merge_reset_per_cpu_live_hist(&global_live_hist);
 
-	seq_printf(m, "Range    \t\tsys_rd\tsys_wrt\tsys_rw\tsys_snc\t"
-			"sys_opn\tsys_cls\tfs_rd\tfs_wrt\t"
-			"sched_r\tsched_w\t"
-			"blk_rd\tblk_wrt\n");
+	seq_printf(m, "Range           |                    syscall         "
+			"           |      fs       |   iosched     |    block\n"
+			"                |read   write    r+w     sync    open    "
+			"close  |read    write  |read    write  |read    write\n"
+			"########################################################"
+			"######################################################\n");
 	for(i = 0; i < LATENCY_BUCKETS; i++) {
 		seq_printf(m, "[");
 		output_bucket_value(1ULL << i, m);
 		seq_printf(m, ", ");
 		output_bucket_value(1ULL << (i+1), m);
-		seq_printf(m, "[\t");
-		for (j = 0; j < IO_TYPE_NR; j++)
-			seq_printf(m, "\t%u",
-					global_live_hist.values[j][i]);
+		seq_printf(m, "[");
+		seq_printf(m, "\t|%u", global_live_hist.values[IO_SYSCALL_READ][i]);
+		seq_printf(m, "\t %u", global_live_hist.values[IO_SYSCALL_WRITE][i]);
+		seq_printf(m, "\t %u", global_live_hist.values[IO_SYSCALL_RW][i]);
+		seq_printf(m, "\t %u", global_live_hist.values[IO_SYSCALL_SYNC][i]);
+		seq_printf(m, "\t %u", global_live_hist.values[IO_SYSCALL_OPEN][i]);
+		seq_printf(m, "\t %u", global_live_hist.values[IO_SYSCALL_CLOSE][i]);
+
+		seq_printf(m, "\t|%u", global_live_hist.values[IO_FS_READ][i]);
+		seq_printf(m, "\t %u", global_live_hist.values[IO_FS_WRITE][i]);
+
+		seq_printf(m, "\t|%u", global_live_hist.values[IO_SCHED_READ][i]);
+		seq_printf(m, "\t %u", global_live_hist.values[IO_SCHED_WRITE][i]);
+
+		seq_printf(m, "\t|%u", global_live_hist.values[IO_BLOCK_READ][i]);
+		seq_printf(m, "\t %u", global_live_hist.values[IO_BLOCK_WRITE][i]);
+
 		seq_printf(m, "\n");
 	}
 	seq_printf(m, "\n");
