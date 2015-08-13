@@ -283,14 +283,14 @@ void output_live_hist(struct seq_file *m)
 
 	merge_reset_per_cpu_live_hist(&global_live_hist);
 
-	seq_printf(m, "Range           |                    syscall         "
+	seq_printf(m, "Latency range   |                    syscall         "
 			"           |      fs       |   iosched     |    block\n"
 			"                |read   write    r+w     sync    open    "
 			"close  |read    write  |read    write  |read    write\n"
 			"########################################################"
-			"######################################################\n");
+			"######################################################");
 	for(i = 0; i < LATENCY_BUCKETS; i++) {
-		seq_printf(m, "[");
+		seq_printf(m, "\n[");
 		output_bucket_value(1ULL << i, m);
 		seq_printf(m, ", ");
 		output_bucket_value(1ULL << (i+1), m);
@@ -310,8 +310,6 @@ void output_live_hist(struct seq_file *m)
 
 		seq_printf(m, "\t|%u", global_live_hist.values[IO_BLOCK_READ][i]);
 		seq_printf(m, "\t %u", global_live_hist.values[IO_BLOCK_WRITE][i]);
-
-		seq_printf(m, "\n");
 	}
 	seq_printf(m, "\n");
 	reset_hist(&global_live_hist);
