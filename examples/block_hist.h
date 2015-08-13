@@ -68,16 +68,20 @@ enum io_type {
 	IO_FS_READ = 6,
 	IO_FS_WRITE = 7,
 
-	IO_BLOCK_READ = 8,
-	IO_BLOCK_WRITE = 9,
+	IO_SCHED_READ = 8,
+	IO_SCHED_WRITE = 9,
+
+	IO_BLOCK_READ = 10,
+	IO_BLOCK_WRITE = 11,
 	/* must always be the last value in this enum */
-	IO_TYPE_NR = 10,
+	IO_TYPE_NR = 12,
 };
 
 enum tracker_key_type {
 	KEY_SYSCALL = 0,
 	KEY_FS = 1,
-	KEY_BLOCK = 2,
+	KEY_SCHED = 2,
+	KEY_BLOCK = 3,
 };
 
 /* Different keys must not have exactly the same fields. */

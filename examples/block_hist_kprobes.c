@@ -130,8 +130,12 @@ struct kretprobe probe_new_sync_read = {
 
 int setup_kprobes(void)
 {
-	register_kretprobe(&probe_new_sync_write);
-	register_kretprobe(&probe_new_sync_read);
+	int ret;
+
+	ret = register_kretprobe(&probe_new_sync_write);
+	WARN_ON(ret);
+	ret = register_kretprobe(&probe_new_sync_read);
+	WARN_ON(ret);
 
 	return 0;
 }

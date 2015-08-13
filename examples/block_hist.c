@@ -122,18 +122,22 @@ end:
 }
 
 static
-void rq_to_key(struct blk_key_t *key, struct request *rq)
+void rq_to_key(struct blk_key_t *key, struct request *rq,
+		enum tracker_key_type type)
 {
 	if (!key || !rq)
 		return;
 
 	key->sector = blk_rq_pos(rq);
 	key->dev = rq->rq_disk ? disk_devt(rq->rq_disk) : 0;
-	key->type = KEY_BLOCK;
+	key->type = type;
 }
 
+/*
+ * Insert into the I/O scheduler.
+ */
 static
-void probe_block_rq_issue(void *ignore, struct request_queue *q,
+void probe_block_rq_insert(void *ignore, struct request_queue *q,
 		struct request *rq)
 {
 	struct blk_key_t key;
@@ -147,7 +151,63 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 	if (blk_rq_sectors(rq) == 0)
 		return;
 
-	rq_to_key(&key, rq);
+	rq_to_key(&key, rq, KEY_SCHED);
+	thresh = usec_threshold * 1000;
+	timeout = usec_timeout * 1000;
+
+	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
+		thresh, blk_cb, timeout, 0,
+		latency_tracker_get_priv(tracker));
+	if (ret == LATENCY_TRACKER_FULL) {
+		skip_cnt++;
+		//printk("latency_tracker block: no more free events, consider "
+		//		"increasing the max_events parameter\n");
+	} else if (ret) {
+		printk("latency_tracker block: error adding event\n");
+	}
+}
+
+/*
+ * Dequeue from the I/O scheduler and send to the disk.
+ */
+static
+void probe_block_rq_issue(void *ignore, struct request_queue *q,
+		struct request *rq)
+{
+	struct blk_key_t key;
+	u64 thresh, timeout;
+	enum latency_tracker_event_in_ret ret;
+	struct latency_tracker_event *s;
+
+	rq_cnt++;
+	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+		return;
+
+	if (blk_rq_sectors(rq) == 0)
+		return;
+
+	/* Update the I/O scheduler stats */
+	rq_to_key(&key, rq, KEY_SCHED);
+	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	if (s) {
+		if (rq->cmd_flags % 2 == 0) {
+			update_hist(s, IO_SCHED_READ,
+					lttng_this_cpu_ptr(&live_hist));
+			update_hist(s, IO_SCHED_READ,
+					lttng_this_cpu_ptr(&current_hist));
+		} else {
+			update_hist(s, IO_SCHED_WRITE,
+					lttng_this_cpu_ptr(&live_hist));
+			update_hist(s, IO_SCHED_WRITE,
+					lttng_this_cpu_ptr(&current_hist));
+		}
+		latency_tracker_put_event(s);
+		latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+	}
+
+	/* Start tracking the request at the block level */
+	rq_to_key(&key, rq, KEY_BLOCK);
+
 	thresh = usec_threshold * 1000;
 	timeout = usec_timeout * 1000;
 
@@ -225,7 +285,8 @@ void output_live_hist(struct seq_file *m)
 
 	seq_printf(m, "Range    \t\tsys_rd\tsys_wrt\tsys_rw\tsys_snc\t"
 			"sys_opn\tsys_cls\tfs_rd\tfs_wrt\t"
-			"b_rd\tb_wrt\n");
+			"sched_r\tsched_w\t"
+			"blk_rd\tblk_wrt\n");
 	for(i = 0; i < LATENCY_BUCKETS; i++) {
 		seq_printf(m, "[");
 		output_bucket_value(1ULL << i, m);
@@ -275,7 +336,7 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
 
-	rq_to_key(&key, rq);
+	rq_to_key(&key, rq, KEY_BLOCK);
 
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
@@ -652,6 +713,10 @@ int __init block_hist_latency_tp_init(void)
 	block_hist_priv->current_min = 0;
 	enable_hist_timer(block_hist_priv);
 
+	ret = lttng_wrapper_tracepoint_probe_register("block_rq_insert",
+			probe_block_rq_insert, NULL);
+	WARN_ON(ret);
+
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);
 	WARN_ON(ret);
@@ -703,6 +768,8 @@ void __exit block_hist_latency_tp_exit(void)
 {
 	struct block_hist_tracker *block_hist_priv;
 
+	lttng_wrapper_tracepoint_probe_unregister("block_rq_insert",
+			probe_block_rq_insert, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("block_rq_issue",
 			probe_block_rq_issue, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("block_rq_complete",
