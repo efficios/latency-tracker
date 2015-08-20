@@ -30,6 +30,7 @@
 #include <linux/proc_fs.h>
 #include <linux/poll.h>
 #include <linux/cpu.h>
+#include <linux/vmalloc.h>
 #include "block_hist.h"
 #include "block_hist_kprobes.h"
 #include "../latency_tracker.h"
@@ -37,6 +38,7 @@
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/percpu-defs.h"
 #include "../wrapper/jiffies.h"
+#include "../wrapper/vmalloc.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -705,11 +707,12 @@ int __init block_hist_latency_tp_init(void)
 	struct block_hist_tracker *block_hist_priv;
 
 	cnt = rq_cnt = skip_cnt = 0;
-	block_hist_priv = kzalloc(sizeof(struct block_hist_tracker), GFP_KERNEL);
+	block_hist_priv = vzalloc(sizeof(struct block_hist_tracker));
 	if (!block_hist_priv) {
 		ret = -ENOMEM;
 		goto end;
 	}
+	wrapper_vmalloc_sync_all();
 	block_hist_priv->reason = BLOCK_TRACKER_WAIT;
 	/* limit to 1 evt/sec */
 	block_hist_priv->ns_rate_limit = 1000000000;
