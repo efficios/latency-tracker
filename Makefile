@@ -5,7 +5,7 @@ latency_tracker-objs := tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o
 ifneq ($(KERNELRELEASE),)
 latency_tracker-objs += $(shell \
 	if [ $(VERSION) -ge 4 -o \
-		$(VERSION) -eq 3 -a $(PATCHLEVEL) -ge 15 -a $(SUBLEVEL) -ge 0 ] ; then \
+		\( $(VERSION) -eq 3 -a $(PATCHLEVEL) -ge 15 -a $(SUBLEVEL) -ge 0 \) ] ; then \
 	echo "lttng-tracepoint.o" ; fi;)
 endif
 
