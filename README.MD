@@ -43,61 +43,67 @@ cd latency_tracker
 make
 ```
 
-Using it in the kernel
-----------------------
+Implemented modules
+-------------------
 
-Create a latency tracker with:
+Here is a list and the description of the examples ready to run (in the
+[`examples/`] directory.  For all these examples, the threshold and timeout
+parameters can be controlled at run-time in
+/sys/module/<module_name>/parameters/usec_{treshold|timeout}`.
 
-    struct latency_tracker *latency_tracker_create(
-        int (*match_fct) (const void *key1, const void *key2, size_t length),
-        u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-	int max_events, uint64_t gc_period, uint64_t gc_thresh);
+All of these examples require first that the `latency_tracker.ko` module is loaded
+(`insmod latency_tracker.ko`).
 
-You can pass NULL, to use default hash (`jhash`) and match (`memcmp`)
-functions.
+### Wakeup latency
 
-The parameter `max_events` is the maximum number events that can be present at
-any time (event_in without event_out).
-Since no memory allocation is done during the event_in, if the number of
-pre-allocated events is >= to max_events, the new event creations are dropped
-and a message is logged in dmesg until some events are cleared (by event_out).
+Measure the delay between the time a task has been woken up and the time it
+actually runs. When the delay is higher than the specified threshold (5 usec by
+default), a tracepoint is emitted (`wakeup_latency`).
+Example with ftrace (works also with LTTng, see below for the configuration):
 
-On the enter callsite, call:
+```
+# insmod latency_tracker.ko
+# insmod latency_tracker_wakeup.ko
+# echo 1 > /sys/kernel/debug/tracing/tracing_on
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/wakeup_latency/enable 
+# cat /sys/kernel/debug/tracing/trace_pipe
+rsyslogd   [001] d...   171.919230: wakeup_latency: comm=in:imklog, pid=412, delay=1496644, flag=0
+```
 
-    latency_tracker_event_in(struct latency_tracker *tracker,
-        void *key, size_t key_len, uint64_t thresh,
-        void (*cb)(unsigned long ptr),
-        uint64_t timeout, unsigned int unique, void *priv);
+###  Offcpu latency
 
-On the exit callsite, call:
+Measure how long a task has been scheduled out and why it was woken up. If a
+task has been scheduled out for more than the threshold, take the stack of its
+waker when it is woken up.
+Example with ftrace (works also with LTTng, see below for the configuration):
 
-    latency_tracker_event_out(struct latency_tracker *tracker,
-        void *key, unsigned int key_len, unsigned int id);
+```
+# insmod latency_tracker.ko
+# insmod latency_tracker_offcpu.ko
+# echo 1 > /sys/kernel/debug/tracing/tracing_on
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/offcpu_sched_switch/enable
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/offcpu_sched_wakeup/enable
+# cat /sys/kernel/debug/tracing/trace_pipe
+          <idle>-0     [002] dNh.   446.936781: offcpu_sched_wakeup: waker_comm=swapper/2 (0), wakee_comm=rcuos/1 (18), wakee_offcpu_delay=9999903039, flag=0, waker_stack=ttwu_do_wakeup+0xe2/0x100
+ttwu_do_activate.constprop.112+0x66/0x70
+sched_ttwu_pending+0x4f/0x70
+scheduler_ipi+0x5b/0x170
+smp_reschedule_interrupt+0x2a/0x30
+reschedule_interrupt+0x6d/0x80
+default_idle+0x23/0xe0
+arch_cpu_idle+0xf/0x20
+cpuidle_idle_call+0xce
+          <idle>-0     [002] d...   446.936841: offcpu_sched_switch: comm=rcuos/1, pid=18, delay=9999959521, flag=0, stack=schedule+0x29/0x70
+nocb_follower_wait+0xa2/0xf0
+rcu_nocb_kthread+0x3d/0x190
+kthread+0xc9/0xe0
+ret_from_fork+0x7c/0xb0
+```
 
-If the delay (ns) between the event_in and event_out is higher than
-thresh, execute cb with a pointer to the struct latency_tracker_event
-of this event. The pointer priv of this structure is initialized from
-priv passed here.
-
-If timeout (nsec) is > 0, start a timer to fire at now + timeout. If the
-timeout fires before the event_out, the cb_flag argument of the struct passed
-to the callback is set to LATENCY_TRACKER_CB_TIMEOUT and the timer is stopped.
-The event is not removed from the HT, so if the event_out arrives eventually,
-the callback is executed again but with cb_flag set to
-LATENCY_TRACKER_CB_NORMAL.
-
-The id is passed to the callback as the cb_out_id member of the struct. It
-can be used to track the event_out origin if multiple possible.
-
-The memory management of priv is left entirely to the caller.
-
-When done, destroy the tracker with:
-
-    latency_tracker_destroy(struct latency_tracker *tracker);
 
 
-Example usage
--------------
+Coding examples
+---------------
 
 ### Block I/O requests
 
@@ -198,6 +204,59 @@ can range from a few milliseconds to minutes.
 
 To try it, the script [`examples/watch-block-event.sh`](examples/watch-block-event.sh)
 give a good starting point.
+
+Using it in the kernel
+----------------------
+
+Create a latency tracker with:
+
+    struct latency_tracker *latency_tracker_create(
+        int (*match_fct) (const void *key1, const void *key2, size_t length),
+        u32 (*hash_fct) (const void *key, u32 length, u32 initval),
+	int max_events, uint64_t gc_period, uint64_t gc_thresh);
+
+You can pass NULL, to use default hash (`jhash`) and match (`memcmp`)
+functions.
+
+The parameter `max_events` is the maximum number events that can be present at
+any time (event_in without event_out).
+Since no memory allocation is done during the event_in, if the number of
+pre-allocated events is >= to max_events, the new event creations are dropped
+and a message is logged in dmesg until some events are cleared (by event_out).
+
+On the enter callsite, call:
+
+    latency_tracker_event_in(struct latency_tracker *tracker,
+        void *key, size_t key_len, uint64_t thresh,
+        void (*cb)(unsigned long ptr),
+        uint64_t timeout, unsigned int unique, void *priv);
+
+On the exit callsite, call:
+
+    latency_tracker_event_out(struct latency_tracker *tracker,
+        void *key, unsigned int key_len, unsigned int id);
+
+If the delay (ns) between the event_in and event_out is higher than
+thresh, execute cb with a pointer to the struct latency_tracker_event
+of this event. The pointer priv of this structure is initialized from
+priv passed here.
+
+If timeout (nsec) is > 0, start a timer to fire at now + timeout. If the
+timeout fires before the event_out, the cb_flag argument of the struct passed
+to the callback is set to LATENCY_TRACKER_CB_TIMEOUT and the timer is stopped.
+The event is not removed from the HT, so if the event_out arrives eventually,
+the callback is executed again but with cb_flag set to
+LATENCY_TRACKER_CB_NORMAL.
+
+The id is passed to the callback as the cb_out_id member of the struct. It
+can be used to track the event_out origin if multiple possible.
+
+The memory management of priv is left entirely to the caller.
+
+When done, destroy the tracker with:
+
+    latency_tracker_destroy(struct latency_tracker *tracker);
+
 
 Acknowledgment
 --------------
