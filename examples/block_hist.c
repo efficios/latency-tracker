@@ -799,7 +799,7 @@ void __exit block_hist_latency_tp_exit(void)
 
 	block_hist_priv = latency_tracker_get_priv(tracker);
 	del_timer_sync(&block_hist_priv->timer);
-	kfree(block_hist_priv);
+	vfree(block_hist_priv);
 
 	latency_tracker_destroy(tracker);
 
