@@ -153,61 +153,63 @@ tracesys+0xe1/0xe6
 
 ### I/O request latency histogram
 
-Measure how long a system call is running, if it is running for more than the
-threshold, record its stack every time it has some CPU time. That way, we can
-follow where it is blocked in the kernel.
+Classify the I/O requests at various level (syscall, FS, I/O scheduler and
+block device) into buckets of latency to give a quick overview of the current
+I/O activity and latency. Every time the data is output, the counters are
+reset, so it is possible to accurately measure what happened between 2 commands
+in terms of I/O, or just let it run and output the files once a day.
 
-Example with ftrace (works also with LTTng, see below for the configuration):
+[Video demo](http://ju.klipix.org/demo-latency_tracker.ogv)
 
 ```
 # insmod latency_tracker.ko
 # insmod latency_tracker_block_hist.ko
 # watch -n 1 cat /proc/block_hist_tracker
 # cat /proc/block_hist_tracker
-Latency range   |                    syscall                    |      fs       |   iosched     |    block
-		|read   write    r+w     sync    open    close  |read    write  |read    write  |read    write
-##############################################################################################################
-[1ns, 2ns[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[2ns, 4ns[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[4ns, 8ns[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[8ns, 16ns[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[16ns, 32ns[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[32ns, 64ns[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[64ns, 128ns[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[128ns, 256ns[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[256ns, 512ns[	|0	 0	 0	 0	 0	 8	|0	 0	|0	 0	|0	 0
-[512ns, 1us[	|9	 0	 0	 0	 2	 162	|45	 0	|0	 0	|0	 0
-[1us, 2us[	|21	 0	 0	 0	 22	 36	|59	 0	|0	 1	|0	 0
-[2us, 4us[	|78	 1	 0	 0	 75	 11	|26	 0	|0	 0	|0	 0
-[4us, 8us[	|76	 0	 0	 0	 78	 0	|37	 0	|0	 2	|0	 0
-[8us, 16us[	|22	 11	 0	 0	 18	 0	|4	 2	|0	 0	|0	 0
-[16us, 32us[	|3	 4	 0	 0	 3	 0	|1	 1	|0	 0	|0	 0
-[32us, 64us[	|1	 14	 0	 0	 0	 0	|1	 0	|0	 0	|0	 0
-[64us, 128us[	|5	 10	 0	 0	 0	 0	|2	 0	|0	 0	|0	 0
-[128us, 256us[	|0	 1	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[256us, 512us[	|1	 0	 0	 0	 3	 0	|1	 0	|0	 0	|0	 1
-[512us, 1ms[	|1	 0	 0	 0	 4	 0	|1	 0	|0	 0	|0	 2
-[1ms, 2ms[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[2ms, 4ms[	|1	 0	 0	 0	 0	 0	|1	 0	|0	 0	|0	 0
-[4ms, 8ms[	|3	 0	 0	 0	 0	 0	|3	 0	|0	 0	|0	 0
-[8ms, 16ms[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[16ms, 32ms[	|1	 0	 0	 0	 0	 0	|1	 0	|0	 0	|0	 0
-[32ms, 64ms[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[64ms, 128ms[	|1	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[128ms, 256ms[	|4	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[256ms, 512ms[	|4	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[512ms, 1s[	|1	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[1s, 2s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[2s, 4s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[4s, 8s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[8s, 16s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[16s, 32s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[32s, 64s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[64s, 128s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[128s, 256s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[256s, 512s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[512s, 1024s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
-[1024s, 2048s[	|0	 0	 0	 0	 0	 0	|0	 0	|0	 0	|0	 0
+Latency range   |                    syscall        |      fs   |   iosched |    block
+                |read  write r+w   sync  open  close|read  write|read  write|read  write
+#########################################################################################
+[1ns, 2ns[      |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[2ns, 4ns[      |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[4ns, 8ns[      |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[8ns, 16ns[     |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[16ns, 32ns[    |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[32ns, 64ns[    |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[64ns, 128ns[   |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[128ns, 256ns[  |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[256ns, 512ns[  |0     0     0     0     0     8    |0     0    |0     0    |0     0
+[512ns, 1us[    |9     0     0     0     2     162  |45    0    |0     0    |0     0
+[1us, 2us[      |21    0     0     0     22    36   |59    0    |0     1    |0     0
+[2us, 4us[      |78    1     0     0     75    11   |26    0    |0     0    |0     0
+[4us, 8us[      |76    0     0     0     78    0    |37    0    |0     2    |0     0
+[8us, 16us[     |22    11    0     0     18    0    |4     2    |0     0    |0     0
+[16us, 32us[    |3     4     0     0     3     0    |1     1    |0     0    |0     0
+[32us, 64us[    |1     14    0     0     0     0    |1     0    |0     0    |0     0
+[64us, 128us[   |5     10    0     0     0     0    |2     0    |0     0    |0     0
+[128us, 256us[  |0     1     0     0     0     0    |0     0    |0     0    |0     0
+[256us, 512us[  |1     0     0     0     3     0    |1     0    |0     0    |0     1
+[512us, 1ms[    |1     0     0     0     4     0    |1     0    |0     0    |0     2
+[1ms, 2ms[      |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[2ms, 4ms[      |1     0     0     0     0     0    |1     0    |0     0    |0     0
+[4ms, 8ms[      |3     0     0     0     0     0    |3     0    |0     0    |0     0
+[8ms, 16ms[     |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[16ms, 32ms[    |1     0     0     0     0     0    |1     0    |0     0    |0     0
+[32ms, 64ms[    |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[64ms, 128ms[   |1     0     0     0     0     0    |0     0    |0     0    |0     0
+[128ms, 256ms[  |4     0     0     0     0     0    |0     0    |0     0    |0     0
+[256ms, 512ms[  |4     0     0     0     0     0    |0     0    |0     0    |0     0
+[512ms, 1s[     |1     0     0     0     0     0    |0     0    |0     0    |0     0
+[1s, 2s[        |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[2s, 4s[        |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[4s, 8s[        |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[8s, 16s[       |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[16s, 32s[      |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[32s, 64s[      |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[64s, 128s[     |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[128s, 256s[    |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[256s, 512s[    |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[512s, 1024s[   |0     0     0     0     0     0    |0     0    |0     0    |0     0
+[1024s, 2048s[  |0     0     0     0     0     0    |0     0    |0     0    |0     0
 
 ```
 
