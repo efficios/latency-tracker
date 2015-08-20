@@ -100,6 +100,55 @@ kthread+0xc9/0xe0
 ret_from_fork+0x7c/0xb0
 ```
 
+### System calls latency
+
+Measure how long a system call is running, if it is running for more than the
+threshold, record its stack every time it has some CPU time. That way, we can
+follow where it is blocked in the kernel.
+
+Example with ftrace (works also with LTTng, see below for the configuration):
+
+```
+# insmod latency_tracker.ko
+# insmod latency_tracker_syscalls.ko
+# echo 1 > /sys/module/latency_tracker_syscalls/parameters/watch_all
+# echo 1 > /sys/kernel/debug/tracing/tracing_on
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/syscall_latency/enable
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/syscall_latency_stack/enable
+# cat /sys/kernel/debug/tracing/trace_pipe # example with a "sync" process that is blocked in the kernel
+     kworker/3:2-28326 [003] d... 81136.470321: syscall_latency_stack: comm=sync, pid=32224, start_ts=81106437283881, delay=8559610219 flag=0, stack=_cond_resched+0x29/0x40
+write_cache_pages+0x283/0x480
+generic_writepages+0x40/0x60
+do_writepages+0x1e/0x40
+__filemap_fdatawrite_range+0x59/0x60
+filemap_fdatawrite+0x1f/0x30
+fdatawrite_one_bdev+0x16/0x20
+iterate_bdevs+0xd9/0x120
+sys_sync+0x63/0x90
+tracesys
+
+     ksoftirqd/0-3     [000] d... 81136.471039: syscall_latency_stack: comm=sync, pid=32224, start_ts=81106437283881, delay=8560313476 flag=0, stack=io_schedule+0x9d/0x140
+sleep_on_page+0xe/0x20
+__wait_on_bit+0x62/0x90
+wait_on_page_bit+0x7f/0x90
+filemap_fdatawait_range+0xf9/0x190
+filemap_fdatawait+0x27/0x30
+fdatawait_one_bdev+0x16/0x20
+iterate_bdevs+0xd9/0x120
+sys_sync+0x71/0x90
+tracesys+0xe1/0xe6
+
+          <idle>-0     [001] d... 81136.471234: syscall_latency_stack: comm=rngd, pid=1937, start_ts=81113031566114, delay=1966228144 flag=0, stack=schedule+0x29/0x70
+schedule_hrtimeout_range_clock+0x14d/0x170
+schedule_hrtimeout_range+0x13/0x20
+poll_schedule_timeout+0x49/0x70
+do_sys_poll+0x428/0x540
+SyS_poll+0x65/0x100
+tracesys+0xe1/0xe6
+
+[...]
+            sync-32224 [000] d... 81136.471297: syscall_latency: comm=sync, pid=32224, start_ts=81106437283881, delay=8560621068
+```
 
 
 Coding examples
