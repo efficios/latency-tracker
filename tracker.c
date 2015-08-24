@@ -87,48 +87,9 @@ static
 void discard_event(struct latency_tracker *tracker,
 		struct latency_tracker_event *s)
 {
-#if defined(BASEHT) && !defined(LLFREELIST)
-	__wrapper_freelist_put_event(tracker, s);
-#else
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
-	/*
-	 * Our own call_rcu because the mainline one causes sched_wakeups
-	 * that we might want to instrument causing deadlocks.
-	 */
-	int was_empty;
-
-	was_empty = llist_add(&s->release_llist, &tracker->to_release);
-	if (was_empty)
-		queue_delayed_work(tracker->tracker_call_rcu_q,
-				&tracker->tracker_call_rcu_w, 100);
-#else
 	call_rcu_sched(&s->urcuhead,
 			deferred_latency_tracker_put_event);
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0) */
-#endif
 }
-
-#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
-static
-void tracker_call_rcu_workqueue(struct work_struct *work)
-{
-       struct latency_tracker *tracker;
-       struct llist_node *list;
-       struct latency_tracker_event *e, *n;
-
-       tracker = container_of(work, struct latency_tracker,
-		       tracker_call_rcu_w.work);
-
-       if (!tracker)
-	       return;
-
-       list = llist_del_all(&tracker->to_release);
-       synchronize_sched();
-       llist_for_each_entry_safe(e, n, list, release_llist)
-	       wrapper_freelist_put_event(tracker, e);
-}
-#endif
-
 
 /*
  * Must be called with proper locking.
@@ -142,21 +103,6 @@ void __latency_tracker_event_destroy(struct kref *kref)
 	s = container_of(kref, struct latency_tracker_event, refcount);
 	tracker = s->tracker;
 	discard_event(tracker, s);
-}
-
-static
-void latency_tracker_event_destroy(struct kref *kref)
-{
-	unsigned long flags;
-	struct latency_tracker *tracker;
-	struct latency_tracker_event *s;
-
-	s = container_of(kref, struct latency_tracker_event, refcount);
-	tracker = s->tracker;
-
-	spin_lock_irqsave(&tracker->lock, flags);
-	__latency_tracker_event_destroy(kref);
-	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
 static
@@ -315,10 +261,6 @@ struct latency_tracker *latency_tracker_create(
 		tracker->resize_q = create_singlethread_workqueue("latency_tracker");
 		INIT_WORK(&tracker->resize_w, latency_tracker_workqueue);
 	}
-#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
-	tracker->tracker_call_rcu_q = create_workqueue("tracker_rcu");
-	INIT_DELAYED_WORK(&tracker->tracker_call_rcu_w, tracker_call_rcu_workqueue);
-#endif
 
 	ret = wrapper_freelist_init(tracker, max_events);
 	if (ret < 0)
@@ -367,12 +309,6 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	}
 	del_timer_sync(&tracker->timer);
 
-#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
-	cancel_delayed_work(&tracker->tracker_call_rcu_w);
-	flush_workqueue(tracker->tracker_call_rcu_q);
-	destroy_workqueue(tracker->tracker_call_rcu_q);
-#endif
-
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
 
@@ -401,19 +337,11 @@ void latency_tracker_timeout_cb(struct latency_tracker_event *data, int flush)
 	data->end_ts = trace_clock_monotonic_wrapper();
 
 	if (unlikely(flush)) {
-#if !defined(LLFREELIST)
-		latency_tracker_event_destroy(&data->refcount);
-#else
 		__latency_tracker_event_destroy(&data->refcount);
-#endif
 		return;
 	}
 
-#if !defined(LLFREELIST)
-	ret = kref_put(&data->refcount, latency_tracker_event_destroy);
-#else
 	ret = kref_put(&data->refcount, __latency_tracker_event_destroy);
-#endif
 	/* Run the user-provided callback if it has never been run. */
 	if (!ret)
 		data->cb((unsigned long) data);
@@ -427,7 +355,6 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 {
 	struct latency_tracker_event *s, *old_s;
 	int ret;
-	unsigned long flags;
 
 	if (!tracker) {
 		ret = LATENCY_TRACKER_ERR;
@@ -438,15 +365,8 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		goto end;
 	}
 
-#if !defined(LLFREELIST)
-	spin_lock_irqsave(&tracker->lock, flags);
-#endif
-
 	s = wrapper_freelist_get_event(tracker);
 
-#if !defined(LLFREELIST) && defined URCUHT
-	spin_unlock_irqrestore(&tracker->lock, flags);
-#endif
 	if (!s) {
 		ret = LATENCY_TRACKER_FULL;
 		tracker->skipped_count++;
@@ -485,9 +405,6 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	if (old_s) {
 		kref_put(&old_s->refcount, __latency_tracker_event_destroy);
 	}
-#if !defined(LLFREELIST) && !defined(URCUHT)
-	spin_unlock_irqrestore(&tracker->lock, flags);
-#endif
 	if (s->resize_flag &&
 			(tracker->free_list_nelems < tracker->max_resize))
 		tracker->need_to_resize = 1;
@@ -497,10 +414,6 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	goto end;
 
 end_unlock:
-#if !defined(LLFREELIST) && !defined(URCUHT)
-	spin_unlock_irqrestore(&tracker->lock, flags);
-#endif
-
 end:
 	return ret;
 }
@@ -586,11 +499,7 @@ void latency_tracker_put_event(struct latency_tracker_event *event)
 	if (!event)
 		return;
 	rcu_read_lock_sched_notrace();
-#if !defined(LLFREELIST)
-	kref_put(&event->refcount, latency_tracker_event_destroy);
-#else
 	kref_put(&event->refcount, __latency_tracker_event_destroy);
-#endif
 	rcu_read_unlock_sched_notrace();
 }
 EXPORT_SYMBOL_GPL(latency_tracker_put_event);
