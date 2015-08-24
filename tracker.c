@@ -51,8 +51,6 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(block_latency);
 
 static void latency_tracker_enable_timer(struct latency_tracker *tracker);
 static void latency_tracker_timer_cb(unsigned long ptr);
-static void latency_tracker_timeout_cb(struct latency_tracker_event *data,
-		int flush);
 
 /*
  * Function to get the timestamp.
@@ -103,42 +101,6 @@ void __latency_tracker_event_destroy(struct kref *kref)
 	s = container_of(kref, struct latency_tracker_event, refcount);
 	tracker = s->tracker;
 	discard_event(tracker, s);
-}
-
-static
-void latency_tracker_handle_timeouts(struct latency_tracker *tracker, int flush)
-{
-	struct cds_wfcq_node *qnode;
-	struct latency_tracker_event *s;
-	u64 now;
-
-	if (unlikely(flush))
-		now = -1ULL;
-	else
-		now = trace_clock_monotonic_wrapper();
-
-	for (;;) {
-		if (cds_wfcq_empty(&tracker->timeout_head, &tracker->timeout_tail))
-			break;
-		if (likely(!flush)) {
-			/* Check before dequeue. */
-			qnode = &tracker->timeout_head.node;
-			if (!qnode->next)
-				break;
-			s = caa_container_of(qnode->next,
-					struct latency_tracker_event, timeout_node);
-			if (atomic_read(&s->refcount.refcount) > 1 && s->timeout > now)
-				break;
-		}
-
-		qnode = __cds_wfcq_dequeue_nonblocking(&tracker->timeout_head,
-				&tracker->timeout_tail);
-		if (!qnode)
-			break;
-		s = caa_container_of(qnode, struct latency_tracker_event,
-				timeout_node);
-		latency_tracker_timeout_cb(s, flush);
-	}
 }
 
 /*
@@ -209,7 +171,6 @@ void latency_tracker_workqueue(struct work_struct *work)
 	tracker = container_of(work, struct latency_tracker, resize_w);
 	if (!tracker)
 		return;
-	latency_tracker_handle_timeouts(tracker, 0);
 	if (tracker->need_to_resize) {
 		tracker->need_to_resize = 0;
 		printk("latency_tracker: starting the resize\n");
@@ -311,9 +272,6 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 
 	nb = wrapper_ht_clear(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
-
-	if (tracker->timer_period)
-		latency_tracker_handle_timeouts(tracker, 1);
 	/*
 	 * Wait for all call_rcu_sched issued within wrapper_ht_clear to have
 	 * completed.
@@ -326,26 +284,6 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	module_put(THIS_MODULE);
 }
 EXPORT_SYMBOL_GPL(latency_tracker_destroy);
-
-static
-void latency_tracker_timeout_cb(struct latency_tracker_event *data, int flush)
-{
-	int ret;
-
-	data->cb_flag = LATENCY_TRACKER_CB_TIMEOUT;
-	data->timeout = 0;
-	data->end_ts = trace_clock_monotonic_wrapper();
-
-	if (unlikely(flush)) {
-		__latency_tracker_event_destroy(&data->refcount);
-		return;
-	}
-
-	ret = kref_put(&data->refcount, __latency_tracker_event_destroy);
-	/* Run the user-provided callback if it has never been run. */
-	if (!ret)
-		data->cb((unsigned long) data);
-}
 
 enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		struct latency_tracker *tracker,
