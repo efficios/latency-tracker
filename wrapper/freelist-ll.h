@@ -50,42 +50,6 @@ error:
 	return -1;
 }
 
-static
-void wrapper_resize_work(struct latency_tracker *tracker)
-{
-	int i, max_events;
-	struct latency_tracker_event *e;
-
-	max_events = min(tracker->free_list_nelems * 2,
-			tracker->max_resize - tracker->free_list_nelems);
-	printk("latency_tracker: increasing to %d (adding %d)\n",
-			tracker->free_list_nelems + max_events, max_events);
-
-	for (i = 0; i < max_events; i++) {
-		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
-		if (!e)
-			goto error;
-		if (i == max_events / 2)
-			e->resize_flag = 1;
-		/*
-		 * FIXME: add should be at the tail, we will resize too
-		 * much.
-		 */
-		llist_add(&e->llist, &tracker->ll_events_free_list);
-	}
-	tracker->free_list_nelems += max_events;
-	wrapper_vmalloc_sync_all();
-	goto end;
-
-error:
-	printk("latency_tracker: resize error\n");
-	return;
-
-end:
-	printk("latency_tracker: resize success\n");
-	return;
-}
-
 static inline
 void wrapper_freelist_destroy(struct latency_tracker *tracker)
 {

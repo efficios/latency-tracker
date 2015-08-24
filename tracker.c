@@ -119,8 +119,6 @@ void latency_tracker_timer_cb(unsigned long ptr)
 		wrapper_ht_gc(tracker, now);
 	}
 
-	queue_work(tracker->resize_q, &tracker->resize_w);
-
 	spin_lock_irqsave(&tracker->lock, flags);
 	latency_tracker_enable_timer(tracker);
 	spin_unlock_irqrestore(&tracker->lock, flags);
@@ -163,21 +161,6 @@ void latency_tracker_set_timer_period(struct latency_tracker *tracker,
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
-static
-void latency_tracker_workqueue(struct work_struct *work)
-{
-	struct latency_tracker *tracker;
-
-	tracker = container_of(work, struct latency_tracker, resize_w);
-	if (!tracker)
-		return;
-	if (tracker->need_to_resize) {
-		tracker->need_to_resize = 0;
-		printk("latency_tracker: starting the resize\n");
-		wrapper_resize_work(tracker);
-	}
-}
-
 struct latency_tracker *latency_tracker_create(
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length),
@@ -218,10 +201,6 @@ struct latency_tracker *latency_tracker_create(
 	wrapper_ht_init(tracker);
 
 	tracker->max_resize = max_resize;
-	if (timer_period) {
-		tracker->resize_q = create_singlethread_workqueue("latency_tracker");
-		INIT_WORK(&tracker->resize_w, latency_tracker_workqueue);
-	}
 
 	ret = wrapper_freelist_init(tracker, max_events);
 	if (ret < 0)
@@ -261,13 +240,6 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	 */
 	del_timer_sync(&tracker->timer);
 
-	/*
-	 * Stop and destroy the freelist resize work queue.
-	 */
-	if (tracker->timer_period) {
-		flush_workqueue(tracker->resize_q);
-		destroy_workqueue(tracker->resize_q);
-	}
 	del_timer_sync(&tracker->timer);
 
 	nb = wrapper_ht_clear(tracker);
