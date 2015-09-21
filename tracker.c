@@ -21,7 +21,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/preempt_mask.h>
 #include <linux/ktime.h>
 #include <linux/hrtimer.h>
 #include <linux/slab.h>
