@@ -27,6 +27,10 @@
 #include "../latency_tracker.h"
 #include "../tracker_private.h"
 
+#if !defined(LLFREELIST) && !defined(OLDFREELIST)
+#define LLFREELIST
+#endif
+
 #ifdef LLFREELIST
 #include "freelist-ll.h"
 #else /* LLFREELIST */

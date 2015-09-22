@@ -27,10 +27,10 @@ struct latency_tracker {
 	int need_to_resize;
 	/* How much event could not be tracked due to an empty free list. */
 	uint64_t skipped_count;
-#ifdef LLFREELIST
-	struct llist_head ll_events_free_list;
-#else
+#ifdef OLDFREELIST
 	struct list_head events_free_list;
+#else
+	struct llist_head ll_events_free_list;
 #endif
         uint64_t timer_period;
         uint64_t gc_thresh;
@@ -38,11 +38,11 @@ struct latency_tracker {
         struct timer_list timer;
 	struct workqueue_struct *resize_q;
 	struct work_struct resize_w;
-#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
+
 	struct llist_head to_release;
 	struct workqueue_struct *tracker_call_rcu_q;
 	struct delayed_work tracker_call_rcu_w;
-#endif
+
 	/* For timeout on events (on timer_period) */
 	struct cds_wfcq_head timeout_head;
 	struct cds_wfcq_tail timeout_tail;

@@ -34,7 +34,7 @@
 #endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
 
 #if !defined(BASEHT) && !defined(URCUHT) && !defined(RHASHTABLE)
-#define BASEHT
+#define URCUHT
 #endif
 
 #ifdef BASEHT
