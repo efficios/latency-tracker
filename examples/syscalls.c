@@ -84,115 +84,115 @@ static int cnt = 0;
 static struct latency_tracker *tracker;
 
 struct sched_key_t {
-  pid_t pid;
+	pid_t pid;
 } __attribute__((__packed__));
 
 struct process_key_t {
-  pid_t tgid;
+	pid_t tgid;
 } __attribute__((__packed__));
 
 struct process_val_t {
-  u64 syscall_start_ts;
-  pid_t tgid;
-  int take_stack_dump;
-  struct hlist_node hlist;
-  struct rcu_head rcu;
+	u64 syscall_start_ts;
+	pid_t tgid;
+	int take_stack_dump;
+	struct hlist_node hlist;
+	struct rcu_head rcu;
 };
 
 static DEFINE_HASHTABLE(process_map, 3);
 
 static int print_trace_stack(void *data, char *name)
 {
-        return 0;
+	return 0;
 }
 
 static void
 __save_stack_address(void *data, unsigned long addr, bool reliable, bool nosched)
 {
-        struct stack_trace *trace = data;
+	struct stack_trace *trace = data;
 #ifdef CONFIG_FRAME_POINTER
-        if (!reliable)
-                return;
+	if (!reliable)
+		return;
 #endif
-        if (nosched && in_sched_functions(addr))
-                return;
-        if (trace->skip > 0) {
-                trace->skip--;
-                return;
-        }
-        if (trace->nr_entries < trace->max_entries)
-                trace->entries[trace->nr_entries++] = addr;
+	if (nosched && in_sched_functions(addr))
+		return;
+	if (trace->skip > 0) {
+		trace->skip--;
+		return;
+	}
+	if (trace->nr_entries < trace->max_entries)
+		trace->entries[trace->nr_entries++] = addr;
 }
 
 static void save_stack_address(void *data, unsigned long addr, int reliable)
 {
-        return __save_stack_address(data, addr, reliable, false);
+	return __save_stack_address(data, addr, reliable, false);
 }
 
 static const struct stacktrace_ops backtrace_ops = {
-        .stack                  = print_trace_stack,
-        .address                = save_stack_address,
-        .walk_stack             = print_context_stack,
+	.stack                  = print_trace_stack,
+	.address                = save_stack_address,
+	.walk_stack             = print_context_stack,
 };
 
 static void free_process_val_rcu(struct rcu_head *rcu)
 {
-  kfree(container_of(rcu, struct process_val_t, rcu));
+	kfree(container_of(rcu, struct process_val_t, rcu));
 }
 
 static 
 struct process_val_t* find_process(struct process_key_t *key, u32 hash)
 {
-  struct process_val_t *val;
+	struct process_val_t *val;
 
-  hash_for_each_possible_rcu(process_map, val, hlist, hash) {
-    if (key->tgid == val->tgid) {
-      return val;
-    }
-  }
-  return NULL;
+	hash_for_each_possible_rcu(process_map, val, hlist, hash) {
+		if (key->tgid == val->tgid) {
+			return val;
+		}
+	}
+	return NULL;
 }
 
 void process_register(pid_t tgid)
 {
-  u32 hash;
-  struct process_key_t key;
-  struct process_val_t *val;
+	u32 hash;
+	struct process_key_t key;
+	struct process_val_t *val;
 
-  key.tgid = tgid;
-  hash = jhash(&key, sizeof(key), 0);
+	key.tgid = tgid;
+	hash = jhash(&key, sizeof(key), 0);
 
-  rcu_read_lock();
-  val = find_process(&key, hash);
-  if (val) {
-    rcu_read_unlock();
-    return;
-  }
-  rcu_read_unlock();
+	rcu_read_lock();
+	val = find_process(&key, hash);
+	if (val) {
+		rcu_read_unlock();
+		return;
+	}
+	rcu_read_unlock();
 
-  val = kzalloc(sizeof(struct process_val_t), GFP_KERNEL);
-  val->tgid = tgid;
-  hash_add_rcu(process_map, &val->hlist, hash);
-  printk("syscall tracker register process %d\n", tgid);
+	val = kzalloc(sizeof(struct process_val_t), GFP_KERNEL);
+	val->tgid = tgid;
+	hash_add_rcu(process_map, &val->hlist, hash);
+	printk("syscall tracker register process %d\n", tgid);
 }
 
 void process_unregister(pid_t tgid)
 {
-  u32 hash;
-  struct process_key_t key;
-  struct process_val_t *val;
+	u32 hash;
+	struct process_key_t key;
+	struct process_val_t *val;
 
-  key.tgid = tgid;
-  hash = jhash(&key, sizeof(key), 0);
+	key.tgid = tgid;
+	hash = jhash(&key, sizeof(key), 0);
 
-  rcu_read_lock();
-  val = find_process(&key, hash);
-  if (val) {
-    hash_del_rcu(&val->hlist);
-    call_rcu(&val->rcu, free_process_val_rcu);
-    printk("syscall tracker unregister process %d\n", tgid);
-  }
-  rcu_read_unlock();
+	rcu_read_lock();
+	val = find_process(&key, hash);
+	if (val) {
+		hash_del_rcu(&val->hlist);
+		call_rcu(&val->rcu, free_process_val_rcu);
+		printk("syscall tracker unregister process %d\n", tgid);
+	}
+	rcu_read_unlock();
 }
 
 static
@@ -269,47 +269,47 @@ end:
 static
 void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 {
-  struct task_struct* task = current;
-  struct process_key_t process_key;
-  u32 hash;
-  struct sched_key_t sched_key;
-  u64 thresh;
+	struct task_struct* task = current;
+	struct process_key_t process_key;
+	u32 hash;
+	struct sched_key_t sched_key;
+	u64 thresh;
 
-  if (!watch_all)
-  {
-    process_key.tgid = task->tgid;
-    hash = jhash(&process_key, sizeof(process_key), 0);
+	if (!watch_all)
+	{
+		process_key.tgid = task->tgid;
+		hash = jhash(&process_key, sizeof(process_key), 0);
 
-    rcu_read_lock();
-    if (find_process(&process_key, hash) == NULL) {
-      rcu_read_unlock();
-      return;
-    }
-    rcu_read_unlock();
-  }
+		rcu_read_lock();
+		if (find_process(&process_key, hash) == NULL) {
+			rcu_read_unlock();
+			return;
+		}
+		rcu_read_unlock();
+	}
 
-  sched_key.pid = task->pid;
-  thresh = usec_threshold * 1000;
+	sched_key.pid = task->pid;
+	thresh = usec_threshold * 1000;
 
-  latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
-        thresh, syscall_cb, 0, 1, (void *) id);
+	latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
+			thresh, syscall_cb, 0, 1, (void *) id);
 }
 
 static
 void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 {
-  struct sched_key_t key;
-  key.pid = current->pid;
-  latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+	struct sched_key_t key;
+	key.pid = current->pid;
+	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
 }
 
 static
 void probe_sched_process_exit(void *__data, struct task_struct *p)
 {
-  // If this is the main thread of a process, unregister the process.
-  if (p->pid == p->tgid) {
-    process_unregister(p->tgid);
-  }
+	// If this is the main thread of a process, unregister the process.
+	if (p->pid == p->tgid) {
+		process_unregister(p->tgid);
+	}
 }
 
 static
@@ -347,80 +347,80 @@ end:
 static
 int __init syscalls_init(void)
 {
-  int ret;
-  struct syscall_tracker *tracker_priv;
+	int ret;
+	struct syscall_tracker *tracker_priv;
 
-  wrapper_vmalloc_sync_all();
+	wrapper_vmalloc_sync_all();
 
-  tracker_priv = syscall_tracker_alloc_priv();
-  if (!tracker_priv) {
-    ret = -ENOMEM;
-    goto end;
-  }
+	tracker_priv = syscall_tracker_alloc_priv();
+	if (!tracker_priv) {
+		ret = -ENOMEM;
+		goto end;
+	}
 
-  tracker = latency_tracker_create(NULL, NULL, 1000, 20000, 100000000, 0,
-      tracker_priv);
-  if (!tracker)
-    goto error;
+	tracker = latency_tracker_create(NULL, NULL, 1000, 20000, 100000000, 0,
+			tracker_priv);
+	if (!tracker)
+		goto error;
 
-  ret = lttng_wrapper_tracepoint_probe_register(
-      "sys_enter", probe_syscall_enter, NULL);
-  WARN_ON(ret);
-  ret = lttng_wrapper_tracepoint_probe_register(
-      "sys_exit", probe_syscall_exit, NULL);
-  WARN_ON(ret);
-  ret = lttng_wrapper_tracepoint_probe_register(
-      "sched_process_exit", probe_sched_process_exit, NULL);
-  WARN_ON(ret);
-  ret = lttng_wrapper_tracepoint_probe_register(
-      "sched_switch", probe_sched_switch, NULL);
-  WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register(
+			"sys_enter", probe_syscall_enter, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register(
+			"sys_exit", probe_syscall_exit, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register(
+			"sched_process_exit", probe_sched_process_exit, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register(
+			"sched_switch", probe_sched_switch, NULL);
+	WARN_ON(ret);
 
-  ret = syscall_tracker_setup_proc_priv(tracker_priv);
+	ret = syscall_tracker_setup_proc_priv(tracker_priv);
 
-  goto end;
+	goto end;
 
 error:
-  ret = -1;
+	ret = -1;
 end:
-  return ret;
+	return ret;
 }
 module_init(syscalls_init);
 
 static
 void __exit syscalls_exit(void)
 {
-  struct process_val_t *process_val;
-  int bkt;
-  uint64_t skipped;
-  struct syscall_tracker *tracker_priv;
+	struct process_val_t *process_val;
+	int bkt;
+	uint64_t skipped;
+	struct syscall_tracker *tracker_priv;
 
-  lttng_wrapper_tracepoint_probe_unregister(
-      "sys_enter", probe_syscall_enter, NULL);
-  lttng_wrapper_tracepoint_probe_unregister(
-      "sys_exit", probe_syscall_exit, NULL);
-  lttng_wrapper_tracepoint_probe_unregister(
-      "sched_process_exit", probe_sched_process_exit, NULL);
-  lttng_wrapper_tracepoint_probe_unregister(
-      "sched_switch", probe_sched_switch, NULL);
-  tracepoint_synchronize_unregister();
+	lttng_wrapper_tracepoint_probe_unregister(
+			"sys_enter", probe_syscall_enter, NULL);
+	lttng_wrapper_tracepoint_probe_unregister(
+			"sys_exit", probe_syscall_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister(
+			"sched_process_exit", probe_sched_process_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister(
+			"sched_switch", probe_sched_switch, NULL);
+	tracepoint_synchronize_unregister();
 
-  rcu_read_lock();
-  hash_for_each_rcu(process_map, bkt, process_val, hlist) {
-    hash_del_rcu(&process_val->hlist);
-    call_rcu(&process_val->rcu, free_process_val_rcu);
-  }
-  rcu_read_unlock();
-  synchronize_rcu();
+	rcu_read_lock();
+	hash_for_each_rcu(process_map, bkt, process_val, hlist) {
+		hash_del_rcu(&process_val->hlist);
+		call_rcu(&process_val->rcu, free_process_val_rcu);
+	}
+	rcu_read_unlock();
+	synchronize_rcu();
 
-  skipped = latency_tracker_skipped_count(tracker);
+	skipped = latency_tracker_skipped_count(tracker);
 
-  tracker_priv = latency_tracker_get_priv(tracker);
-  syscall_tracker_destroy_proc_priv(tracker_priv);
-  latency_tracker_destroy(tracker);
+	tracker_priv = latency_tracker_get_priv(tracker);
+	syscall_tracker_destroy_proc_priv(tracker_priv);
+	latency_tracker_destroy(tracker);
 
-  printk("Missed events : %llu\n", skipped);
-  printk("Total syscall alerts : %d\n", cnt);
+	printk("Missed events : %llu\n", skipped);
+	printk("Total syscall alerts : %d\n", cnt);
 }
 module_exit(syscalls_exit);
 
