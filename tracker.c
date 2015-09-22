@@ -72,6 +72,7 @@ static inline u64 trace_clock_monotonic_wrapper(void)
 	return ktime_to_ns(ktime);
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
 static
 void deferred_latency_tracker_put_event(struct rcu_head *head)
 {
@@ -81,6 +82,7 @@ void deferred_latency_tracker_put_event(struct rcu_head *head)
 	tracker = s->tracker;
 	wrapper_freelist_put_event(tracker, s);
 }
+#endif
 
 static
 void discard_event(struct latency_tracker *tracker,
@@ -107,7 +109,7 @@ void discard_event(struct latency_tracker *tracker,
 #endif
 }
 
-#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
+#if defined(URCUHT) || defined(LLFREELIST)
 static
 void tracker_call_rcu_workqueue(struct work_struct *work)
 {
@@ -143,6 +145,7 @@ void __latency_tracker_event_destroy(struct kref *kref)
 	discard_event(tracker, s);
 }
 
+#if defined(OLDFREELIST)
 static
 void latency_tracker_event_destroy(struct kref *kref)
 {
@@ -157,6 +160,7 @@ void latency_tracker_event_destroy(struct kref *kref)
 	__latency_tracker_event_destroy(kref);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
+#endif
 
 static
 void latency_tracker_handle_timeouts(struct latency_tracker *tracker, int flush)
@@ -314,7 +318,7 @@ struct latency_tracker *latency_tracker_create(
 		tracker->resize_q = create_singlethread_workqueue("latency_tracker");
 		INIT_WORK(&tracker->resize_w, latency_tracker_workqueue);
 	}
-#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
+#if defined(URCUHT) || defined(LLFREELIST)
 	tracker->tracker_call_rcu_q = create_workqueue("tracker_rcu");
 	INIT_DELAYED_WORK(&tracker->tracker_call_rcu_w, tracker_call_rcu_workqueue);
 #endif
@@ -366,7 +370,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	}
 	del_timer_sync(&tracker->timer);
 
-#if defined(URCUHT) || defined(RHASHTABLE) || defined(LLFREELIST)
+#if defined(URCUHT) || defined(LLFREELIST)
 	cancel_delayed_work(&tracker->tracker_call_rcu_w);
 	flush_workqueue(tracker->tracker_call_rcu_q);
 	destroy_workqueue(tracker->tracker_call_rcu_q);
@@ -426,7 +430,9 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 {
 	struct latency_tracker_event *s, *old_s;
 	int ret;
+#if !defined(LLFREELIST)
 	unsigned long flags;
+#endif
 
 	if (!tracker) {
 		ret = LATENCY_TRACKER_ERR;

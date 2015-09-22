@@ -27,36 +27,24 @@
 #include "../latency_tracker.h"
 #include "../tracker_private.h"
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
-#ifdef RHASHTABLE
-#error rhashtable not supported before 3.17
-#endif
-#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0)) */
-
-#if !defined(BASEHT) && !defined(URCUHT) && !defined(RHASHTABLE)
+#if !defined(BASEHT) && !defined(URCUHT)
 #define URCUHT
 #endif
 
 #ifdef BASEHT
+#undef URCUHT
 #include "ht-base.h"
-#elif defined(RHASHTABLE)
-#include "ht-rhashtable.h"
-
-#else /* RHASHTABLE */
-
+#else /* BASEHT */
 #if !defined(URCUHT)
 #define URCUHT
 #endif /* !defined(URCUHT) */
 #include "ht-urcuht.h"
-#endif /* RHASHTABLE */
+#endif /* BASEHT */
 
 #ifdef COMPILEDEBUG
 /* Just debug warnings */
 #ifdef URCUHT
 #warning Compiling with URCU HT
-#endif
-#ifdef RHASHTABLE
-#warning Compiling with RHASHTABLE
 #endif
 #ifdef BASEHT
 #warning Compiling with BASEHT

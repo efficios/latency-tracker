@@ -26,10 +26,11 @@ run() {
 }
 
 run default ""
+run oldfreelist "-DOLDFREELIST"
 run baseht "-DBASEHT"
-run rhashtable "-DRHASHTABLE"
-run rhashtable "-DURCUHT"
+run urcuht "-DURCUHT"
+run "baseht + oldlist" "-DBASEHT -DOLDFREELIST"
+run "urcuht + oldlist" "-DURCUHT -DOLDFREELIST"
 run "baseht + ll" "-DBASEHT -DLLFREELIST"
-run "rhashtable + ll" "-DRHASHTABLE -DLLFREELIST"
 run "urcuht + ll" "-DURCUHT -DLLFREELIST"
 

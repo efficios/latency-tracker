@@ -32,6 +32,7 @@
 #endif
 
 #ifdef LLFREELIST
+#undef OLDFREELIST
 #include "freelist-ll.h"
 #else /* LLFREELIST */
 #include "freelist-base.h"

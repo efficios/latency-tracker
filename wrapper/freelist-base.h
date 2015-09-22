@@ -140,6 +140,7 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	list_add(&e->list, &tracker->events_free_list);
 }
 
+#if defined(URCUHT) || (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
 static
 void wrapper_freelist_put_event(struct latency_tracker *tracker,
 		struct latency_tracker_event *e)
@@ -150,5 +151,6 @@ void wrapper_freelist_put_event(struct latency_tracker *tracker,
 	__wrapper_freelist_put_event(tracker, e);
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
+#endif
 
 #endif /* _LTTNG_WRAPPER_FREELIST_BASE_H */

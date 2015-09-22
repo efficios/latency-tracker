@@ -36,12 +36,6 @@ enum latency_tracker_cb_flag {
 	LATENCY_TRACKER_CB_GC		= 3,
 };
 
-#ifdef RHASHTABLE
-#include <linux/rhashtable.h>
-#else
-struct rhash_head {};
-struct rhashtable {};
-#endif
 #include "rculfhash-internal.h"
 #include "urcu/wfcqueue.h"
 
@@ -54,8 +48,6 @@ struct latency_tracker_event {
 	struct timer_list timer;
 	/* basic kernel HT */
 	struct hlist_node hlist;
-	/* rhashtable */
-	struct rhash_head node;
 	/* URCU HT */
 	struct cds_lfht_node urcunode;
 	struct rcu_head urcuhead;

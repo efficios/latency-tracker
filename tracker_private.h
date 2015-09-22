@@ -14,8 +14,6 @@
 struct latency_tracker {
 	/*  basic kernel HT */
         struct hlist_head ht[DEFAULT_LATENCY_TABLE_SIZE];
-	/* rhashtable */
-	struct rhashtable rht;
 	/* urcu ht */
 	struct cds_lfht *urcu_ht;
 	/* Returns 0 on match. */
@@ -54,8 +52,10 @@ struct latency_tracker {
 };
 
 struct latency_tracker_event;
+#if defined(OLDFREELIST)
 static
 void latency_tracker_event_destroy(struct kref *kref);
+#endif
 static
 void __latency_tracker_event_destroy(struct kref *kref);
 
