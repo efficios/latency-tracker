@@ -349,6 +349,15 @@ int __init syscalls_init(void)
 {
 	int ret;
 	struct syscall_tracker *tracker_priv;
+	struct latency_tracker_conf tracker_config = {
+		.match_fct = NULL,
+		.hash_fct = NULL,
+		.max_events = 1000,
+		.max_resize = 20000,
+		.timer_period = 100000000,
+		.gc_thresh = 0,
+		.priv = NULL,
+	};
 
 	wrapper_vmalloc_sync_all();
 
@@ -358,8 +367,8 @@ int __init syscalls_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create(NULL, NULL, 1000, 20000, 100000000, 0,
-			tracker_priv);
+	tracker_config.priv = tracker_priv;
+	tracker = latency_tracker_create(&tracker_config);
 	if (!tracker)
 		goto error;
 

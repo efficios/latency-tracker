@@ -221,10 +221,18 @@ int __init net_latency_tp_init(void)
 {
 	int ret;
 	void (*kfree_skbmem_sym)(struct sk_buff *skb);
+	struct latency_tracker_conf tracker_config = {
+		.match_fct = NULL,
+		.hash_fct = NULL,
+		.max_events = 100,
+		.max_resize = 0,
+		.timer_period = usec_gc_period * 1000,
+		.gc_thresh = usec_gc_period * 1000,
+		.priv = NULL,
+	};
 
-	tracker = latency_tracker_create(NULL, NULL, 100, 0,
-			usec_gc_period * 1000, usec_gc_threshold * 1000,
-			NULL);
+	tracker = latency_tracker_create(&tracker_config);
+
 	if (!tracker)
 		goto error;
 

@@ -287,6 +287,15 @@ int __init offcpu_init(void)
 {
 	int ret;
 	struct offcpu_tracker *offcpu_priv;
+	struct latency_tracker_conf tracker_config = {
+		.match_fct = match_fct,
+		.hash_fct = hash_fct,
+		.max_events = 2000,
+		.max_resize = 10000,
+		.timer_period = 100000000,
+		.gc_thresh = 0,
+		.priv = NULL,
+	};
 
 	offcpu_priv = offcpu_alloc_priv();
 	if (!offcpu_priv) {
@@ -294,8 +303,8 @@ int __init offcpu_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create(match_fct, hash_fct, 2000, 10000, 100000000, 0,
-			offcpu_priv);
+	tracker_config.priv = offcpu_priv;
+	tracker = latency_tracker_create(&tracker_config);
 	if (!tracker)
 		goto error;
 

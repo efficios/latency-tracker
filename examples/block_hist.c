@@ -717,10 +717,17 @@ int __init block_hist_latency_tp_init(void)
 	/* limit to 1 evt/sec */
 	block_hist_priv->ns_rate_limit = 1000000000;
 
-	tracker = latency_tracker_create(NULL, NULL, 100000, 0,
-			usec_gc_period * 1000,
-			usec_gc_period * 1000,
-			block_hist_priv);
+	struct latency_tracker_conf tracker_config = {
+		.match_fct = NULL,
+		.hash_fct = NULL,
+		.max_events = 100000,
+		.max_resize = 0,
+		.timer_period = usec_gc_period * 1000,
+		.gc_thresh = usec_gc_period * 1000,
+		.priv = block_hist_priv,
+	};
+
+	tracker = latency_tracker_create(&tracker_config);
 	if (!tracker)
 		goto error;
 

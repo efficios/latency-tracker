@@ -261,6 +261,15 @@ int __init block_latency_tp_init(void)
 	int ret;
 	struct block_tracker *block_priv;
 
+	struct latency_tracker_conf tracker_config = {
+		.match_fct = NULL,
+		.hash_fct = NULL,
+		.max_events = 100,
+		.max_resize = 0,
+		.timer_period = usec_gc_period * 1000,
+		.gc_thresh = usec_gc_period * 1000,
+	};
+
 	block_priv = kzalloc(sizeof(struct block_tracker), GFP_KERNEL);
 	if (!block_priv) {
 		ret = -ENOMEM;
@@ -269,11 +278,9 @@ int __init block_latency_tp_init(void)
 	block_priv->reason = BLOCK_TRACKER_WAIT;
 	/* limit to 1 evt/sec */
 	block_priv->ns_rate_limit = 1000000000;
+	tracker_config.priv = block_priv;
 
-	tracker = latency_tracker_create(NULL, NULL, 100, 0,
-			usec_gc_threshold * 1000,
-			usec_gc_period * 1000,
-			block_priv);
+	tracker = latency_tracker_create(&tracker_config);
 	if (!tracker)
 		goto error;
 

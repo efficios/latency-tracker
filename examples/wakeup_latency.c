@@ -169,6 +169,15 @@ int __init wakeup_latency_init(void)
 {
 	int ret;
 	struct wakeup_tracker *wakeup_priv;
+	struct latency_tracker_conf tracker_config = {
+		.match_fct = NULL,
+		.hash_fct = NULL,
+		.max_events = 200,
+		.max_resize = 1000,
+		.timer_period = 100000000,
+		.gc_thresh = 0,
+		.priv = NULL,
+	};
 
 	wakeup_priv = wakeup_alloc_priv();
 	if (!wakeup_priv) {
@@ -176,8 +185,8 @@ int __init wakeup_latency_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create(NULL, NULL, 200, 1000, 100000000, 0,
-			wakeup_priv);
+	tracker_config.priv = wakeup_priv;
+	tracker = latency_tracker_create(&tracker_config);
 	if (!tracker)
 		goto error;
 

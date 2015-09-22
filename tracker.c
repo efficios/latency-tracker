@@ -275,12 +275,7 @@ void latency_tracker_workqueue(struct work_struct *work)
 }
 
 struct latency_tracker *latency_tracker_create(
-		int (*match_fct) (const void *key1, const void *key2,
-			size_t length),
-		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events, int max_resize, uint64_t timer_period,
-		uint64_t gc_thresh, void *priv)
-
+		struct latency_tracker_conf *conf)
 {
 	struct latency_tracker *tracker;
 	int ret;
@@ -290,21 +285,21 @@ struct latency_tracker *latency_tracker_create(
 		printk("latency_tracker: Alloc tracker failed\n");
 		goto error;
 	}
-	if (!hash_fct)
+	if (!conf->hash_fct)
 		tracker->hash_fct = jhash;
 	else
-		tracker->hash_fct = hash_fct;
+		tracker->hash_fct = conf->hash_fct;
 
-	if (!match_fct)
+	if (!conf->match_fct)
 		tracker->match_fct = memcmp;
 	else
-		tracker->match_fct = match_fct;
+		tracker->match_fct = conf->match_fct;
 
-	if (!max_events)
-		max_events = DEFAULT_MAX_ALLOC_EVENTS;
-	tracker->timer_period = timer_period;
-	tracker->gc_thresh = gc_thresh;
-	tracker->priv = priv;
+	if (!conf->max_events)
+		conf->max_events = DEFAULT_MAX_ALLOC_EVENTS;
+	tracker->timer_period = conf->timer_period;
+	tracker->gc_thresh = conf->gc_thresh;
+	tracker->priv = conf->priv;
 
 	init_timer(&tracker->timer);
 	latency_tracker_enable_timer(tracker);
@@ -313,8 +308,8 @@ struct latency_tracker *latency_tracker_create(
 
 	wrapper_ht_init(tracker);
 
-	tracker->max_resize = max_resize;
-	if (timer_period) {
+	tracker->max_resize = conf->max_resize;
+	if (conf->timer_period) {
 		tracker->resize_q = create_singlethread_workqueue("latency_tracker");
 		INIT_WORK(&tracker->resize_w, latency_tracker_workqueue);
 	}
@@ -323,7 +318,7 @@ struct latency_tracker *latency_tracker_create(
 	INIT_DELAYED_WORK(&tracker->tracker_call_rcu_w, tracker_call_rcu_workqueue);
 #endif
 
-	ret = wrapper_freelist_init(tracker, max_events);
+	ret = wrapper_freelist_init(tracker, conf->max_events);
 	if (ret < 0)
 		goto error_free_events;
 
@@ -628,7 +623,17 @@ int test_tracker(void)
 	int ret, i;
 	struct latency_tracker *tracker;
 
-	tracker = latency_tracker_create(NULL, NULL, 300, 0, 100*1000*1000, 0, NULL);
+	struct latency_tracker_conf tracker_config = {
+		.match_fct = NULL,
+		.hash_fct = NULL,
+		.max_events = 300,
+		.max_resize = 0,
+		.timer_period = 100*1000*1000,
+		.gc_thresh = 0,
+		.priv = NULL,
+	};
+
+	tracker = latency_tracker_create(&tracker_config);
 	if (!tracker)
 		goto error;
 

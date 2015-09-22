@@ -44,8 +44,18 @@ struct latency_tracker_key {
 	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
 };
 
+struct latency_tracker_conf {
+	int (*match_fct) (const void *key1, const void *key2,
+			size_t length);
+	u32 (*hash_fct) (const void *key, u32 length, u32 initval);
+	int max_events;
+	int max_resize;
+	uint64_t timer_period;
+	uint64_t gc_thresh;
+	void *priv;
+};
+
 struct latency_tracker_event {
-	struct timer_list timer;
 	/* basic kernel HT */
 	struct hlist_node hlist;
 	/* URCU HT */
@@ -109,6 +119,32 @@ struct latency_tracker_event {
 	void *priv;
 };
 
+struct latency_tracker_event2 {
+	/* Node in the LL freelist. */
+	struct llist_node llist;
+	/* URCU HT */
+	struct cds_lfht_node urcunode;
+
+	union {
+		/* wfcqueue node if using the timeout. */
+		struct cds_wfcq_node timeout_node;
+		/* call_rcu */
+		struct rcu_head urcuhead;
+	} u;
+	/*
+	 * Reclaim the event when the refcount == 0.  If we use
+	 * the timeout, the refcount is set to 2 (one for the
+	 * timeout list and the other for the normal exit (or
+	 * GC)).
+	 */
+	struct kref refcount;
+
+	/* Timestamp of event creation. */
+	u64 start_ts;
+	/* Event key. */
+	struct latency_tracker_key tkey;
+};
+
 /*
  * Return code when adding an event to a tracker.
  */
@@ -132,11 +168,7 @@ enum latency_tracker_event_in_ret {
  *     default with 0 and 0).
  */
 struct latency_tracker *latency_tracker_create(
-		int (*match_fct) (const void *key1, const void *key2,
-			size_t length),
-		u32 (*hash_fct) (const void *key, u32 length, u32 initval),
-		int max_events, int max_resize, uint64_t timer_period,
-		uint64_t gc_thresh, void *priv);
+		struct latency_tracker_conf *conf);
 
 /*
  * Destroy and free a tracker and all the current events in the HT.
