@@ -44,14 +44,56 @@ struct latency_tracker_key {
 	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
 };
 
+/*
+ * Configuration structure of the tracker, passed as argument to
+ * latency_tracker_create(). All the values set here are copied internally, so
+ * the structure does not need to stay alive after the creation of the tracker.
+ *
+ * Make sure to set all of the fields before creating the tracker or memset
+ * to zero the structure beforehand.
+ */
 struct latency_tracker_conf {
+	/*
+	 * Match function for the hash table, use jhash if NULL.
+	 */
 	int (*match_fct) (const void *key1, const void *key2,
 			size_t length);
+	/*
+	 * Hash function for the hash table, use memcmp if NULL.
+	 */
 	u32 (*hash_fct) (const void *key, u32 length, u32 initval);
+	/*
+	 * Expected maximum number of events active concurrently.
+	 * The memory is only allocated when the tracker is created.
+	 */
 	int max_events;
+	/*
+	 * Allow the maximum number of concurrent events to grow up
+	 * to this value (resized in a workqueue, by doubling the size
+	 * of the total list up-to max_resize). 0 to disable resizing.
+	 */
 	int max_resize;
+	/*
+	 * Period of the timer (nsec) that performs various housekeeping tasks:
+	 * - garbage collection checks (if enabled)
+	 * - check if the freelist needs to be resized
+	 * Set it to 0 to disable it.
+	 * 100ms (100*1000*1000) is a good arbitrary value.
+	 */
 	uint64_t timer_period;
+	/*
+	 * Delay (nsec) after which an event is considered too old (so we
+	 * stop waiting for the event_out and remove it from the HT.
+	 * This performs an iteration on the HT of in use events, the overhead
+	 * of this action depends on the timer_period and number of events
+	 * simultaneously active.
+	 */
 	uint64_t gc_thresh;
+	/*
+	 * A private pointer that is accessible everywhere the tracker object
+	 * is accessible, the caller is responsible of the memory allocation of
+	 * this pointer.
+	 */
 	void *priv;
 };
 
