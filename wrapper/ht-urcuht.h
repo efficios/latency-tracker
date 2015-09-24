@@ -104,6 +104,28 @@ int wrapper_ht_clear(struct latency_tracker *tracker)
 	return nb;
 }
 
+static
+void callback(struct latency_tracker_event *s,
+		struct latency_tracker *tracker,
+		uint64_t end_ts, unsigned int id,
+		enum latency_tracker_cb_flag cb_flag)
+{
+	struct latency_tracker_event_ctx ctx = {
+		.start_ts = s->start_ts,
+		.end_ts = end_ts,
+		.cb_flag = cb_flag,
+		.cb_out_id = id,
+		.tkey = &s->tkey,
+		.priv = s->priv,
+	};
+
+	if (!tracker->cb)
+		return;
+
+	tracker->cb(&ctx);
+}
+
+
 static inline
 void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 {
@@ -112,12 +134,8 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 
 	rcu_read_lock_sched_notrace();
 	cds_lfht_for_each_entry(tracker->urcu_ht, &iter, s, urcunode) {
-		if ((now - s->start_ts) > tracker->gc_thresh) {
-			s->end_ts = now;
-			s->cb_flag = LATENCY_TRACKER_CB_GC;
-			if (s->cb)
-				s->cb((unsigned long) s);
-		}
+		if ((now - s->start_ts) > tracker->gc_thresh)
+			callback(s, tracker, now, 0, LATENCY_TRACKER_CB_GC);
 		kref_put(&s->refcount, __latency_tracker_event_destroy);
 	}
 	rcu_read_unlock_sched_notrace();
@@ -146,10 +164,9 @@ end:
 	return s;
 }
 
-
 static inline
 int wrapper_ht_check_event(struct latency_tracker *tracker,
-		struct latency_tracker_key *tkey, unsigned int id, u64 now)
+		struct latency_tracker_key *tkey, unsigned int id, uint64_t now)
 {
 	struct latency_tracker_event *s;
 	u32 k;
@@ -161,13 +178,8 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 	rcu_read_lock_sched_notrace();
 	cds_lfht_for_each_entry_duplicate(tracker->urcu_ht, k,
 			urcu_match, tkey, &iter, s, urcunode) {
-		if ((now - s->start_ts) > s->thresh) {
-			s->end_ts = now;
-			s->cb_flag = LATENCY_TRACKER_CB_NORMAL;
-			s->cb_out_id = id;
-			if (s->cb)
-				s->cb((unsigned long) s);
-		}
+		if ((now - s->start_ts) > tracker->threshold)
+			callback(s, tracker, now, id, LATENCY_TRACKER_CB_NORMAL);
 		ret = wrapper_ht_del(tracker, s);
 		if (!ret)
 			kref_put(&s->refcount, __latency_tracker_event_destroy);

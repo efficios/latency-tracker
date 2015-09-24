@@ -16,10 +16,27 @@ struct latency_tracker {
         struct hlist_head ht[DEFAULT_LATENCY_TABLE_SIZE];
 	/* urcu ht */
 	struct cds_lfht *urcu_ht;
-	/* Returns 0 on match. */
+	/*
+	 * Match function for the hash table, use jhash if NULL.
+	 * Returns 0 on match.
+	 */
         int (*match_fct) (const void *key1, const void *key2, size_t length);
+	/*
+	 * Hash function for the hash table, use memcmp if NULL.
+	 */
         u32 (*hash_fct) (const void *key, u32 length, u32 initval);
+	/*
+	 * Expected maximum number of events active concurrently.
+	 * The memory is only allocated when the tracker is created.
+	 * FIXME: useful vs free_list_nelems ?
+	 */
+	int max_events;
 	int free_list_nelems;
+	/*
+	 * Allow the maximum number of concurrent events to grow up
+	 * to this value (resized in a workqueue, by doubling the size
+	 * of the total list up-to max_resize). 0 to disable resizing.
+	 */
 	int max_resize;
 	/* Flag to trigger the freelist resize work. */
 	int need_to_resize;
@@ -30,8 +47,44 @@ struct latency_tracker {
 #else
 	struct llist_head ll_events_free_list;
 #endif
+	/*
+	 * Period of the timer (nsec) that performs various housekeeping tasks:
+	 * - garbage collection checks (if enabled)
+	 * - check if the freelist needs to be resized
+	 * Set it to 0 to disable it.
+	 * 100ms (100*1000*1000) is a good arbitrary value.
+	 */
         uint64_t timer_period;
+	/*
+	 * Delay (nsec) after which an event is considered too old (so we
+	 * stop waiting for the event_out and remove it from the HT.
+	 * This performs an iteration on the HT of in use events, the overhead
+	 * of this action depends on the timer_period and number of events
+	 * simultaneously active.
+	 */
         uint64_t gc_thresh;
+
+	/*
+	 * If an event_out happens after "threshold" ns after the event_in,
+	 * the callback associated with the event is called with cb_flag set
+	 * to LATENCY_TRACKER_CB_NORMAL.
+	 */
+	uint64_t threshold;
+	/*
+	 * After "timeout" ns, if the event_out has still not happened, call
+	 * the callback with cb_flag set to LATENCY_TRACKER_CB_TIMEOUT. The
+	 * event is not removed from the HT, so the callback will be called
+	 * again if the event_out arrives. This feature is different from the
+	 * garbage collector.
+	 *
+	 * Set to 0 to disable it.
+	 */
+	uint64_t timeout;
+	/*
+	 * Function pointer to the callback
+	 */
+	void (*cb)(struct latency_tracker_event_ctx *ctx);
+
 	/* GC and resize work */
         struct timer_list timer;
 	struct workqueue_struct *resize_q;
@@ -48,10 +101,82 @@ struct latency_tracker {
          * Protects the access to the HT, the free_list and the timer.
          */
         spinlock_t lock;
+	/*
+	 * A private pointer that is accessible everywhere the tracker object
+	 * is accessible, the caller is responsible of the memory allocation of
+	 * this pointer.
+	 */
         void *priv;
 };
 
-struct latency_tracker_event;
+struct latency_tracker_event {
+	/* basic kernel HT */
+	struct hlist_node hlist;
+	/* URCU HT */
+	struct cds_lfht_node urcunode;
+	struct rcu_head urcuhead;
+	/* Timestamp of event creation. */
+	u64 start_ts;
+	/* Hash of the key. */
+	u32 hkey;
+	/* Copy of the key. */
+	struct latency_tracker_key tkey;
+	/* Node in the LL freelist. */
+	struct llist_node llist;
+	/* Node in the spin_locked freelist. */
+	struct list_head list;
+	/* Node in the release list (when using the LL freelist). */
+	struct llist_node release_llist;
+	/* back pointer to the tracker. */
+	struct latency_tracker *tracker;
+	/*
+	 * Marker to indicate the half of the freelist, it is used to trigger
+	 * the resize mechanism.
+	 */
+	int resize_flag;
+	/*
+	 * wfcqueue node if using the timeout.
+	 */
+	struct cds_wfcq_node timeout_node;
+	/*
+	 * Reclaim the event when the refcount == 0.
+	 * If we use the timeout, the refcount is set to 2 (one for the
+	 * timeout list and the other for the normal exit (or GC)).
+	 */
+	struct kref refcount;
+	/*
+	 * Private pointer set by the caller, passed when the callback is
+	 * called. Memory management left entirely to the user.
+	 */
+	void *priv;
+};
+
+struct latency_tracker_event2 {
+	/* Node in the LL freelist. */
+	struct llist_node llist;
+	/* URCU HT */
+	struct cds_lfht_node urcunode;
+
+	union {
+		/* wfcqueue node if using the timeout. */
+		struct cds_wfcq_node timeout_node;
+		/* call_rcu */
+		struct rcu_head urcuhead;
+	} u;
+	/*
+	 * Reclaim the event when the refcount == 0.  If we use
+	 * the timeout, the refcount is set to 2 (one for the
+	 * timeout list and the other for the normal exit (or
+	 * GC)).
+	 */
+	struct kref refcount;
+
+	/* Timestamp of event creation. */
+	u64 start_ts;
+	/* Event key. */
+	struct latency_tracker_key tkey;
+};
+
 #if defined(OLDFREELIST)
 static
 void latency_tracker_event_destroy(struct kref *kref);

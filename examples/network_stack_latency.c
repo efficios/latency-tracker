@@ -102,31 +102,32 @@ static struct latency_tracker *tracker;
 static int cnt = 0;
 
 static
-void net_cb(unsigned long ptr)
+void net_cb(struct latency_tracker_event_ctx *ctx)
 {
-	struct latency_tracker_event *data =
-		(struct latency_tracker_event *) ptr;
-	struct net_device *dev = data->priv;
+	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
+	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
+	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
+	unsigned int cb_out_id = latency_tracker_event_ctx_get_cb_out_id(ctx);
+	struct net_device *dev = latency_tracker_event_ctx_get_priv(ctx);
 
 	/*
 	 * Don't log garbage collector and unique cleanups.
 	 */
-	if (data->cb_flag == LATENCY_TRACKER_CB_GC ||
-			data->cb_flag == LATENCY_TRACKER_CB_UNIQUE)
+	if (cb_flag == LATENCY_TRACKER_CB_GC ||
+			cb_flag == LATENCY_TRACKER_CB_UNIQUE)
 		return;
 
 	cnt++;
 
 	if (dev)
-		trace_net_latency(dev, data->end_ts - data->start_ts,
-			data->cb_flag, data->cb_out_id);
+		trace_net_latency(dev, end_ts - start_ts,
+			cb_flag, cb_out_id);
 }
 
 static
 void probe_netif_receive_skb(void *ignore, struct sk_buff *skb)
 {
 	struct netkey key;
-	u64 thresh, timeout;
 	enum latency_tracker_event_in_ret ret;
 
 	if (!skb)
@@ -134,12 +135,9 @@ void probe_netif_receive_skb(void *ignore, struct sk_buff *skb)
 
 	key.skb = skb;
 
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, net_cb, timeout, 1,
-		skb->dev);
+		1, skb->dev);
 	if (ret == LATENCY_TRACKER_FULL) {
 		printk("latency_tracker net: no more free events, consider "
 				"increasing the max_events parameter\n");
@@ -221,20 +219,15 @@ int __init net_latency_tp_init(void)
 {
 	int ret;
 	void (*kfree_skbmem_sym)(struct sk_buff *skb);
-	struct latency_tracker_conf tracker_config = {
-		.match_fct = NULL,
-		.hash_fct = NULL,
-		.max_events = 100,
-		.max_resize = 0,
-		.timer_period = usec_gc_period * 1000,
-		.gc_thresh = usec_gc_period * 1000,
-		.priv = NULL,
-	};
 
-	tracker = latency_tracker_create(&tracker_config);
-
+	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
+	latency_tracker_set_max_events(tracker, 100);
+	latency_tracker_set_timer_period(tracker, usec_gc_period * 1000);
+	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
+	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
+	latency_tracker_set_callback(tracker, net_cb);
 
 	ret = lttng_wrapper_tracepoint_probe_register("netif_receive_skb",
 			probe_netif_receive_skb, NULL);

@@ -51,6 +51,9 @@ unsigned long usec_timeout = DEFAULT_USEC_BLK_LATENCY_TIMEOUT;
 unsigned long usec_gc_threshold = DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD;
 unsigned long usec_gc_period = DEFAULT_USEC_BLK_LATENCY_GC_PERIOD;
 
+/*
+ * FIXME: action on update (all modules)
+ */
 module_param(usec_threshold, ulong, 0644);
 MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 
@@ -82,7 +85,7 @@ int skip_cnt;
 
 struct latency_tracker *tracker;
 
-void blk_cb(unsigned long ptr)
+void blk_cb(struct latency_tracker_event_ctx *ctx)
 {
 #if 0
 	struct latency_tracker_event *data =
@@ -143,7 +146,6 @@ void probe_block_rq_insert(void *ignore, struct request_queue *q,
 		struct request *rq)
 {
 	struct blk_key_t key;
-	u64 thresh, timeout;
 	enum latency_tracker_event_in_ret ret;
 
 	rq_cnt++;
@@ -154,12 +156,9 @@ void probe_block_rq_insert(void *ignore, struct request_queue *q,
 		return;
 
 	rq_to_key(&key, rq, KEY_SCHED);
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, blk_cb, timeout, 0,
-		latency_tracker_get_priv(tracker));
+		0, latency_tracker_get_priv(tracker));
 	if (ret == LATENCY_TRACKER_FULL) {
 		skip_cnt++;
 		//printk("latency_tracker block: no more free events, consider "
@@ -177,7 +176,6 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 		struct request *rq)
 {
 	struct blk_key_t key;
-	u64 thresh, timeout;
 	enum latency_tracker_event_in_ret ret;
 	struct latency_tracker_event *s;
 
@@ -210,12 +208,8 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 	/* Start tracking the request at the block level */
 	rq_to_key(&key, rq, KEY_BLOCK);
 
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
-
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, blk_cb, timeout, 0,
-		latency_tracker_get_priv(tracker));
+		0, latency_tracker_get_priv(tracker));
 	if (ret == LATENCY_TRACKER_FULL) {
 		skip_cnt++;
 		//printk("latency_tracker block: no more free events, consider "
@@ -325,7 +319,7 @@ void update_hist(struct latency_tracker_event *s, enum io_type t,
 	unsigned long flags;
 
 	now = trace_clock_read64();
-	delta = now - s->start_ts;
+	delta = now - latency_tracker_event_get_start_ts(s);
 
 	spin_lock_irqsave(&h->lock, flags);
 	if (h->ts_begin == 0)
@@ -464,7 +458,7 @@ void probe_syscall_enter(void *ignore, struct pt_regs *regs,
 	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &syscall_key, sizeof(syscall_key),
-			thresh, blk_cb, timeout, 0, (void *) id);
+			0, (void *) id);
 	if (ret == LATENCY_TRACKER_FULL) {
 		skip_cnt++;
 		//printk("latency_tracker block: no more free events, consider "
@@ -485,9 +479,9 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s)
 		goto end;
-	update_hist(s, io_syscall((unsigned long) s->priv),
+	update_hist(s, io_syscall((unsigned long) latency_tracker_event_get_priv(s)),
 			lttng_this_cpu_ptr(&live_hist));
-	update_hist(s, io_syscall((unsigned long) s->priv),
+	update_hist(s, io_syscall((unsigned long) latency_tracker_event_get_priv(s)),
 			lttng_this_cpu_ptr(&current_hist));
 	latency_tracker_put_event(s);
 
@@ -717,19 +711,15 @@ int __init block_hist_latency_tp_init(void)
 	/* limit to 1 evt/sec */
 	block_hist_priv->ns_rate_limit = 1000000000;
 
-	struct latency_tracker_conf tracker_config = {
-		.match_fct = NULL,
-		.hash_fct = NULL,
-		.max_events = 100000,
-		.max_resize = 0,
-		.timer_period = usec_gc_period * 1000,
-		.gc_thresh = usec_gc_period * 1000,
-		.priv = block_hist_priv,
-	};
-
-	tracker = latency_tracker_create(&tracker_config);
+	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
+	latency_tracker_set_max_events(tracker, 100000);
+	latency_tracker_set_timer_period(tracker, usec_gc_period * 1000);
+	latency_tracker_set_priv(tracker, block_hist_priv);
+	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
+	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
+	latency_tracker_set_callback(tracker, blk_cb);
 
 	init_histograms();
 	init_timer(&block_hist_priv->timer);

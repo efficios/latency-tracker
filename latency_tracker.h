@@ -25,166 +25,16 @@
 
 #include <linux/version.h>
 #include <linux/kref.h>
-#define LATENCY_TRACKER_MAX_KEY_SIZE 128
-
-struct latency_tracker;
-
-enum latency_tracker_cb_flag {
-	LATENCY_TRACKER_CB_NORMAL	= 0,
-	LATENCY_TRACKER_CB_TIMEOUT	= 1,
-	LATENCY_TRACKER_CB_UNIQUE	= 2,
-	LATENCY_TRACKER_CB_GC		= 3,
-};
-
 #include "rculfhash-internal.h"
 #include "urcu/wfcqueue.h"
+
+#define LATENCY_TRACKER_MAX_KEY_SIZE 128
+
+struct latency_tracker_event_ctx;
 
 struct latency_tracker_key {
 	size_t key_len;
 	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
-};
-
-/*
- * Configuration structure of the tracker, passed as argument to
- * latency_tracker_create(). All the values set here are copied internally, so
- * the structure does not need to stay alive after the creation of the tracker.
- *
- * Make sure to set all of the fields before creating the tracker or memset
- * to zero the structure beforehand.
- */
-struct latency_tracker_conf {
-	/*
-	 * Match function for the hash table, use jhash if NULL.
-	 */
-	int (*match_fct) (const void *key1, const void *key2,
-			size_t length);
-	/*
-	 * Hash function for the hash table, use memcmp if NULL.
-	 */
-	u32 (*hash_fct) (const void *key, u32 length, u32 initval);
-	/*
-	 * Expected maximum number of events active concurrently.
-	 * The memory is only allocated when the tracker is created.
-	 */
-	int max_events;
-	/*
-	 * Allow the maximum number of concurrent events to grow up
-	 * to this value (resized in a workqueue, by doubling the size
-	 * of the total list up-to max_resize). 0 to disable resizing.
-	 */
-	int max_resize;
-	/*
-	 * Period of the timer (nsec) that performs various housekeeping tasks:
-	 * - garbage collection checks (if enabled)
-	 * - check if the freelist needs to be resized
-	 * Set it to 0 to disable it.
-	 * 100ms (100*1000*1000) is a good arbitrary value.
-	 */
-	uint64_t timer_period;
-	/*
-	 * Delay (nsec) after which an event is considered too old (so we
-	 * stop waiting for the event_out and remove it from the HT.
-	 * This performs an iteration on the HT of in use events, the overhead
-	 * of this action depends on the timer_period and number of events
-	 * simultaneously active.
-	 */
-	uint64_t gc_thresh;
-	/*
-	 * A private pointer that is accessible everywhere the tracker object
-	 * is accessible, the caller is responsible of the memory allocation of
-	 * this pointer.
-	 */
-	void *priv;
-};
-
-struct latency_tracker_event {
-	/* basic kernel HT */
-	struct hlist_node hlist;
-	/* URCU HT */
-	struct cds_lfht_node urcunode;
-	struct rcu_head urcuhead;
-	/* Timestamp of event creation. */
-	u64 start_ts;
-	/* Timestamp of event completion. */
-	u64 end_ts;
-	/* Timeout timestamp. */
-	uint64_t timeout;
-	/* Time threshold value to call the callback. */
-	uint64_t thresh;
-	/* Hash of the key. */
-	u32 hkey;
-	/* Copy of the key. */
-	struct latency_tracker_key tkey;
-	/* Node in the LL freelist. */
-	struct llist_node llist;
-	/* Node in the spin_locked freelist. */
-	struct list_head list;
-	/* Node in the release list (when using the LL freelist). */
-	struct llist_node release_llist;
-	/* back pointer to the tracker. */
-	struct latency_tracker *tracker;
-	/*
-	 * Flag set before calling the callback to identify various
-	 * the condition of call (normal, timeout, garbage collect, etc).
-	 */
-	enum latency_tracker_cb_flag cb_flag;
-	/*
-	 * Optional event_out ID, useful if multiple exit paths are
-	 * possible (error, normal, etc).
-	 */
-	unsigned int cb_out_id;
-	/*
-	 * Function pointer to the callback, the pointer passed is this
-	 * struct latency_tracker_event.
-	 */
-	void (*cb)(unsigned long ptr);
-	/*
-	 * Marker to indicate the half of the freelist, it is used to trigger
-	 * the resize mechanism.
-	 */
-	int resize_flag;
-	/*
-	 * wfcqueue node if using the timeout.
-	 */
-	struct cds_wfcq_node timeout_node;
-	/*
-	 * Reclaim the event when the refcount == 0.
-	 * If we use the timeout, the refcount is set to 2 (one for the
-	 * timeout list and the other for the normal exit (or GC)).
-	 */
-	struct kref refcount;
-	/*
-	 * Pointer set a event creation by the caller and kept as is up
-	 * to the event destruction. The memory management is left entirely
-	 * to the caller.
-	 */
-	void *priv;
-};
-
-struct latency_tracker_event2 {
-	/* Node in the LL freelist. */
-	struct llist_node llist;
-	/* URCU HT */
-	struct cds_lfht_node urcunode;
-
-	union {
-		/* wfcqueue node if using the timeout. */
-		struct cds_wfcq_node timeout_node;
-		/* call_rcu */
-		struct rcu_head urcuhead;
-	} u;
-	/*
-	 * Reclaim the event when the refcount == 0.  If we use
-	 * the timeout, the refcount is set to 2 (one for the
-	 * timeout list and the other for the normal exit (or
-	 * GC)).
-	 */
-	struct kref refcount;
-
-	/* Timestamp of event creation. */
-	u64 start_ts;
-	/* Event key. */
-	struct latency_tracker_key tkey;
 };
 
 /*
@@ -195,6 +45,13 @@ enum latency_tracker_event_in_ret {
 	LATENCY_TRACKER_FULL		= 1,
 	LATENCY_TRACKER_ERR		= 2,
 	LATENCY_TRACKER_ERR_TIMEOUT	= 3,
+};
+
+enum latency_tracker_cb_flag {
+	LATENCY_TRACKER_CB_NORMAL	= 0,
+	LATENCY_TRACKER_CB_TIMEOUT	= 1,
+	LATENCY_TRACKER_CB_UNIQUE	= 2,
+	LATENCY_TRACKER_CB_GC		= 3,
 };
 
 /*
@@ -209,8 +66,7 @@ enum latency_tracker_event_in_ret {
  *     close them and pass LATENCY_TRACKER_CB_GC as cb_flag (disabled by
  *     default with 0 and 0).
  */
-struct latency_tracker *latency_tracker_create(
-		struct latency_tracker_conf *conf);
+struct latency_tracker *latency_tracker_create(void);
 
 /*
  * Destroy and free a tracker and all the current events in the HT.
@@ -220,14 +76,87 @@ struct latency_tracker *latency_tracker_create(
  */
 void latency_tracker_destroy(struct latency_tracker *tracker);
 
+int latency_tracker_set_match_fct(struct latency_tracker *tracker,
+		int (*match_fct) (const void *key1, const void *key2,
+			size_t length));
+int latency_tracker_set_hash_fct(struct latency_tracker *tracker,
+		u32 (*hash_fct) (const void *key, u32 length, u32 initval));
+int latency_tracker_set_max_events(struct latency_tracker *tracker,
+		int max_events);
+int latency_tracker_set_max_resize(struct latency_tracker *tracker,
+		int max_resize);
+int latency_tracker_set_priv(struct latency_tracker *tracker,
+		void *priv);
+int latency_tracker_set_timer_period(struct latency_tracker *tracker,
+		uint64_t timer_period);
+int latency_tracker_set_timeout(struct latency_tracker *tracker,
+		uint64_t timeout);
+int latency_tracker_set_threshold(struct latency_tracker *tracker,
+		uint64_t threshold);
+int latency_tracker_set_callback(struct latency_tracker *tracker,
+		void (*cb)(struct latency_tracker_event_ctx *ctx));
+
 /*
  * Update the tracker garbage collector parameters (ns).
- * If any of the 2 values equals 0, the GC is stopped.
+ * If 0, the GC is stopped.
  */
-void latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
+int latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
 		uint64_t gc_thres);
-void latency_tracker_set_timer_period(struct latency_tracker *tracker,
-		uint64_t gc_thres);
+
+void *latency_tracker_get_priv(struct latency_tracker *tracker);
+
+/*
+ * Structure passed as argument to the callback.
+ * Exposed publicly, but should be accessed with the getters to make the
+ * code eventually portable to user-space.
+ */
+struct latency_tracker_event_ctx {
+	uint64_t start_ts;
+	uint64_t end_ts;
+	enum latency_tracker_cb_flag cb_flag;
+	unsigned int cb_out_id;
+	struct latency_tracker_key *tkey;
+	void *priv;
+};
+
+static inline
+uint64_t latency_tracker_event_ctx_get_start_ts(
+		struct latency_tracker_event_ctx *ctx)
+{
+	return ctx->start_ts;
+}
+
+static inline
+uint64_t latency_tracker_event_ctx_get_end_ts(
+		struct latency_tracker_event_ctx *ctx)
+{
+	return ctx->end_ts;
+}
+static inline
+enum latency_tracker_cb_flag latency_tracker_event_ctx_get_cb_flag(
+		struct latency_tracker_event_ctx *ctx)
+{
+	return ctx->cb_flag;
+}
+static inline
+unsigned int latency_tracker_event_ctx_get_cb_out_id(
+		struct latency_tracker_event_ctx *ctx)
+{
+	return ctx->cb_out_id;
+}
+static inline
+struct latency_tracker_key *latency_tracker_event_ctx_get_key(
+		struct latency_tracker_event_ctx *ctx)
+{
+	return ctx->tkey;
+}
+
+static inline
+void *latency_tracker_event_ctx_get_priv(
+		struct latency_tracker_event_ctx *ctx)
+{
+	return ctx->priv;
+}
 
 /*
  * Start the tracking of an event.
@@ -249,15 +178,13 @@ void latency_tracker_set_timer_period(struct latency_tracker *tracker,
  */
 enum latency_tracker_event_in_ret latency_tracker_event_in(
 		struct latency_tracker *tracker,
-		void *key, size_t key_len, uint64_t thresh,
-		void (*cb)(unsigned long ptr),
-		uint64_t timeout, unsigned int unique, void *priv);
+		void *key, size_t key_len,
+		unsigned int unique, void *priv);
 
 enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		struct latency_tracker *tracker,
-		void *key, size_t key_len, uint64_t thresh,
-		void (*cb)(unsigned long ptr),
-		uint64_t timeout, unsigned int unique, void *priv);
+		void *key, size_t key_len,
+		unsigned int unique, void *priv);
 
 /*
  * Stop the tracking of an event.
@@ -291,12 +218,12 @@ struct latency_tracker_event *latency_tracker_get_event(
  */
 void latency_tracker_put_event(struct latency_tracker_event *event);
 
+void *latency_tracker_event_get_priv(struct latency_tracker_event *event);
+uint64_t latency_tracker_event_get_start_ts(struct latency_tracker_event *event);
+
 /*
  * Returns the number of skipped events due to an empty free list.
  */
 uint64_t latency_tracker_skipped_count(struct latency_tracker *tracker);
-
-
-void *latency_tracker_get_priv(struct latency_tracker *tracker);
 
 #endif /*  LATENCY_TRACKER_H */

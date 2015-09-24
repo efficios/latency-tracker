@@ -94,31 +94,32 @@ static struct proc_dir_entry *block_tracker_proc_dentry;
 static const struct file_operations block_tracker_fops;
 
 static
-void blk_cb(unsigned long ptr)
+void blk_cb(struct latency_tracker_event_ctx *ctx)
 {
-	struct latency_tracker_event *data =
-		(struct latency_tracker_event *) ptr;
-	struct blkkey *key = (struct blkkey *) data->tkey.key;
+	struct blkkey *key = (struct blkkey *) latency_tracker_event_ctx_get_key(ctx)->key;
 	struct block_tracker *block_priv =
-		(struct block_tracker *) data->priv;
+		(struct block_tracker *) latency_tracker_event_ctx_get_priv(ctx);
+	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
+	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
+	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
 
 	/*
 	 * Don't log garbage collector and unique cleanups.
 	 */
-	if (data->cb_flag == LATENCY_TRACKER_CB_GC ||
-			data->cb_flag == LATENCY_TRACKER_CB_UNIQUE)
+	if (cb_flag == LATENCY_TRACKER_CB_GC ||
+			cb_flag == LATENCY_TRACKER_CB_UNIQUE)
 		goto end;
 
 	/*
 	 * Rate limiter.
 	 */
-	if ((data->end_ts - block_priv->last_alert_ts) <
+	if ((end_ts - block_priv->last_alert_ts) <
 			block_priv->ns_rate_limit)
-		goto end_ts;
+		goto rate_limit;
 
 	printk("BLOCK\n");
 	trace_block_latency(key->dev, key->sector,
-			data->end_ts - data->start_ts);
+			end_ts - start_ts);
 	cnt++;
 
 	if (block_priv->readers > 0) {
@@ -127,8 +128,8 @@ void blk_cb(unsigned long ptr)
 		block_priv->got_alert = true;
 	}
 
-end_ts:
-	block_priv->last_alert_ts = data->end_ts;
+rate_limit:
+	block_priv->last_alert_ts = end_ts;
 end:
 	return;
 }
@@ -148,7 +149,6 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 		struct request *rq)
 {
 	struct blkkey key;
-	u64 thresh, timeout;
 	enum latency_tracker_event_in_ret ret;
 
 	rq_cnt++;
@@ -159,12 +159,9 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 		return;
 
 	rq_to_key(&key, rq);
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, blk_cb, timeout, 0,
-		latency_tracker_get_priv(tracker));
+		0, latency_tracker_get_priv(tracker));
 	if (ret == LATENCY_TRACKER_FULL) {
 		printk("latency_tracker block: no more free events, consider "
 				"increasing the max_events parameter\n");
@@ -261,15 +258,6 @@ int __init block_latency_tp_init(void)
 	int ret;
 	struct block_tracker *block_priv;
 
-	struct latency_tracker_conf tracker_config = {
-		.match_fct = NULL,
-		.hash_fct = NULL,
-		.max_events = 100,
-		.max_resize = 0,
-		.timer_period = usec_gc_period * 1000,
-		.gc_thresh = usec_gc_period * 1000,
-	};
-
 	block_priv = kzalloc(sizeof(struct block_tracker), GFP_KERNEL);
 	if (!block_priv) {
 		ret = -ENOMEM;
@@ -278,11 +266,15 @@ int __init block_latency_tp_init(void)
 	block_priv->reason = BLOCK_TRACKER_WAIT;
 	/* limit to 1 evt/sec */
 	block_priv->ns_rate_limit = 1000000000;
-	tracker_config.priv = block_priv;
 
-	tracker = latency_tracker_create(&tracker_config);
+	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
+	latency_tracker_set_max_events(tracker, 100);
+	latency_tracker_set_timer_period(tracker, usec_gc_period * 1000);
+	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
+	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
+	latency_tracker_set_callback(tracker, blk_cb);
 
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);

@@ -135,7 +135,7 @@ DECLARE_PER_CPU(struct iohist, current_hist);
 
 extern int skip_cnt;
 
-void blk_cb(unsigned long ptr);
+void blk_cb(struct latency_tracker_event_ctx *ctx);
 void update_hist(struct latency_tracker_event *s, enum io_type t,
 		struct iohist *h);
 

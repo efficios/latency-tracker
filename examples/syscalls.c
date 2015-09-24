@@ -222,10 +222,11 @@ void get_stack_txt(char *stacktxt, struct task_struct *p)
 }
 
 static
-void syscall_cb(unsigned long ptr)
+void syscall_cb(struct latency_tracker_event_ctx *ctx)
 {
-	struct latency_tracker_event *data =
-		(struct latency_tracker_event *) ptr;
+	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
+	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
+	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
 	struct process_key_t process_key;
 	struct process_val_t *val;
 	struct task_struct* task;
@@ -233,9 +234,9 @@ void syscall_cb(unsigned long ptr)
 	u32 hash;
 
 	rcu_read_lock();
-	if (data->cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
+	if (cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
 		goto end_unlock;
-	} else if (data->cb_flag == LATENCY_TRACKER_CB_NORMAL) {
+	} else if (cb_flag == LATENCY_TRACKER_CB_NORMAL) {
 		task = current;
 	} else {
 		goto end_unlock;
@@ -249,7 +250,7 @@ void syscall_cb(unsigned long ptr)
 		send_sig = 1;
 
 	trace_syscall_latency(task->comm, task->pid,
-			data->start_ts, data->end_ts - data->start_ts);
+			start_ts, end_ts - start_ts);
 	if (send_sig)
 		send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
 	else
@@ -273,7 +274,6 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 	struct process_key_t process_key;
 	u32 hash;
 	struct sched_key_t sched_key;
-	u64 thresh;
 
 	if (!watch_all)
 	{
@@ -289,10 +289,9 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 	}
 
 	sched_key.pid = task->pid;
-	thresh = usec_threshold * 1000;
 
 	latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
-			thresh, syscall_cb, 0, 1, (void *) id);
+			1, (void *) id);
 }
 
 static
@@ -331,11 +330,11 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	if (!s)
 		goto end;
 	now = trace_clock_read64();
-	delta = now - s->start_ts;
+	delta = now - latency_tracker_event_get_start_ts(s);
 	if (delta > ((usec_threshold * 1000)/2)) {
 		get_stack_txt(stacktxt, task);
 		trace_syscall_latency_stack(
-				task->comm, task->pid, s->start_ts,
+				task->comm, task->pid, latency_tracker_event_get_start_ts(s),
 				delta, 0, stacktxt);
 	}
 	latency_tracker_put_event(s);
@@ -349,15 +348,6 @@ int __init syscalls_init(void)
 {
 	int ret;
 	struct syscall_tracker *tracker_priv;
-	struct latency_tracker_conf tracker_config = {
-		.match_fct = NULL,
-		.hash_fct = NULL,
-		.max_events = 1000,
-		.max_resize = 20000,
-		.timer_period = 100000000,
-		.gc_thresh = 0,
-		.priv = NULL,
-	};
 
 	wrapper_vmalloc_sync_all();
 
@@ -367,10 +357,15 @@ int __init syscalls_init(void)
 		goto end;
 	}
 
-	tracker_config.priv = tracker_priv;
-	tracker = latency_tracker_create(&tracker_config);
+	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
+	latency_tracker_set_timer_period(tracker, 100000000);
+	latency_tracker_set_max_events(tracker, 1000);
+	latency_tracker_set_max_resize(tracker, 20000);
+	latency_tracker_set_priv(tracker, tracker_priv);
+	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
+	latency_tracker_set_callback(tracker, syscall_cb);
 
 	ret = lttng_wrapper_tracepoint_probe_register(
 			"sys_enter", probe_syscall_enter, NULL);

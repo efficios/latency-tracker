@@ -56,7 +56,7 @@ struct wakeup_tracker *wakeup_alloc_priv(void);
 int wakeup_setup_priv(struct wakeup_tracker *wakeup_priv);
 void wakeup_destroy_priv(struct wakeup_tracker *wakeup_priv);
 void wakeup_handle_proc(struct wakeup_tracker *wakeup_priv,
-		struct latency_tracker_event *data);
+		uint64_t end_ts);
 
 static const
 struct file_operations wakeup_tracker_fops = {

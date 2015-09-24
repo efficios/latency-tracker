@@ -76,16 +76,16 @@ void wakeup_destroy_priv(struct wakeup_tracker *wakeup_priv)
 }
 
 void wakeup_handle_proc(struct wakeup_tracker *wakeup_priv,
-		struct latency_tracker_event *data)
+		uint64_t end_ts)
 {
 	/* Rate limiter */
-	if ((data->end_ts - wakeup_priv->last_alert_ts) <
+	if ((end_ts - wakeup_priv->last_alert_ts) <
 			wakeup_priv->ns_rate_limit)
 		return;
 
 	if (wakeup_priv->readers > 0)
 		irq_work_queue(&wakeup_priv->w_irq);
-	wakeup_priv->last_alert_ts = data->end_ts;
+	wakeup_priv->last_alert_ts = end_ts;
 }
 
 unsigned int tracker_proc_poll(struct file *filp,

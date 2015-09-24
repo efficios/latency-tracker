@@ -55,7 +55,7 @@ struct offcpu_tracker *offcpu_alloc_priv(void);
 int offcpu_setup_priv(struct offcpu_tracker *wakeup_priv);
 void offcpu_destroy_priv(struct offcpu_tracker *wakeup_priv);
 void offcpu_handle_proc(struct offcpu_tracker *wakeup_priv,
-		struct latency_tracker_event *data);
+		uint64_t end_ts);
 
 static const
 struct file_operations wakeup_tracker_fops = {

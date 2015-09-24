@@ -16,15 +16,12 @@ int entry_new_sync_write(struct kretprobe_instance *p, struct pt_regs *regs)
 	struct task_struct* task = current;
 	struct kprobe_key_t kprobe_key;
 	enum latency_tracker_event_in_ret ret;
-	u64 thresh, timeout;
 
 	kprobe_key.pid = task->pid;
 	kprobe_key.type = KEY_FS;
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &kprobe_key, sizeof(kprobe_key),
-			thresh, blk_cb, timeout, 0, NULL);
+			0, NULL);
 	if (ret == LATENCY_TRACKER_FULL) {
 		skip_cnt++;
 		//printk("latency_tracker block: no more free events, consider "
@@ -75,15 +72,12 @@ int entry_new_sync_read(struct kretprobe_instance *p, struct pt_regs *regs)
 	struct task_struct* task = current;
 	struct kprobe_key_t kprobe_key;
 	enum latency_tracker_event_in_ret ret;
-	u64 thresh, timeout;
 
 	kprobe_key.pid = task->pid;
 	kprobe_key.type = KEY_FS;
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &kprobe_key, sizeof(kprobe_key),
-			thresh, blk_cb, timeout, 0, NULL);
+			0, NULL);
 	if (ret == LATENCY_TRACKER_FULL) {
 		skip_cnt++;
 		//printk("latency_tracker block: no more free events, consider "

@@ -150,23 +150,25 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int sk
 }
 
 static
-void offcpu_cb(unsigned long ptr)
+void offcpu_cb(struct latency_tracker_event_ctx *ctx)
 {
-	struct latency_tracker_event *data =
-		(struct latency_tracker_event *) ptr;
-	struct schedkey *key = (struct schedkey *) data->tkey.key;
+	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
+	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
+	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
+	unsigned int cb_out_id = latency_tracker_event_ctx_get_cb_out_id(ctx);
+	struct schedkey *key = (struct schedkey *) latency_tracker_event_ctx_get_key(ctx)->key;
 	struct offcpu_tracker *offcpu_priv =
 		(struct offcpu_tracker *) latency_tracker_get_priv(tracker);
 	struct task_struct *p;
 	char stacktxt[MAX_STACK_TXT];
 	u64 delay;
 
-	if (data->cb_flag != LATENCY_TRACKER_CB_NORMAL)
+	if (cb_flag != LATENCY_TRACKER_CB_NORMAL)
 		return;
-	if (data->cb_out_id == SCHED_EXIT_DIED)
+	if (cb_out_id == SCHED_EXIT_DIED)
 		return;
 
-	delay = (data->end_ts - data->start_ts) / 1000;
+	delay = (end_ts - start_ts) / 1000;
 #ifdef SCHEDWORST
 	usec_threshold = delay;
 #endif
@@ -177,10 +179,10 @@ void offcpu_cb(unsigned long ptr)
 		goto end;
 //	printk("offcpu: sched_switch %s (%d) %llu us\n", p->comm, key->pid, delay);
 	extract_stack(p, stacktxt, delay, 0);
-	trace_offcpu_sched_switch(p->comm, key->pid, data->end_ts - data->start_ts,
-			data->cb_flag, stacktxt);
+	trace_offcpu_sched_switch(p->comm, key->pid, end_ts - start_ts,
+			cb_flag, stacktxt);
 	cnt++;
-	offcpu_handle_proc(offcpu_priv, data);
+	offcpu_handle_proc(offcpu_priv, end_ts);
 
 end:
 	rcu_read_unlock();
@@ -192,21 +194,16 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 {
 	struct schedkey key;
 	enum latency_tracker_event_in_ret ret;
-	u64 thresh, timeout;
 
 	rcu_read_lock();
 	if (!next || !prev)
 		goto end;
 	current_pid[prev->on_cpu] = next->pid;
 
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
-
 	key.pid = prev->pid;
 	key.cpu = smp_processor_id();
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-			thresh, offcpu_cb, timeout, 1,
-			latency_tracker_get_priv(tracker));
+			1, latency_tracker_get_priv(tracker));
 
 	key.pid = next->pid;
 	key.cpu = smp_processor_id();
@@ -240,7 +237,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	if (!s)
 		goto end;
 	now = trace_clock_read64();
-	delta = now - s->start_ts;
+	delta = now - latency_tracker_event_get_start_ts(s);
 	if (delta > (usec_threshold * 1000)) {
 		/* skip our own stack (3 levels) */
 		extract_stack(current, stacktxt_waker, 0, 3);
@@ -287,15 +284,6 @@ int __init offcpu_init(void)
 {
 	int ret;
 	struct offcpu_tracker *offcpu_priv;
-	struct latency_tracker_conf tracker_config = {
-		.match_fct = match_fct,
-		.hash_fct = hash_fct,
-		.max_events = 2000,
-		.max_resize = 10000,
-		.timer_period = 100000000,
-		.gc_thresh = 0,
-		.priv = NULL,
-	};
 
 	offcpu_priv = offcpu_alloc_priv();
 	if (!offcpu_priv) {
@@ -303,10 +291,18 @@ int __init offcpu_init(void)
 		goto end;
 	}
 
-	tracker_config.priv = offcpu_priv;
-	tracker = latency_tracker_create(&tracker_config);
+	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
+	latency_tracker_set_max_events(tracker, 2000);
+	latency_tracker_set_max_resize(tracker, 10000);
+	latency_tracker_set_timer_period(tracker, 100000000);
+	latency_tracker_set_priv(tracker, offcpu_priv);
+	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
+	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
+	latency_tracker_set_callback(tracker, offcpu_cb);
+	latency_tracker_set_hash_fct(tracker, hash_fct);
+	latency_tracker_set_match_fct(tracker, match_fct);
 
 	ret = offcpu_setup_priv(offcpu_priv);
 	WARN_ON(ret);

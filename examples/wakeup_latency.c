@@ -78,20 +78,20 @@ static struct latency_tracker *tracker;
 static int cnt = 0;
 
 static
-void wakeup_cb(unsigned long ptr)
+void wakeup_cb(struct latency_tracker_event_ctx *ctx)
 {
-	struct latency_tracker_event *data =
-		(struct latency_tracker_event *) ptr;
-	struct schedkey *key = (struct schedkey *) data->tkey.key;
-	struct wakeup_tracker *wakeup_priv =
-		(struct wakeup_tracker *) data->priv;
+	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
+	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
+	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
+	struct schedkey *key = (struct schedkey *) latency_tracker_event_ctx_get_key(ctx)->key;
+	struct wakeup_tracker *wakeup_priv = latency_tracker_event_ctx_get_priv(ctx);
 	struct task_struct *p;
 	u64 delay;
 
-	if (data->cb_flag != LATENCY_TRACKER_CB_NORMAL)
+	if (cb_flag != LATENCY_TRACKER_CB_NORMAL)
 		return;
 
-	delay = (data->end_ts - data->start_ts) / 1000;
+	delay = (end_ts - start_ts) / 1000;
 #ifdef SCHEDWORST
 	usec_threshold = delay;
 #endif
@@ -100,13 +100,13 @@ void wakeup_cb(unsigned long ptr)
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
 	if (!p)
 		goto end_unlock;
-	trace_wakeup_latency(p->comm, key->pid, data->end_ts - data->start_ts,
-			data->cb_flag);
-	printk("wakeup_latency: (%d) %s (%d), %llu us\n", data->cb_flag,
+	trace_wakeup_latency(p->comm, key->pid, end_ts - start_ts,
+			cb_flag);
+	printk("wakeup_latency: (%d) %s (%d), %llu us\n", cb_flag,
 			p->comm, key->pid, delay);
 	rcu_read_unlock();
 	cnt++;
-	wakeup_handle_proc(wakeup_priv, data);
+	wakeup_handle_proc(wakeup_priv, end_ts);
 
 	goto end;
 
@@ -120,7 +120,6 @@ static
 void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 {
 	struct schedkey key;
-	u64 thresh, timeout;
 	int i;
 	enum latency_tracker_event_in_ret ret;
 
@@ -135,12 +134,9 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 			return;
 
 	key.pid = p->pid;
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-		thresh, wakeup_cb, timeout, 1,
-		latency_tracker_get_priv(tracker));
+		1, latency_tracker_get_priv(tracker));
 	if (ret == LATENCY_TRACKER_FULL) {
 //		printk("latency_tracker sched: no more free events, consider "
 //				"increasing the max_events parameter\n");
@@ -169,15 +165,6 @@ int __init wakeup_latency_init(void)
 {
 	int ret;
 	struct wakeup_tracker *wakeup_priv;
-	struct latency_tracker_conf tracker_config = {
-		.match_fct = NULL,
-		.hash_fct = NULL,
-		.max_events = 200,
-		.max_resize = 1000,
-		.timer_period = 100000000,
-		.gc_thresh = 0,
-		.priv = NULL,
-	};
 
 	wakeup_priv = wakeup_alloc_priv();
 	if (!wakeup_priv) {
@@ -185,10 +172,16 @@ int __init wakeup_latency_init(void)
 		goto end;
 	}
 
-	tracker_config.priv = wakeup_priv;
-	tracker = latency_tracker_create(&tracker_config);
+	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
+	latency_tracker_set_timer_period(tracker, 100000000);
+	latency_tracker_set_max_resize(tracker, 1000);
+	latency_tracker_set_max_events(tracker, 200);
+	latency_tracker_set_priv(tracker, wakeup_priv);
+	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
+	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
+	latency_tracker_set_callback(tracker, wakeup_cb);
 
 	ret = lttng_wrapper_tracepoint_probe_register("sched_wakeup",
 			probe_sched_wakeup, NULL);

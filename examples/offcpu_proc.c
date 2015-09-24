@@ -77,16 +77,16 @@ void offcpu_destroy_priv(struct offcpu_tracker *offcpu_priv)
 }
 
 void offcpu_handle_proc(struct offcpu_tracker *offcpu_priv,
-		struct latency_tracker_event *data)
+		uint64_t end_ts)
 {
 	/* Rate limiter */
-	if ((data->end_ts - offcpu_priv->last_alert_ts) <
+	if ((end_ts - offcpu_priv->last_alert_ts) <
 			offcpu_priv->ns_rate_limit)
 		return;
 
 	if (offcpu_priv->readers > 0)
 		irq_work_queue(&offcpu_priv->w_irq);
-	offcpu_priv->last_alert_ts = data->end_ts;
+	offcpu_priv->last_alert_ts = end_ts;
 }
 
 unsigned int tracker_proc_poll(struct file *filp,
