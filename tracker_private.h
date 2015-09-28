@@ -26,11 +26,9 @@ struct latency_tracker {
 	 */
         u32 (*hash_fct) (const void *key, u32 length, u32 initval);
 	/*
-	 * Expected maximum number of events active concurrently.
-	 * The memory is only allocated when the tracker is created.
-	 * FIXME: useful vs free_list_nelems ?
+	 * Number of events currently allocated in the tracker (or to be
+	 * allocated after the latency_tracker_enable).
 	 */
-	int max_events;
 	int free_list_nelems;
 	/*
 	 * Allow the maximum number of concurrent events to grow up

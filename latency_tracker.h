@@ -57,15 +57,11 @@ enum latency_tracker_cb_flag {
 
 /*
  * Create a latency tracker.
- * match_fct: function to compare 2 keys, returns 0 if equal
- *            if NULL: use memcmp
- * hash_fct: function to hash a key, if NULL: use jhash
- * max_events: expected number of concurrent live events (default: 100)
- * max_resize: allow the freelist to grow up to this number of concurrent
- *     events (0 to disable resizing).
- * gc: every timer_period ns, check if there are events older than gc_thresh ns,
- *     close them and pass LATENCY_TRACKER_CB_GC as cb_flag (disabled by
- *     default with 0 and 0).
+ *
+ * The default parameters are enough to start (FIXME: document the
+ * defaultshere), but we can override with the latency_tracker_set_* functions.
+ * When all the settings are done, call latency_tracker_enable to start the
+ * tracking.
  */
 struct latency_tracker *latency_tracker_create(void);
 
@@ -93,8 +89,8 @@ int latency_tracker_set_match_fct(struct latency_tracker *tracker,
 			size_t length));
 int latency_tracker_set_hash_fct(struct latency_tracker *tracker,
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval));
-int latency_tracker_set_max_events(struct latency_tracker *tracker,
-		int max_events);
+int latency_tracker_set_startup_events(struct latency_tracker *tracker,
+		int startup_events);
 int latency_tracker_set_max_resize(struct latency_tracker *tracker,
 		int max_resize);
 int latency_tracker_set_priv(struct latency_tracker *tracker,

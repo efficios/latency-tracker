@@ -311,16 +311,16 @@ int latency_tracker_set_hash_fct(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_hash_fct);
 
-int latency_tracker_set_max_events(struct latency_tracker *tracker,
-		int max_events)
+int latency_tracker_set_startup_events(struct latency_tracker *tracker,
+		int startup_events)
 {
 	if (tracker->enabled)
 		return -1;
 
-	tracker->max_events = max_events;
+	tracker->free_list_nelems = startup_events;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(latency_tracker_set_max_events);
+EXPORT_SYMBOL_GPL(latency_tracker_set_startup_events);
 
 int latency_tracker_set_max_resize(struct latency_tracker *tracker,
 		int max_resize)
@@ -379,7 +379,7 @@ struct latency_tracker *latency_tracker_create(void)
 	}
 	tracker->hash_fct = jhash;
 	tracker->match_fct = memcmp;
-	tracker->max_events = DEFAULT_MAX_ALLOC_EVENTS;
+	tracker->free_list_nelems = DEFAULT_MAX_ALLOC_EVENTS;
 	init_timer(&tracker->timer);
 	spin_lock_init(&tracker->lock);
 	wrapper_ht_init(tracker);
@@ -405,7 +405,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_create);
 int latency_tracker_enable(struct latency_tracker *tracker)
 {
 	tracker->enabled = 1;
-	return wrapper_freelist_init(tracker, tracker->max_events);
+	return wrapper_freelist_init(tracker, tracker->free_list_nelems);
 }
 EXPORT_SYMBOL_GPL(latency_tracker_enable);
 
@@ -718,7 +718,7 @@ int test_tracker(void)
 	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
-	ret = latency_tracker_set_max_events(tracker, 300);
+	ret = latency_tracker_set_startup_events(tracker, 300);
 	if (ret)
 		goto error;
 	ret = latency_tracker_set_timer_period(tracker, 100*1000*1000);

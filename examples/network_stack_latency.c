@@ -223,7 +223,7 @@ int __init net_latency_tp_init(void)
 	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
-	latency_tracker_set_max_events(tracker, 100);
+	latency_tracker_set_startup_events(tracker, 100);
 	latency_tracker_set_timer_period(tracker, usec_gc_period * 1000);
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
