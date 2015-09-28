@@ -287,7 +287,7 @@ int latency_tracker_set_match_fct(struct latency_tracker *tracker,
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length))
 {
-	if (tracker->match_fct)
+	if (tracker->started)
 		return -1;
 
 	tracker->match_fct = match_fct;
@@ -298,7 +298,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_match_fct);
 int latency_tracker_set_hash_fct(struct latency_tracker *tracker,
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval))
 {
-	if (tracker->hash_fct)
+	if (tracker->started)
 		return -1;
 
 	tracker->hash_fct = hash_fct;
@@ -309,7 +309,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_hash_fct);
 int latency_tracker_set_max_events(struct latency_tracker *tracker,
 		int max_events)
 {
-	if (tracker->max_events)
+	if (tracker->started)
 		return -1;
 
 	tracker->max_events = max_events;
@@ -320,7 +320,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_max_events);
 int latency_tracker_set_max_resize(struct latency_tracker *tracker,
 		int max_resize)
 {
-	if (tracker->max_resize)
+	if (tracker->started)
 		return -1;
 
 	tracker->max_resize = max_resize;

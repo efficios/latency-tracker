@@ -102,6 +102,11 @@ struct latency_tracker {
          */
         spinlock_t lock;
 	/*
+	 * When started some parameters cannot be changed anymore.
+	 * FIXME: list them here.
+	 */
+	int started;
+	/*
 	 * A private pointer that is accessible everywhere the tracker object
 	 * is accessible, the caller is responsible of the memory allocation of
 	 * this pointer.
