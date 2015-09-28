@@ -97,15 +97,23 @@ struct latency_tracker {
 	/* For timeout on events (on timer_period) */
 	struct cds_wfcq_head timeout_head;
 	struct cds_wfcq_tail timeout_tail;
+
+	/*
+	 * When we start using the event at this address, start
+	 * the resize mechanism (pointer comparison).
+	 */
+	struct latency_tracker_event *resize_event;
         /*
          * Protects the access to the HT, the free_list and the timer.
          */
         spinlock_t lock;
 	/*
-	 * When started some parameters cannot be changed anymore.
+	 * When enabled, the tracking actually starts and some parameters
+	 * cannot be changed anymore.
+	 *
 	 * FIXME: list them here.
 	 */
-	int started;
+	int enabled;
 	/*
 	 * A private pointer that is accessible everywhere the tracker object
 	 * is accessible, the caller is responsible of the memory allocation of
@@ -115,30 +123,20 @@ struct latency_tracker {
 };
 
 struct latency_tracker_event {
+#ifdef BASEHT
 	/* basic kernel HT */
 	struct hlist_node hlist;
-	/* URCU HT */
-	struct cds_lfht_node urcunode;
-	struct rcu_head urcuhead;
-	/* Timestamp of event creation. */
-	u64 start_ts;
-	/* Hash of the key. */
-	u32 hkey;
-	/* Copy of the key. */
-	struct latency_tracker_key tkey;
-	/* Node in the LL freelist. */
-	struct llist_node llist;
+#endif
+#if defined(OLDFREELIST)
 	/* Node in the spin_locked freelist. */
 	struct list_head list;
-	/* Node in the release list (when using the LL freelist). */
-	struct llist_node release_llist;
+#endif
+	/* Node in the LL freelist. */
+	struct llist_node llist;
+	struct cds_lfht_node urcunode;
+	struct rcu_head urcuhead;
 	/* back pointer to the tracker. */
 	struct latency_tracker *tracker;
-	/*
-	 * Marker to indicate the half of the freelist, it is used to trigger
-	 * the resize mechanism.
-	 */
-	int resize_flag;
 	/*
 	 * wfcqueue node if using the timeout.
 	 */
@@ -149,6 +147,10 @@ struct latency_tracker_event {
 	 * timeout list and the other for the normal exit (or GC)).
 	 */
 	struct kref refcount;
+	/* Timestamp of event creation. */
+	u64 start_ts;
+	/* Copy of the key. */
+	struct latency_tracker_key tkey;
 	/*
 	 * Private pointer set by the caller, passed when the callback is
 	 * called. Memory management left entirely to the user.

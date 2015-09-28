@@ -182,6 +182,9 @@ int __init wakeup_latency_init(void)
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, wakeup_cb);
+	ret = latency_tracker_enable(tracker);
+	if (ret)
+		goto error;
 
 	ret = lttng_wrapper_tracepoint_probe_register("sched_wakeup",
 			probe_sched_wakeup, NULL);

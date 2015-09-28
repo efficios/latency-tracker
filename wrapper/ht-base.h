@@ -33,7 +33,7 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 
 static inline
 struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
-		struct latency_tracker_event *s)
+		struct latency_tracker_event *s, u32 hkey)
 {
 #if defined(LLFREELIST)
 	unsigned long flags;
@@ -41,7 +41,7 @@ struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
 	spin_lock_irqsave(&tracker->lock, flags);
 #endif
 
-	hash_add(tracker->ht, &s->hlist, s->hkey);
+	hash_add(tracker->ht, &s->hlist, hkey);
 
 #if defined(LLFREELIST)
 	spin_unlock_irqrestore(&tracker->lock, flags);
@@ -167,7 +167,7 @@ struct latency_tracker_event *wrapper_ht_get_event(
 			continue;
 		if (tracker->match_fct(tkey->key, s->tkey.key, tkey->key_len))
 			continue;
-		kref_get(&s->refcount);
+		kref_get_unless_zero(&s->refcount);
 		goto end;
 	}
 	s = NULL;
@@ -198,9 +198,7 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 			continue;
 		if (tracker->match_fct(tkey->key, s->tkey.key, tkey->key_len))
 			continue;
-		s->cb_flag = LATENCY_TRACKER_CB_UNIQUE;
-		if (s->cb)
-			s->cb((unsigned long) s);
+		callback(s, tracker, 0, 0, LATENCY_TRACKER_CB_UNIQUE);
 		wrapper_ht_del(tracker, s);
 		kref_put(&s->refcount, __latency_tracker_event_destroy);
 	}

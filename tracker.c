@@ -99,7 +99,11 @@ void discard_event(struct latency_tracker *tracker,
 	 */
 	int was_empty;
 
-	was_empty = llist_add(&s->release_llist, &tracker->to_release);
+	/*
+	 * We can reuse llist node because it is not used anymore
+	 * by the parent list.
+	 */
+	was_empty = llist_add(&s->llist, &tracker->to_release);
 	if (was_empty)
 		queue_delayed_work(tracker->tracker_call_rcu_q,
 				&tracker->tracker_call_rcu_w, 100);
@@ -126,7 +130,7 @@ void tracker_call_rcu_workqueue(struct work_struct *work)
 
        list = llist_del_all(&tracker->to_release);
        synchronize_sched();
-       llist_for_each_entry_safe(e, n, list, release_llist)
+       llist_for_each_entry_safe(e, n, list, llist)
 	       wrapper_freelist_put_event(tracker, e);
 }
 #endif
@@ -288,7 +292,7 @@ int latency_tracker_set_match_fct(struct latency_tracker *tracker,
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length))
 {
-	if (tracker->started)
+	if (tracker->enabled)
 		return -1;
 
 	tracker->match_fct = match_fct;
@@ -299,7 +303,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_match_fct);
 int latency_tracker_set_hash_fct(struct latency_tracker *tracker,
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval))
 {
-	if (tracker->started)
+	if (tracker->enabled)
 		return -1;
 
 	tracker->hash_fct = hash_fct;
@@ -310,18 +314,18 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_hash_fct);
 int latency_tracker_set_max_events(struct latency_tracker *tracker,
 		int max_events)
 {
-	if (tracker->started)
+	if (tracker->enabled)
 		return -1;
 
 	tracker->max_events = max_events;
-	return wrapper_freelist_init(tracker, tracker->max_events);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_max_events);
 
 int latency_tracker_set_max_resize(struct latency_tracker *tracker,
 		int max_resize)
 {
-	if (tracker->started)
+	if (tracker->enabled)
 		return -1;
 
 	tracker->max_resize = max_resize;
@@ -397,6 +401,13 @@ end:
 	return tracker;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_create);
+
+int latency_tracker_enable(struct latency_tracker *tracker)
+{
+	tracker->enabled = 1;
+	return wrapper_freelist_init(tracker, tracker->max_events);
+}
+EXPORT_SYMBOL_GPL(latency_tracker_enable);
 
 void latency_tracker_destroy(struct latency_tracker *tracker)
 {
@@ -486,12 +497,17 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 {
 	struct latency_tracker_event *s, *old_s;
 	int ret;
+	u32 hkey;
 #if !defined(LLFREELIST)
 	unsigned long flags;
 #endif
 
 	if (!tracker) {
 		ret = LATENCY_TRACKER_ERR;
+		goto end;
+	}
+	if (!tracker->enabled) {
+		ret = LATENCY_TRACKER_DISABLED;
 		goto end;
 	}
 	if (key_len > LATENCY_TRACKER_MAX_KEY_SIZE) {
@@ -513,7 +529,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		tracker->skipped_count++;
 		goto end_unlock;
 	}
-	s->hkey = tracker->hash_fct(key, key_len, 0);
+	hkey = tracker->hash_fct(key, key_len, 0);
 
 	memcpy(s->tkey.key, key, key_len);
 	s->tkey.key_len = key_len;
@@ -539,16 +555,18 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	 */
 	if (unique)
 		wrapper_ht_unique_check(tracker, &s->tkey);
-	old_s = wrapper_ht_add(tracker, s);
+	old_s = wrapper_ht_add(tracker, s, hkey);
 	if (old_s) {
 		kref_put(&old_s->refcount, __latency_tracker_event_destroy);
 	}
 #if !defined(LLFREELIST) && !defined(URCUHT)
 	spin_unlock_irqrestore(&tracker->lock, flags);
 #endif
-	if (s->resize_flag &&
-			(tracker->free_list_nelems < tracker->max_resize))
+	if ((s == tracker->resize_event) &&
+			(tracker->free_list_nelems < tracker->max_resize)) {
 		tracker->need_to_resize = 1;
+		tracker->resize_event = NULL;
+	}
 
 	ret = LATENCY_TRACKER_OK;
 
@@ -589,6 +607,10 @@ int _latency_tracker_event_out(struct latency_tracker *tracker,
 
 	if (!tracker) {
 		goto error;
+	}
+	if (!tracker->enabled) {
+		ret = LATENCY_TRACKER_DISABLED;
+		goto end;
 	}
 
 	now = trace_clock_monotonic_wrapper();
@@ -696,8 +718,15 @@ int test_tracker(void)
 	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
-	latency_tracker_set_max_events(tracker, 300);
-	latency_tracker_set_timer_period(tracker, 100*1000*1000);
+	ret = latency_tracker_set_max_events(tracker, 300);
+	if (ret)
+		goto error;
+	ret = latency_tracker_set_timer_period(tracker, 100*1000*1000);
+	if (ret)
+		goto error;
+	ret = latency_tracker_enable(tracker);
+	if (ret)
+		goto error;
 
 	for (i = 0; i < 10; i++) {
 	printk("insert k1\n");

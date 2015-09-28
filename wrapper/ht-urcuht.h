@@ -55,13 +55,13 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 /* TODO: we assume unique key feature enabled. */
 static inline
 struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
-		struct latency_tracker_event *s)
+		struct latency_tracker_event *s, u32 hkey)
 {
 	struct cds_lfht_node *node_ptr;
 
 	rcu_read_lock_sched_notrace();
 	node_ptr = cds_lfht_add_replace(tracker->urcu_ht,
-			s->hkey, urcu_match, (void *) &s->tkey, &s->urcunode);
+			hkey, urcu_match, (void *) &s->tkey, &s->urcunode);
 	rcu_read_unlock_sched_notrace();
 
 	if (node_ptr != NULL) {
@@ -155,7 +155,7 @@ struct latency_tracker_event *wrapper_ht_get_event(
 	rcu_read_lock_sched_notrace();
 	cds_lfht_for_each_entry_duplicate(tracker->urcu_ht, k,
 			urcu_match, tkey, &iter, s, urcunode) {
-		kref_get(&s->refcount);
+		kref_get_unless_zero(&s->refcount);
 		goto end;
 	}
 	s = NULL;

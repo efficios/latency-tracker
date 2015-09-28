@@ -38,7 +38,7 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 		if (!e)
 			goto error;
 		if (tracker->max_resize && (i == max_events/2))
-			e->resize_flag = 1;
+			tracker->resize_event = e;
 		list_add(&e->list, &tracker->events_free_list);
 	}
 
@@ -71,7 +71,7 @@ void wrapper_resize_work(struct latency_tracker *tracker)
 		if (!e)
 			goto error;
 		if (i == max_events / 2)
-			e->resize_flag = 1;
+			tracker->resize_event = e;
 		list_add(&e->list, &tmp_list);
 	}
 

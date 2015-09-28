@@ -275,6 +275,9 @@ int __init block_latency_tp_init(void)
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, blk_cb);
+	ret = latency_tracker_enable(tracker);
+	if (ret)
+		goto error;
 
 	ret = lttng_wrapper_tracepoint_probe_register("block_rq_issue",
 			probe_block_rq_issue, NULL);

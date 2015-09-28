@@ -228,6 +228,9 @@ int __init net_latency_tp_init(void)
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, net_cb);
+	ret = latency_tracker_enable(tracker);
+	if (ret)
+		goto error;
 
 	ret = lttng_wrapper_tracepoint_probe_register("netif_receive_skb",
 			probe_netif_receive_skb, NULL);

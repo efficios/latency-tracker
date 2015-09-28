@@ -45,6 +45,7 @@ enum latency_tracker_event_in_ret {
 	LATENCY_TRACKER_FULL		= 1,
 	LATENCY_TRACKER_ERR		= 2,
 	LATENCY_TRACKER_ERR_TIMEOUT	= 3,
+	LATENCY_TRACKER_DISABLED	= 4,
 };
 
 enum latency_tracker_cb_flag {
@@ -76,6 +77,17 @@ struct latency_tracker *latency_tracker_create(void);
  */
 void latency_tracker_destroy(struct latency_tracker *tracker);
 
+/*
+ * Start the tracker.
+ * Returns 0 on success, a negative value and a printk on error.
+ */
+int latency_tracker_enable(struct latency_tracker *tracker);
+
+/*
+ * Setters to various tracker parameters.
+ * Most of these should be performed before the call to latency_tracker_enable.
+ * FIXME: document which parameters can be changed at runtime.
+ */
 int latency_tracker_set_match_fct(struct latency_tracker *tracker,
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length));

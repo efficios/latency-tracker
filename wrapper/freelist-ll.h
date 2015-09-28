@@ -37,8 +37,9 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
 		if (!e)
 			goto error;
-		if (tracker->max_resize && (i == max_events/2))
-			e->resize_flag = 1;
+		if (tracker->max_resize && (i == max_events/2)) {
+			tracker->resize_event = e;
+		}
 		llist_add(&e->llist, &tracker->ll_events_free_list);
 	}
 	tracker->free_list_nelems = max_events;
@@ -66,7 +67,7 @@ void wrapper_resize_work(struct latency_tracker *tracker)
 		if (!e)
 			goto error;
 		if (i == max_events / 2)
-			e->resize_flag = 1;
+			tracker->resize_event = e;
 		/*
 		 * FIXME: add should be at the tail, we will resize too
 		 * much.
