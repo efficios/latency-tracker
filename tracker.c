@@ -79,7 +79,7 @@ void deferred_latency_tracker_put_event(struct rcu_head *head)
 {
 	struct latency_tracker *tracker;
 	struct latency_tracker_event *s =
-		container_of(head, struct latency_tracker_event, urcuhead);
+		container_of(head, struct latency_tracker_event, u.urcuhead);
 	tracker = s->tracker;
 	wrapper_freelist_put_event(tracker, s);
 }
@@ -108,7 +108,7 @@ void discard_event(struct latency_tracker *tracker,
 		queue_delayed_work(tracker->tracker_call_rcu_q,
 				&tracker->tracker_call_rcu_w, 100);
 #else
-	call_rcu_sched(&s->urcuhead,
+	call_rcu_sched(&s->u.urcuhead,
 			deferred_latency_tracker_put_event);
 #endif /* LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0) */
 #endif
@@ -188,7 +188,7 @@ void latency_tracker_handle_timeouts(struct latency_tracker *tracker, int flush)
 			if (!qnode->next)
 				break;
 			s = caa_container_of(qnode->next,
-					struct latency_tracker_event, timeout_node);
+					struct latency_tracker_event, u.timeout_node);
 			if (atomic_read(&s->refcount.refcount) > 1 &&
 					(s->start_ts + tracker->timeout) > now)
 				break;
@@ -199,7 +199,7 @@ void latency_tracker_handle_timeouts(struct latency_tracker *tracker, int flush)
 		if (!qnode)
 			break;
 		s = caa_container_of(qnode, struct latency_tracker_event,
-				timeout_node);
+				u.timeout_node);
 		latency_tracker_timeout_cb(tracker, s, flush);
 	}
 }
@@ -546,7 +546,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		}
 		kref_get(&s->refcount);
 		cds_wfcq_enqueue(&tracker->timeout_head,
-				&tracker->timeout_tail, &s->timeout_node);
+				&tracker->timeout_tail, &s->u.timeout_node);
 	}
 
 	/*

@@ -122,6 +122,13 @@ struct latency_tracker {
         void *priv;
 };
 
+/*
+ * Structure representing an event, it is preallocated during the
+ * latency_tracker_enable (or resize), initialized during the
+ * latency_tracker_event_in and released after the latency_tracker_event_out.
+ * We try to keep this struct as small as possible because there might be a
+ * lot of these in circulation.
+ */
 struct latency_tracker_event {
 #ifdef BASEHT
 	/* basic kernel HT */
@@ -133,14 +140,18 @@ struct latency_tracker_event {
 #endif
 	/* Node in the LL freelist. */
 	struct llist_node llist;
+	/* Node in the URCU HT */
 	struct cds_lfht_node urcunode;
-	struct rcu_head urcuhead;
 	/* back pointer to the tracker. */
 	struct latency_tracker *tracker;
-	/*
-	 * wfcqueue node if using the timeout.
-	 */
-	struct cds_wfcq_node timeout_node;
+	union {
+		/*
+		 * wfcqueue node if using the timeout.
+		 */
+		struct cds_wfcq_node timeout_node;
+		/* call_rcu */
+		struct rcu_head urcuhead;
+	} u;
 	/*
 	 * Reclaim the event when the refcount == 0.
 	 * If we use the timeout, the refcount is set to 2 (one for the
@@ -156,32 +167,6 @@ struct latency_tracker_event {
 	 * called. Memory management left entirely to the user.
 	 */
 	void *priv;
-};
-
-struct latency_tracker_event2 {
-	/* Node in the LL freelist. */
-	struct llist_node llist;
-	/* URCU HT */
-	struct cds_lfht_node urcunode;
-
-	union {
-		/* wfcqueue node if using the timeout. */
-		struct cds_wfcq_node timeout_node;
-		/* call_rcu */
-		struct rcu_head urcuhead;
-	} u;
-	/*
-	 * Reclaim the event when the refcount == 0.  If we use
-	 * the timeout, the refcount is set to 2 (one for the
-	 * timeout list and the other for the normal exit (or
-	 * GC)).
-	 */
-	struct kref refcount;
-
-	/* Timestamp of event creation. */
-	u64 start_ts;
-	/* Event key. */
-	struct latency_tracker_key tkey;
 };
 
 #if defined(OLDFREELIST)
