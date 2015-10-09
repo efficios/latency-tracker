@@ -176,6 +176,25 @@ TRACE_EVENT(
 		__entry->out_id)
    );
 
+TRACE_EVENT(
+	latency_tracker_critical_timing_stack,
+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, char stack[256]),
+	TP_ARGS(comm, pid, stack),
+	TP_STRUCT__entry(
+		 __array(char, comm, TASK_COMM_LEN)
+		__field(int, pid)
+		__array(char, stack, 256)
+		),
+	TP_fast_assign(
+		memcpy(__entry->comm, comm, TASK_COMM_LEN);
+		entry->pid = pid;
+		memcpy(__entry->stack, stack, 256);
+		),
+	TP_printk("comm=%s, pid=%d, stack=%s",
+		__entry->comm, __entry->pid, __entry->stack)
+   );
+
+
 #endif /* _TRACE_LATENCY_TRACKER_H */
 
 /* this part must be outside protection */
