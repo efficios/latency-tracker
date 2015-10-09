@@ -1,23 +1,23 @@
-From 2a9f94496697a2b6e942c4296db4745b38fa1eca Mon Sep 17 00:00:00 2001
+From 347b46ebd49c20ac3595294395ac23be18690374 Mon Sep 17 00:00:00 2001
 From: Francois Doray <francois.pierre-doray@polymtl.ca>
 Date: Tue, 17 Mar 2015 19:36:15 -0400
-Subject: [MODULES PATCH] connect to latency_tracker tracepoints
+Subject: [PATCH] connect to latency_tracker tracepoints
 
 Signed-off-by: Francois Doray <francois.pierre-doray@polymtl.ca>
 Signed-off-by: Julien Desfossez <jdesfossez@efficios.com>
 ---
- .../events/lttng-module/latency_tracker.h          |  85 ++++++++++++
- instrumentation/events/mainline/latency_tracker.h  | 148 +++++++++++++++++++++
+ .../events/lttng-module/latency_tracker.h          |  85 ++++++++++
+ instrumentation/events/mainline/latency_tracker.h  | 182 +++++++++++++++++++++
  probes/Makefile                                    |   2 +
  probes/lttng-probe-latency_tracker.c               |  22 +++
- 4 files changed, 257 insertions(+)
+ 4 files changed, 291 insertions(+)
  create mode 100644 instrumentation/events/lttng-module/latency_tracker.h
  create mode 100644 instrumentation/events/mainline/latency_tracker.h
  create mode 100644 probes/lttng-probe-latency_tracker.c
 
 diff --git a/instrumentation/events/lttng-module/latency_tracker.h b/instrumentation/events/lttng-module/latency_tracker.h
 new file mode 100644
-index 0000000..7a47c71
+index 0000000..4e0d41d
 --- /dev/null
 +++ b/instrumentation/events/lttng-module/latency_tracker.h
 @@ -0,0 +1,85 @@
@@ -30,7 +30,7 @@ index 0000000..7a47c71
 +#include <linux/tracepoint.h>
 +#include <linux/netdevice.h>
 +
-+LTTNG_TRACEPOINT_EVENT(wakeup_latency,
++LTTNG_TRACEPOINT_EVENT(latency_tracker_wakeup,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay, unsigned int flag),
 +	TP_ARGS(comm, pid, delay, flag),
 +	TP_FIELDS(
@@ -41,7 +41,7 @@ index 0000000..7a47c71
 +	)
 +   )
 +
-+LTTNG_TRACEPOINT_EVENT(offcpu_latency,
++LTTNG_TRACEPOINT_EVENT(latency_tracker_offcpu,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
 +		unsigned int flag, char stack[256]),
 +	TP_ARGS(comm, pid, delay, flag, stack),
@@ -54,7 +54,7 @@ index 0000000..7a47c71
 +	)
 +   )
 +
-+LTTNG_TRACEPOINT_EVENT(syscall_latency,
++LTTNG_TRACEPOINT_EVENT(latency_tracker_syscall,
 +	TP_PROTO(char comm[TASK_COMM_LEN],
 +		pid_t pid, u64 start_ts, u64 delay),
 +	TP_ARGS(comm, pid, start_ts, delay),
@@ -66,7 +66,7 @@ index 0000000..7a47c71
 +	)
 +   )
 +
-+LTTNG_TRACEPOINT_EVENT(syscall_latency_stack,
++LTTNG_TRACEPOINT_EVENT(latency_tracker_syscall_stack,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid,
 +		u64 start_ts, u64 delay, unsigned int flag, char stack[256]),
 +	TP_ARGS(comm, pid, start_ts, delay, flag, stack),
@@ -80,7 +80,7 @@ index 0000000..7a47c71
 +	)
 +   )
 +
-+LTTNG_TRACEPOINT_EVENT(block_latency,
++LTTNG_TRACEPOINT_EVENT(latency_tracker_block,
 +	TP_PROTO(dev_t dev, sector_t sector, u64 delay),
 +	TP_ARGS(dev, sector, delay),
 +	TP_FIELDS(
@@ -91,7 +91,7 @@ index 0000000..7a47c71
 +	)
 +   )
 +
-+LTTNG_TRACEPOINT_EVENT(net_latency,
++LTTNG_TRACEPOINT_EVENT(latency_tracker_net,
 +	TP_PROTO(struct net_device *dev, u64 delay,
 +		unsigned int flag, unsigned int out_id),
 +	TP_ARGS(dev, delay, flag, out_id),
@@ -108,10 +108,10 @@ index 0000000..7a47c71
 +#include "../../../probes/define_trace.h"
 diff --git a/instrumentation/events/mainline/latency_tracker.h b/instrumentation/events/mainline/latency_tracker.h
 new file mode 100644
-index 0000000..2003e66
+index 0000000..806bc17
 --- /dev/null
 +++ b/instrumentation/events/mainline/latency_tracker.h
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,182 @@
 +/* subsystem name is "latency_tracker" */
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
@@ -123,7 +123,7 @@ index 0000000..2003e66
 +#include <linux/netdevice.h>
 +
 +TRACE_EVENT(
-+	wakeup_latency,
++	latency_tracker_wakeup,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay, unsigned int flag),
 +	TP_ARGS(comm, pid, delay, flag),
 +	TP_STRUCT__entry(
@@ -143,7 +143,7 @@ index 0000000..2003e66
 +   );
 +
 +TRACE_EVENT(
-+	offcpu_latency,
++	latency_tracker_offcpu_sched_switch,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
 +		unsigned int flag, char stack[256]),
 +	TP_ARGS(comm, pid, delay, flag, stack),
@@ -167,7 +167,41 @@ index 0000000..2003e66
 +   );
 +
 +TRACE_EVENT(
-+	syscall_latency_stack,
++	latency_tracker_offcpu_sched_wakeup,
++	TP_PROTO(struct task_struct *waker, char waker_stack[256],
++		struct task_struct *wakee,
++		u64 wakee_offcpu_delay, unsigned int flag),
++	TP_ARGS(waker, waker_stack,
++		wakee,
++		wakee_offcpu_delay, flag),
++	TP_STRUCT__entry(
++		__field(int, waker_pid)
++		__array(char, waker_comm, TASK_COMM_LEN)
++		__array(char, waker_stack, 256)
++		__field(int, wakee_pid)
++		__array(char, wakee_comm, TASK_COMM_LEN)
++		__field(u64, wakee_offcpu_delay)
++		__field(unsigned int, flag)
++		),
++	TP_fast_assign(
++		entry->waker_pid = waker->pid;
++		memcpy(__entry->waker_comm, waker->comm, TASK_COMM_LEN);
++		memcpy(__entry->waker_stack, waker_stack, 256);
++		entry->wakee_pid = wakee->pid;
++		memcpy(__entry->wakee_comm, wakee->comm, TASK_COMM_LEN);
++		entry->wakee_offcpu_delay = wakee_offcpu_delay;
++		entry->flag = flag;
++		),
++	TP_printk("waker_comm=%s (%d), wakee_comm=%s (%d), wakee_offcpu_delay=%llu, "
++			"flag=%u, waker_stack=%s",
++		__entry->waker_comm, __entry->waker_pid,
++		__entry->wakee_comm, __entry->wakee_pid,
++		__entry->wakee_offcpu_delay, __entry->flag,
++		__entry->waker_stack)
++   );
++
++TRACE_EVENT(
++	latency_tracker_syscall_stack,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 start_ts, u64 delay,
 +		unsigned int flag, char stack[256]),
 +	TP_ARGS(comm, pid, start_ts, delay, flag, stack),
@@ -193,7 +227,7 @@ index 0000000..2003e66
 +   );
 +
 +TRACE_EVENT(
-+	syscall_latency,
++	latency_tracker_syscall,
 +	TP_PROTO(char comm[TASK_COMM_LEN],
 +		pid_t pid, u64 start_ts, u64 delay),
 +	TP_ARGS(comm, pid, start_ts, delay),
@@ -214,7 +248,7 @@ index 0000000..2003e66
 +   );
 +
 +TRACE_EVENT(
-+	block_latency,
++	latency_tracker_block,
 +	TP_PROTO(dev_t dev, sector_t sector, u64 delay),
 +	TP_ARGS(dev, sector, delay),
 +	TP_STRUCT__entry(
@@ -235,7 +269,7 @@ index 0000000..2003e66
 +   );
 +
 +TRACE_EVENT(
-+	net_latency,
++	latency_tracker_net,
 +	TP_PROTO(struct net_device *dev, u64 delay,
 +		unsigned int flag, unsigned int out_id),
 +	TP_ARGS(dev, delay, flag, out_id),
@@ -261,7 +295,7 @@ index 0000000..2003e66
 +/* this part must be outside protection */
 +#include <trace/define_trace.h>
 diff --git a/probes/Makefile b/probes/Makefile
-index 9a2558b..d45de85 100644
+index 7b00a81..b5c5607 100644
 --- a/probes/Makefile
 +++ b/probes/Makefile
 @@ -22,6 +22,8 @@ obj-m += lttng-probe-power.o
