@@ -40,13 +40,13 @@
 
 #define DEFAULT_MAX_ALLOC_EVENTS 100
 
-EXPORT_TRACEPOINT_SYMBOL_GPL(wakeup_latency);
-EXPORT_TRACEPOINT_SYMBOL_GPL(offcpu_sched_switch);
-EXPORT_TRACEPOINT_SYMBOL_GPL(offcpu_sched_wakeup);
-EXPORT_TRACEPOINT_SYMBOL_GPL(syscall_latency);
-EXPORT_TRACEPOINT_SYMBOL_GPL(syscall_latency_stack);
-EXPORT_TRACEPOINT_SYMBOL_GPL(net_latency);
-EXPORT_TRACEPOINT_SYMBOL_GPL(block_latency);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_wakeup);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_offcpu_sched_switch);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_offcpu_sched_wakeup);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_syscall);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_syscall_stack);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_net);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_block);
 
 static void latency_tracker_enable_timer(struct latency_tracker *tracker);
 static void latency_tracker_timer_cb(unsigned long ptr);

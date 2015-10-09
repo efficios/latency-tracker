@@ -9,7 +9,7 @@
 #include <linux/netdevice.h>
 
 TRACE_EVENT(
-	wakeup_latency,
+	latency_tracker_wakeup,
 	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay, unsigned int flag),
 	TP_ARGS(comm, pid, delay, flag),
 	TP_STRUCT__entry(
@@ -29,7 +29,7 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
-	offcpu_sched_switch,
+	latency_tracker_offcpu_sched_switch,
 	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
 		unsigned int flag, char stack[256]),
 	TP_ARGS(comm, pid, delay, flag, stack),
@@ -53,7 +53,7 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
-	offcpu_sched_wakeup,
+	latency_tracker_offcpu_sched_wakeup,
 	TP_PROTO(struct task_struct *waker, char waker_stack[256],
 		struct task_struct *wakee,
 		u64 wakee_offcpu_delay, unsigned int flag),
@@ -87,7 +87,7 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
-	syscall_latency_stack,
+	latency_tracker_syscall_stack,
 	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 start_ts, u64 delay,
 		unsigned int flag, char stack[256]),
 	TP_ARGS(comm, pid, start_ts, delay, flag, stack),
@@ -113,7 +113,7 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
-	syscall_latency,
+	latency_tracker_syscall,
 	TP_PROTO(char comm[TASK_COMM_LEN],
 		pid_t pid, u64 start_ts, u64 delay),
 	TP_ARGS(comm, pid, start_ts, delay),
@@ -134,7 +134,7 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
-	block_latency,
+	latency_tracker_block,
 	TP_PROTO(dev_t dev, sector_t sector, u64 delay),
 	TP_ARGS(dev, sector, delay),
 	TP_STRUCT__entry(
@@ -155,7 +155,7 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
-	net_latency,
+	latency_tracker_net,
 	TP_PROTO(struct net_device *dev, u64 delay,
 		unsigned int flag, unsigned int out_id),
 	TP_ARGS(dev, delay, flag, out_id),

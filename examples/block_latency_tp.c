@@ -118,7 +118,7 @@ void blk_cb(struct latency_tracker_event_ctx *ctx)
 		goto rate_limit;
 
 	printk("BLOCK\n");
-	trace_block_latency(key->dev, key->sector,
+	trace_latency_tracker_block(key->dev, key->sector,
 			end_ts - start_ts);
 	cnt++;
 

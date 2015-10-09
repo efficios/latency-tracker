@@ -120,7 +120,7 @@ void net_cb(struct latency_tracker_event_ctx *ctx)
 	cnt++;
 
 	if (dev)
-		trace_net_latency(dev, end_ts - start_ts,
+		trace_latency_tracker_net(dev, end_ts - start_ts,
 			cb_flag, cb_out_id);
 }
 

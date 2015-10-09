@@ -100,7 +100,7 @@ void wakeup_cb(struct latency_tracker_event_ctx *ctx)
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
 	if (!p)
 		goto end_unlock;
-	trace_wakeup_latency(p->comm, key->pid, end_ts - start_ts,
+	trace_latency_tracker_wakeup(p->comm, key->pid, end_ts - start_ts,
 			cb_flag);
 	printk("wakeup_latency: (%d) %s (%d), %llu us\n", cb_flag,
 			p->comm, key->pid, delay);

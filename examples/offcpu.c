@@ -179,7 +179,7 @@ void offcpu_cb(struct latency_tracker_event_ctx *ctx)
 		goto end;
 //	printk("offcpu: sched_switch %s (%d) %llu us\n", p->comm, key->pid, delay);
 	extract_stack(p, stacktxt, delay, 0);
-	trace_offcpu_sched_switch(p->comm, key->pid, end_ts - start_ts,
+	trace_latency_tracker_offcpu_sched_switch(p->comm, key->pid, end_ts - start_ts,
 			cb_flag, stacktxt);
 	cnt++;
 	offcpu_handle_proc(offcpu_priv, end_ts);
@@ -241,7 +241,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	if (delta > (usec_threshold * 1000)) {
 		/* skip our own stack (3 levels) */
 		extract_stack(current, stacktxt_waker, 0, 3);
-		trace_offcpu_sched_wakeup(current, stacktxt_waker, p, delta, 0);
+		trace_latency_tracker_offcpu_sched_wakeup(current, stacktxt_waker, p, delta, 0);
 	}
 	latency_tracker_put_event(s);
 

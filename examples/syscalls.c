@@ -249,7 +249,7 @@ void syscall_cb(struct latency_tracker_event_ctx *ctx)
 	if (val)
 		send_sig = 1;
 
-	trace_syscall_latency(task->comm, task->pid,
+	trace_latency_tracker_syscall(task->comm, task->pid,
 			start_ts, end_ts - start_ts);
 	if (send_sig)
 		send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
@@ -333,7 +333,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	delta = now - latency_tracker_event_get_start_ts(s);
 	if (delta > ((usec_threshold * 1000)/2)) {
 		get_stack_txt(stacktxt, task);
-		trace_syscall_latency_stack(
+		trace_latency_tracker_syscall_stack(
 				task->comm, task->pid, latency_tracker_event_get_start_ts(s),
 				delta, 0, stacktxt);
 	}
