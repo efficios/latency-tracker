@@ -30,9 +30,6 @@
 #include <linux/proc_fs.h>
 #include <linux/poll.h>
 #include <linux/cpu.h>
-#include <linux/vmalloc.h>
-#include <linux/fdtable.h>
-#include <linux/tcp.h>
 #include <asm/syscall.h>
 #include "block_hist.h"
 #include "block_hist_kprobes.h"
@@ -444,61 +441,6 @@ int io_syscall(long id)
 }
 
 static
-void ipv4_str(unsigned long ip, char *str)
-{
-	snprintf(str, 16, "%lu.%lu.%lu.%lu",
-			ip >> 24,
-			ip >> 16 & 0xFF,
-			ip >> 8 & 0xFF,
-			ip & 0xFF);
-}
-
-static int nb_print = 0;
-static
-void test_read(struct pt_regs *regs)
-{
-	unsigned long args[1];
-	struct files_struct *files = current->files;
-	int fd;
-	struct path *path = NULL;
-	struct socket *sock;
-	int err = NULL;
-	struct fd f;
-
-	if (current->comm[0] != 's' ||
-		current->comm[1] != 's' ||
-		current->comm[2] != 'h' ||
-		current->comm[3] != 'd')
-		return;
-	if (nb_print++ > 10)
-		return;
-
-	syscall_get_arguments(current, regs, 0, 1, args);
-	fd = args[0];
-
-	spin_lock(&files->file_lock);
-	//printk("test: %s\n", current->files->fd_array[fd]->f_path.dentry->d_name.name);
-	f = fdget(fd);
-	if (f.file) {
-		sock = sock_from_file(f.file, &err);
-		if (sock) {
-			struct inet_sock *inet = inet_sk(sock->sk);
-			char s_ipv4[16], d_ipv4[16];
-
-			ipv4_str(ntohl(inet->inet_saddr), s_ipv4);
-			ipv4_str(ntohl(inet->inet_daddr), d_ipv4);
-			printk("found %s:%u -> %s:%u\n",
-					s_ipv4, ntohs(inet->inet_sport),
-					d_ipv4, ntohs(inet->inet_dport));
-		}
-		fdput(f);
-	}
-	spin_unlock(&files->file_lock);
-
-	printk("%d (%s) read on fd %d, path %p\n", current->pid, current->comm, fd, path);
-}
-
-static
 void probe_syscall_enter(void *ignore, struct pt_regs *regs,
 		long id)
 {
@@ -509,9 +451,6 @@ void probe_syscall_enter(void *ignore, struct pt_regs *regs,
 
 	if (io_syscall(id) < 0)
 		return;
-
-	if (id == __NR_read)
-		test_read(regs);
 
 	syscall_key.pid = task->pid;
 	syscall_key.type = KEY_SYSCALL;
