@@ -36,6 +36,9 @@
 #include <linux/moduleparam.h>
 #include <linux/sched.h>
 #include <linux/stacktrace.h>
+#include <linux/fdtable.h>
+#include <linux/tcp.h>
+#include <asm/syscall.h>
 #include <asm/stacktrace.h>
 #include "syscalls.h"
 #include "../latency_tracker.h"
@@ -77,14 +80,32 @@ MODULE_PARM_DESC(take_kernel_stack, "Extract kernel stack at timeout/2");
 
 static unsigned long watch_all = DEFAULT_WATCH_ALL_PROCESSES;
 module_param(watch_all, ulong, 0644);
-MODULE_PARM_DESC(watch_all, "Watch all processes or just registered one");
+MODULE_PARM_DESC(watch_all, "Watch all processes or just registered ones");
 
 static int cnt = 0;
 
 static struct latency_tracker *tracker;
 
+enum tracker_key_type {
+	KEY_SYSCALL = 0,
+	KEY_POLLFD = 1,
+};
+
+enum tracker_out_reason {
+	OUT_SYSCALL,
+	OUT_POLLFD,
+	OUT_POLLFD_NOCB,
+};
+
+struct pollfd_key_t {
+	pid_t pid;
+	int fd;
+	enum tracker_key_type type;
+} __attribute__((__packed__));
+
 struct sched_key_t {
 	pid_t pid;
+	enum tracker_key_type type;
 } __attribute__((__packed__));
 
 struct process_key_t {
@@ -227,11 +248,16 @@ void syscall_cb(struct latency_tracker_event_ctx *ctx)
 	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
 	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
 	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
+	int out_id = latency_tracker_event_ctx_get_cb_out_id(ctx);
 	struct process_key_t process_key;
 	struct process_val_t *val;
 	struct task_struct* task;
 	int send_sig = 0;
 	u32 hash;
+
+	if (out_id == OUT_POLLFD_NOCB) {
+		return;
+	}
 
 	rcu_read_lock();
 	if (cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
@@ -268,6 +294,320 @@ end:
 }
 
 static
+void ipv4_str(unsigned long ip, char *str)
+{
+	snprintf(str, 16, "%lu.%lu.%lu.%lu",
+			ip >> 24,
+			ip >> 16 & 0xFF,
+			ip >> 8 & 0xFF,
+			ip & 0xFF);
+}
+
+#if 0
+static
+int io_syscall(long id)
+{
+	switch(id) {
+		case __NR_read:
+		case __NR_pread64:
+		case __NR_readv:
+		case __NR_preadv:
+		case __NR_recvfrom:
+		case __NR_recvmsg:
+		case __NR_getdents:
+		case __NR_getdents64:
+		case __NR_statfs:
+		case __NR_fstatfs:
+			return IO_SYSCALL_READ;
+
+		case __NR_write:
+		case __NR_pwrite64:
+		case __NR_writev:
+		case __NR_pwritev:
+		case __NR_sendto:
+		case __NR_sendmsg:
+		case __NR_mkdir:
+		case __NR_mkdirat:
+		case __NR_rmdir:
+		case __NR_creat:
+		case __NR_mknod:
+		case __NR_mknodat:
+		case __NR_vmsplice:
+		case __NR_sendmmsg:
+			return IO_SYSCALL_WRITE;
+
+		case __NR_sendfile:
+		case __NR_splice:
+			return IO_SYSCALL_RW;
+
+		case __NR_fsync:
+		case __NR_fdatasync:
+		case __NR_sync:
+		case __NR_sync_file_range:
+		case __NR_syncfs:
+			return IO_SYSCALL_SYNC;
+
+		case __NR_open:
+		case __NR_pipe:
+		case __NR_pipe2:
+		case __NR_dup2:
+		case __NR_dup3:
+		case __NR_socket:
+		case __NR_connect:
+//		case __NR_accept:
+//		case __NR_accept4:
+		case __NR_execve:
+		case __NR_chdir:
+		case __NR_fchdir:
+		case __NR_mount:
+		case __NR_umount2:
+		case __NR_swapon:
+		case __NR_openat:
+			return IO_SYSCALL_OPEN;
+
+		case __NR_close:
+		case __NR_swapoff:
+		case __NR_shutdown:
+			return IO_SYSCALL_CLOSE;
+
+		default:
+			break;
+	}
+	return -1;
+}
+
+static
+void test_read(struct pt_regs *regs)
+{
+	unsigned long args[1];
+	struct files_struct *files = current->files;
+	int fd;
+	struct path *path = NULL;
+	struct socket *sock;
+	int err = NULL;
+	struct fd f;
+
+	if (current->comm[0] != 's' ||
+		current->comm[1] != 's' ||
+		current->comm[2] != 'h' ||
+		current->comm[3] != 'd')
+		return;
+	if (nb_print++ > 10)
+		return;
+
+	syscall_get_arguments(current, regs, 0, 1, args);
+	fd = args[0];
+
+	spin_lock(&files->file_lock);
+	//printk("test: %s\n", current->files->fd_array[fd]->f_path.dentry->d_name.name);
+	f = fdget(fd);
+	if (f.file) {
+		sock = sock_from_file(f.file, &err);
+		if (sock) {
+			struct inet_sock *inet = inet_sk(sock->sk);
+			char s_ipv4[16], d_ipv4[16];
+
+			ipv4_str(ntohl(inet->inet_saddr), s_ipv4);
+			ipv4_str(ntohl(inet->inet_daddr), d_ipv4);
+			printk("found %s:%u -> %s:%u\n",
+					s_ipv4, ntohs(inet->inet_sport),
+					d_ipv4, ntohs(inet->inet_dport));
+		}
+		fdput(f);
+	}
+	spin_unlock(&files->file_lock);
+
+	printk("%d (%s) read on fd %d, path %p\n", current->pid, current->comm, fd, path);
+}
+#endif
+
+static int nb_print = 0;
+
+static
+void poll_fds(struct pt_regs *regs)
+{
+	/* struct pollfd *fds, nfds_t nfds, int timeout */
+	unsigned long args[3];
+	struct pollfd *fds;
+	int ret, i;
+
+	if (nb_print++ > 10)
+		return;
+
+	syscall_get_arguments(current, regs, 0, 3, args);
+	fds = kmalloc(args[1] * sizeof(struct pollfd), GFP_KERNEL);
+	if (!fds)
+		goto end;
+
+	ret = copy_from_user(fds, (void *) args[0], args[1] * sizeof(struct pollfd));
+	if (ret)
+		goto end_free;
+
+	printk("%s (%d) polling on %lu fds:\n", current->comm, current->pid,
+			args[1]);
+	for (i = 0; i < args[1]; i++) {
+		int fd = fds[i].fd;
+		struct fd f;
+		struct files_struct *files = current->files;
+		struct socket *sock;
+		int err = NULL;
+		struct pollfd_key_t key;
+
+		spin_lock(&files->file_lock);
+		f = fdget(fd);
+		if (!f.file) {
+			printk("LA %d\n", fd);
+			fdput(f);
+			spin_unlock(&files->file_lock);
+			continue;
+		}
+		/*
+		 * Keep track of each individual FD passed to poll, only
+		 * extract them when they have activity (so they stay in the
+		 * HT as long as they are inactive even if poll returns because
+		 * of a timeout or another FD.
+		 * They can also be removed if they get closed.
+		 */
+		key.pid = current->pid;
+		key.fd = fd;
+		key.type = KEY_POLLFD;
+		latency_tracker_event_in(tracker, &key, sizeof(key), 1, NULL);
+
+		sock = sock_from_file(f.file, &err);
+		if (sock) {
+			switch (sock->type) {
+			case SOCK_STREAM:
+				printk("- FD %d (%d, %d) (SOCK_STREAM)\n", fd,
+						fds[i].events, fds[i].revents);
+				break;
+			case SOCK_DGRAM:
+			{
+				struct inet_sock *inet = inet_sk(sock->sk);
+				char s_ipv4[16], d_ipv4[16];
+
+				ipv4_str(ntohl(inet->inet_saddr), s_ipv4);
+				ipv4_str(ntohl(inet->inet_daddr), d_ipv4);
+				printk("- FD (%d, %d) %d = %s:%u -> %s:%u\n",
+						fds[i].events, fds[i].revents, fd,
+						s_ipv4, ntohs(inet->inet_sport),
+						d_ipv4, ntohs(inet->inet_dport));
+				break;
+			}
+			case SOCK_RAW:
+				printk("- FD (%d, %d) %d (SOCK_RAW)\n", fds[i].events,
+						fds[i].revents, fd);
+				break;
+			default:
+				printk("- FD (%d, %d) %d (SOCK other)\n", fds[i].events,
+						fds[i].revents, fd);
+				break;
+			}
+		} else {
+			printk("- FD %d (%d, %d) (FILE)\n", fd, fds[i].events,
+					fds[i].revents);
+		}
+		fdput(f);
+		spin_unlock(&files->file_lock);
+	}
+
+end_free:
+	kfree(fds);
+end:
+	return;
+}
+
+/*
+ * on syscall entry, look if we are working on a FD that we have been polling
+ * before, if it is the case, remove it from our internal state and don't
+ * execute the callback because we were not polling on it anymore.
+ * example use case:
+ * - poll on 2 FDs (1 and 2)
+ * - FD 1 returns with activity
+ * - the program reads on FD 1 and writes on FD 2
+ * in this case we cannot consider that FD 2 is still blocked in poll
+ *
+ * different than:
+ * - poll on 2 FDs (1 and 2)
+ * - FD 1 returns with activity (or poll times out)
+ * - the program handles it and goes back to polling on the 2 FDs
+ * in this case, we consider FD 2 blocked as long as there is no
+ * activity on it even if poll returns.
+ *
+ * TODO: cleanup when the process dies.
+ */
+static
+void fd_out(int fd)
+{
+	struct pollfd_key_t key;
+
+	key.pid = current->pid;
+	key.fd = fd;
+	key.type = KEY_POLLFD;
+	latency_tracker_event_out(tracker, &key, sizeof(key),
+			OUT_POLLFD_NOCB);
+}
+
+static
+void syscall_fd_out(unsigned long id, struct pt_regs *regs)
+{
+	unsigned long fd;
+
+	switch (id) {
+		/* FD is the first argument */
+		case __NR_read:
+		case __NR_pread64:
+		case __NR_readv:
+		case __NR_preadv:
+		case __NR_recvfrom:
+		case __NR_recvmsg:
+		case __NR_getdents:
+		case __NR_getdents64:
+		case __NR_fstatfs:
+		case __NR_write:
+		case __NR_pwrite64:
+		case __NR_writev:
+		case __NR_pwritev:
+		case __NR_sendto:
+		case __NR_sendmsg:
+		case __NR_mkdirat:
+		case __NR_mknodat:
+		case __NR_vmsplice:
+		case __NR_sendmmsg:
+		case __NR_fsync:
+		case __NR_fdatasync:
+		case __NR_sync_file_range:
+		case __NR_syncfs:
+		case __NR_open:
+		case __NR_connect:
+		case __NR_accept:
+		case __NR_accept4:
+		case __NR_openat:
+		case __NR_close:
+		case __NR_shutdown:
+			syscall_get_arguments(current, regs, 0, 1, &fd);
+			fd_out(fd);
+			break;
+		/* 0 in, 1 out */
+		case __NR_sendfile:
+			syscall_get_arguments(current, regs, 0, 1, &fd);
+			fd_out(fd);
+			syscall_get_arguments(current, regs, 1, 1, &fd);
+			fd_out(fd);
+			break;
+		/* 0 in, 2 out */
+		case __NR_splice:
+			syscall_get_arguments(current, regs, 0, 1, &fd);
+			fd_out(fd);
+			syscall_get_arguments(current, regs, 2, 1, &fd);
+			fd_out(fd);
+			break;
+		default:
+			break;
+	}
+	return;
+}
+
+static
 void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 {
 	struct task_struct* task = current;
@@ -275,8 +615,7 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 	u32 hash;
 	struct sched_key_t sched_key;
 
-	if (!watch_all)
-	{
+	if (!watch_all) {
 		process_key.tgid = task->tgid;
 		hash = jhash(&process_key, sizeof(process_key), 0);
 
@@ -288,18 +627,85 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 		rcu_read_unlock();
 	}
 
+	switch (id) {
+	case __NR_poll:
+		poll_fds(regs);
+		break;
+	default:
+		syscall_fd_out(id, regs);
+		break;
+	}
 	sched_key.pid = task->pid;
-
+	sched_key.type = KEY_SYSCALL;
 	latency_tracker_event_in(tracker, &sched_key, sizeof(sched_key),
 			1, (void *) id);
+}
+
+static
+void poll_out(struct pt_regs *regs, long sys_ret)
+{
+	/* struct pollfd *fds, nfds_t nfds, int timeout */
+	unsigned long args[3];
+	struct pollfd *fds;
+	int ret, i;
+
+	if (nb_print++ > 10)
+		return;
+
+	printk("OUT %ld\n", sys_ret);
+	syscall_get_arguments(current, regs, 0, 3, args);
+	fds = kmalloc(args[1] * sizeof(struct pollfd), GFP_KERNEL);
+	if (!fds) {
+		printk("malloc failed\n");
+		goto end;
+	}
+
+	ret = copy_from_user(fds, (void *) args[0], args[1] * sizeof(struct pollfd));
+	if (ret) {
+		printk("copy failed\n");
+		goto end_free;
+	}
+
+	for (i = 0; i < args[1]; i++) {
+		printk("- FD OUT: %d (%d, %d)\n", fds[i].fd,
+				fds[i].events, fds[i].revents);
+		if (fds[i].events & fds[i].revents) {
+			struct pollfd_key_t key;
+
+			key.pid = current->pid;
+			key.fd = fds[i].fd;
+			key.type = KEY_POLLFD;
+			latency_tracker_event_out(tracker, &key, sizeof(key),
+					OUT_POLLFD);
+		}
+	}
+end_free:
+	kfree(fds);
+end:
+	return;
 }
 
 static
 void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 {
 	struct sched_key_t key;
+	struct latency_tracker_event *s;
+
 	key.pid = current->pid;
-	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+	key.type = KEY_SYSCALL;
+
+	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	if (s) {
+		unsigned long id;
+
+		id = (unsigned long) latency_tracker_event_get_priv(s);
+		if (id == __NR_poll) {
+			poll_out(regs, ret);
+		}
+		latency_tracker_put_event(s);
+	}
+
+	latency_tracker_event_out(tracker, &key, sizeof(key), OUT_SYSCALL);
 }
 
 static
@@ -326,6 +732,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	if (!take_kernel_stack)
 		goto end;
 	sched_key.pid = task->pid;
+	sched_key.type = KEY_SYSCALL;
 	s = latency_tracker_get_event(tracker, &sched_key, sizeof(sched_key));
 	if (!s)
 		goto end;
