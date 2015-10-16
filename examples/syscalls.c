@@ -243,40 +243,103 @@ void get_stack_txt(char *stacktxt, struct task_struct *p)
 }
 
 static
+void ipv4_str(unsigned long ip, char *str)
+{
+	snprintf(str, 16, "%lu.%lu.%lu.%lu",
+			ip >> 24,
+			ip >> 16 & 0xFF,
+			ip >> 8 & 0xFF,
+			ip & 0xFF);
+}
+
+
+static
+void get_fd_path(int fd, char *pathstr)
+{
+	struct files_struct *files = current->files;
+	struct socket *sock;
+	int err = NULL;
+	struct fd f;
+
+	spin_lock(&files->file_lock);
+	//printk("test: %s\n", current->files->fd_array[fd]->f_path.dentry->d_name.name);
+	f = fdget(fd);
+	if (f.file) {
+		sock = sock_from_file(f.file, &err);
+		if (sock) {
+			switch (sock->type) {
+			case SOCK_RAW:
+				snprintf(pathstr, 256, "SOCK_RAW");
+				break;
+			case SOCK_STREAM:
+			case SOCK_DGRAM:
+			{
+				struct inet_sock *inet = inet_sk(sock->sk);
+				char s_ipv4[16], d_ipv4[16];
+
+				ipv4_str(ntohl(inet->inet_saddr), s_ipv4);
+				ipv4_str(ntohl(inet->inet_daddr), d_ipv4);
+				snprintf(pathstr, 256, "%s:%u -> %s:%u",
+						s_ipv4, ntohs(inet->inet_sport),
+						d_ipv4, ntohs(inet->inet_dport));
+				break;
+			}
+			default:
+				snprintf(pathstr, 256, "SOCK_other");
+				break;
+			}
+		} else {
+			snprintf(pathstr, 256, "FILE");
+		}
+		fdput(f);
+	}
+	spin_unlock(&files->file_lock);
+}
+
+static
 void syscall_cb(struct latency_tracker_event_ctx *ctx)
 {
 	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
 	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
 	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
 	int out_id = latency_tracker_event_ctx_get_cb_out_id(ctx);
-	struct process_key_t process_key;
-	struct process_val_t *val;
 	struct task_struct* task;
 	int send_sig = 0;
 	u32 hash;
 
-	if (out_id == OUT_POLLFD_NOCB) {
-		return;
-	}
+	if (out_id == OUT_POLLFD_NOCB)
+		goto end;
+
+	if (cb_flag == LATENCY_TRACKER_CB_NORMAL)
+		task = current;
+	else
+		goto end;
 
 	rcu_read_lock();
-	if (cb_flag == LATENCY_TRACKER_CB_TIMEOUT) {
-		goto end_unlock;
-	} else if (cb_flag == LATENCY_TRACKER_CB_NORMAL) {
-		task = current;
+	if (out_id == OUT_POLLFD) {
+		struct latency_tracker_key *tkey =
+			latency_tracker_event_ctx_get_key(ctx);
+		struct pollfd_key_t *key = (struct pollfd_key_t *) tkey->key;
+		char path[256] = "";
+
+		get_fd_path(key->fd, path);
+		trace_latency_tracker_syscall_fd(task->comm, task->pid,
+				start_ts, end_ts - start_ts,
+				key->fd, path);
 	} else {
-		goto end_unlock;
+		struct process_key_t process_key;
+		struct process_val_t *val;
+
+		process_key.tgid = task->tgid;
+		hash = jhash(&process_key, sizeof(process_key), 0);
+
+		val = find_process(&process_key, hash);
+		if (val)
+			send_sig = 1;
+
+		trace_latency_tracker_syscall(task->comm, task->pid,
+				start_ts, end_ts - start_ts);
 	}
-
-	process_key.tgid = task->tgid;
-	hash = jhash(&process_key, sizeof(process_key), 0);
-
-	val = find_process(&process_key, hash);
-	if (val)
-		send_sig = 1;
-
-	trace_latency_tracker_syscall(task->comm, task->pid,
-			start_ts, end_ts - start_ts);
 	if (send_sig)
 		send_sig_info(SIGPROF, SEND_SIG_NOINFO, task);
 	else
@@ -286,21 +349,8 @@ void syscall_cb(struct latency_tracker_event_ctx *ctx)
 	++cnt;
 	goto end;
 
-end_unlock:
-	rcu_read_unlock();
-
 end:
 	return;
-}
-
-static
-void ipv4_str(unsigned long ip, char *str)
-{
-	snprintf(str, 16, "%lu.%lu.%lu.%lu",
-			ip >> 24,
-			ip >> 16 & 0xFF,
-			ip >> 8 & 0xFF,
-			ip & 0xFF);
 }
 
 #if 0
@@ -421,7 +471,7 @@ void test_read(struct pt_regs *regs)
 }
 #endif
 
-static int nb_print = 0;
+//static int nb_print = 0;
 
 static
 void poll_fds(struct pt_regs *regs)
@@ -431,8 +481,8 @@ void poll_fds(struct pt_regs *regs)
 	struct pollfd *fds;
 	int ret, i;
 
-	if (nb_print++ > 10)
-		return;
+//	if (nb_print++ > 10)
+//		return;
 
 	syscall_get_arguments(current, regs, 0, 3, args);
 	fds = kmalloc(args[1] * sizeof(struct pollfd), GFP_KERNEL);
@@ -471,7 +521,7 @@ void poll_fds(struct pt_regs *regs)
 		key.pid = current->pid;
 		key.fd = fd;
 		key.type = KEY_POLLFD;
-		latency_tracker_event_in(tracker, &key, sizeof(key), 1, NULL);
+		latency_tracker_event_in(tracker, &key, sizeof(key), 0, NULL);
 
 		sock = sock_from_file(f.file, &err);
 		if (sock) {
@@ -649,8 +699,8 @@ void poll_out(struct pt_regs *regs, long sys_ret)
 	struct pollfd *fds;
 	int ret, i;
 
-	if (nb_print++ > 10)
-		return;
+//	if (nb_print++ > 10)
+//		return;
 
 	printk("OUT %ld\n", sys_ret);
 	syscall_get_arguments(current, regs, 0, 3, args);

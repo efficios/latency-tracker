@@ -134,6 +134,33 @@ TRACE_EVENT(
    );
 
 TRACE_EVENT(
+	latency_tracker_syscall_fd,
+	TP_PROTO(char comm[TASK_COMM_LEN],
+		pid_t pid, u64 start_ts, u64 delay,
+		int fd, char path[256]),
+	TP_ARGS(comm, pid, start_ts, delay, fd, path),
+	TP_STRUCT__entry(
+		__array(char, comm, TASK_COMM_LEN)
+		__field(int, pid)
+		__field(u64, start_ts)
+		__field(u64, delay)
+		__field(int, fd)
+		__array(char, path, 256)
+		),
+	TP_fast_assign(
+		memcpy(__entry->comm, comm, TASK_COMM_LEN);
+		entry->pid = pid;
+		entry->start_ts = start_ts;
+		entry->delay = delay;
+		entry->fd = fd;
+		memcpy(__entry->path, path, 256);
+		),
+	TP_printk("comm=%s, pid=%d, start_ts=%llu, delay=%llu, fd=%d, path=%s",
+		__entry->comm, __entry->pid, __entry->start_ts, __entry->delay,
+		__entry->fd, __entry->path)
+   );
+
+TRACE_EVENT(
 	latency_tracker_block,
 	TP_PROTO(dev_t dev, sector_t sector, u64 delay),
 	TP_ARGS(dev, sector, delay),

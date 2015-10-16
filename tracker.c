@@ -45,6 +45,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_offcpu_sched_switch);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_offcpu_sched_wakeup);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_syscall);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_syscall_stack);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_syscall_fd);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_net);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_block);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_critical_timing_stack);
