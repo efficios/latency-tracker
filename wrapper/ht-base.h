@@ -33,7 +33,8 @@ void wrapper_ht_init(struct latency_tracker *tracker)
 
 static inline
 struct latency_tracker_event *wrapper_ht_add(struct latency_tracker *tracker,
-		struct latency_tracker_event *s, u32 hkey)
+		struct latency_tracker_event *s, u32 hkey,
+		unsigned int unique)
 {
 #if defined(LLFREELIST)
 	unsigned long flags;
