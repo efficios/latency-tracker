@@ -555,7 +555,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	 */
 	if (unique)
 		wrapper_ht_unique_check(tracker, &s->tkey);
-	old_s = wrapper_ht_add(tracker, s, hkey);
+	old_s = wrapper_ht_add(tracker, s, hkey, unique);
 	if (old_s) {
 		kref_put(&old_s->refcount, __latency_tracker_event_destroy);
 	}
