@@ -191,8 +191,8 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 
 enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		struct latency_tracker *tracker,
-		void *key, size_t key_len,
-		unsigned int unique, void *priv);
+		void *key, size_t key_len, unsigned int unique,
+		u64 ts_override, void *priv);
 
 /*
  * Stop the tracking of an event.

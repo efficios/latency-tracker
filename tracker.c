@@ -493,7 +493,8 @@ void latency_tracker_timeout_cb(struct latency_tracker *tracker,
 enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		struct latency_tracker *tracker,
 		void *key, size_t key_len,
-		unsigned int unique, void *priv)
+		unsigned int unique, u64 ts_override,
+		void *priv)
 {
 	struct latency_tracker_event *s, *old_s;
 	int ret;
@@ -534,7 +535,10 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 	memcpy(s->tkey.key, key, key_len);
 	s->tkey.key_len = key_len;
 	s->tracker = tracker;
-	s->start_ts = trace_clock_monotonic_wrapper();
+	if (ts_override)
+		s->start_ts = ts_override;
+	else
+		s->start_ts = trace_clock_monotonic_wrapper();
 	s->priv = priv;
 	kref_init(&s->refcount);
 
@@ -590,7 +594,7 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 	enum latency_tracker_event_in_ret ret;
 
 	rcu_read_lock_sched_notrace();
-	ret = _latency_tracker_event_in(tracker, key, key_len, unique, priv);
+	ret = _latency_tracker_event_in(tracker, key, key_len, unique, 0, priv);
 	rcu_read_unlock_sched_notrace();
 
 	return ret;
@@ -738,7 +742,7 @@ int test_tracker(void)
 
 	printk("insert k2\n");
 	rcu_read_lock_sched_notrace();
-	ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 0, NULL);
+	ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 0, 0, NULL);
 	rcu_read_unlock_sched_notrace();
 	if (ret)
 		printk("failed\n");
