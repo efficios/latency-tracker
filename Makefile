@@ -33,6 +33,9 @@ obj-m += latency_tracker_network_stack.o
 latency_tracker_critical_timing-objs := examples/critical_timing.o examples/critical_timing_proc.o wrapper/trace-clock.o
 obj-m += latency_tracker_critical_timing.o
 
+latency_tracker_rt-objs := examples/rt.o wrapper/trace-clock.o
+obj-m += latency_tracker_rt.o
+
 
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
