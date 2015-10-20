@@ -33,6 +33,9 @@
 
 #include <trace/events/latency_tracker.h>
 
+//#define DEBUG 1
+#undef DEBUG
+
 /*
  * Threshold to execute the callback (microseconds).
  */
@@ -65,10 +68,12 @@ enum rt_key_type {
 	KEY_RAISE_SOFTIRQ = 2,
 	KEY_SOFTIRQ = 3,
 	KEY_WAKEUP = 4,
+	KEY_SWITCH = 5,
 };
 
 enum event_out_types {
 	OUT_IRQHANDLER_NO_CB = 0,
+	OUT_SWITCH_BLOCKED = 1,
 };
 
 struct do_irq_key_t {
@@ -93,6 +98,11 @@ struct softirq_key_t {
 } __attribute__((__packed__));
 
 struct wakeup_key_t {
+	int pid;
+	enum rt_key_type type;
+} __attribute__((__packed__));
+
+struct switch_key_t {
 	int pid;
 	enum rt_key_type type;
 } __attribute__((__packed__));
@@ -167,12 +177,13 @@ static
 void rt_cb(struct latency_tracker_event_ctx *ctx)
 {
 	unsigned int cb_out_id = latency_tracker_event_ctx_get_cb_out_id(ctx);
+	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
+	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
 
 	if (cb_out_id == OUT_IRQHANDLER_NO_CB)
 		return;
+	printk("YO %s %llu\n", current->comm, end_ts - start_ts);
 #if 0
-	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
-	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
 	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
 	struct schedkey *key = (struct schedkey *) latency_tracker_event_ctx_get_key(ctx)->key;
 	struct rt_tracker *rt_priv =
@@ -205,33 +216,6 @@ end:
 }
 
 static
-void probe_sched_switch(void *ignore, struct task_struct *prev,
-		struct task_struct *next)
-{
-#if 0
-	struct schedkey key;
-	enum latency_tracker_event_in_ret ret;
-
-	rcu_read_lock();
-	if (!next || !prev)
-		goto end;
-	current_pid[prev->on_cpu] = next->pid;
-
-	key.pid = prev->pid;
-	key.cpu = smp_processor_id();
-	ret = latency_tracker_event_in(tracker, &key, sizeof(key),
-			1, latency_tracker_get_priv(tracker));
-
-	key.pid = next->pid;
-	key.cpu = smp_processor_id();
-	latency_tracker_event_out(tracker, &key, sizeof(key),
-			SCHED_EXIT_NORMAL);
-end:
-	rcu_read_unlock();
-#endif
-}
-
-static
 int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	enum latency_tracker_event_in_ret ret;
@@ -242,6 +226,9 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, 0, NULL);
 	if (ret != LATENCY_TRACKER_OK)
 		failed_event_in++;
+#ifdef DEBUG
+	printk("%llu do_IRQ\n", trace_clock_monotonic_wrapper());
+#endif
 
 	return 0;
 }
@@ -273,6 +260,10 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	latency_tracker_put_event(s);
 	latency_tracker_event_out(tracker, &do_irq_key, sizeof(do_irq_key),
 			OUT_IRQHANDLER_NO_CB);
+#ifdef DEBUG
+	printk("%llu hard_irq_entry (orig %llu)\n", trace_clock_monotonic_wrapper(),
+			orig_ts);
+#endif
 
 	/*
 	 * Replace the event with the new information but keep the original
@@ -322,6 +313,10 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	latency_tracker_put_event(s);
 	latency_tracker_event_out(tracker, &hardirq_key, sizeof(hardirq_key),
 			OUT_IRQHANDLER_NO_CB);
+#ifdef DEBUG
+	printk("%llu softirq_raise %u (orig %llu)\n", trace_clock_monotonic_wrapper(),
+			vec_nr, orig_ts);
+#endif
 
 	/*
 	 * Replace the event with the new information but keep the original
@@ -374,6 +369,10 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 	latency_tracker_put_event(s);
 	latency_tracker_event_out(tracker, &raise_softirq_key,
 			sizeof(raise_softirq_key), OUT_IRQHANDLER_NO_CB);
+#ifdef DEBUG
+	printk("%llu softirq_entry %u (orig %llu)\n", trace_clock_monotonic_wrapper(),
+			vec_nr, orig_ts);
+#endif
 
 	/*
 	 * Insert the softirq_entry event.
@@ -432,28 +431,109 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		/* TODO */
 		goto end;
 	} else if (in_serving_softirq()) {
-		/*
-		 * Just cleanup the softirq_entry event
-		 */
 		softirq_key.cpu = smp_processor_id();
 		softirq_key.type = KEY_SOFTIRQ;
-
 		s = latency_tracker_get_event(tracker, &softirq_key,
 				sizeof(softirq_key));
 		if (!s)
 			goto end;
 		orig_ts = latency_tracker_event_get_start_ts(s);
 		latency_tracker_put_event(s);
+#ifdef DEBUG
+		printk("%llu wakeup %d (%s) (orig %llu)\n", trace_clock_monotonic_wrapper(),
+				p->pid, p->comm, orig_ts);
+#endif
 	} else {
+		/*
+		 * In thread context (swapper most likely), we cannot link
+		 * to anything, we need the sched_waking event instead.
+		 */
 		goto end;
 	}
 
 	wakeup_key.pid = p->pid;
 	wakeup_key.type = KEY_WAKEUP;
+	s = latency_tracker_get_event(tracker, &wakeup_key,
+			sizeof(wakeup_key));
+	/*
+	 * If the process was already woken up, we cannot link
+	 * its wakeup to the current event, so we exit here.
+	 */
+	if (s) {
+		latency_tracker_put_event(s);
+		goto end;
+	}
+
 	ret = _latency_tracker_event_in(tracker, &wakeup_key,
 			sizeof(wakeup_key), 1, orig_ts, NULL);
 	if (ret != LATENCY_TRACKER_OK)
 		failed_event_in++;
+
+end:
+	rcu_read_unlock_sched_notrace();
+}
+
+static
+void probe_sched_switch(void *ignore, struct task_struct *prev,
+		struct task_struct *next)
+{
+	struct wakeup_key_t wakeup_key;
+	struct switch_key_t switch_key;
+	struct latency_tracker_event *s;
+	u64 orig_ts;
+	int ret;
+
+	/* FIXME: is it the right RCU magic */
+	rcu_read_lock_sched_notrace();
+	if (!prev || !next)
+		goto end;
+
+	/* TODO check RT prio */
+	/* sched in */
+	wakeup_key.pid = next->pid;
+	wakeup_key.type = KEY_WAKEUP;
+	s = latency_tracker_get_event(tracker, &wakeup_key,
+			sizeof(wakeup_key));
+	if (!s)
+		goto switch_out;
+	orig_ts = latency_tracker_event_get_start_ts(s);
+	latency_tracker_put_event(s);
+	/* Clean-up the raise event */
+	latency_tracker_event_out(tracker, &wakeup_key, sizeof(wakeup_key),
+			OUT_IRQHANDLER_NO_CB);
+
+	switch_key.pid = next->pid;
+	switch_key.type = KEY_SWITCH;
+	ret = _latency_tracker_event_in(tracker, &switch_key,
+			sizeof(switch_key), 1, orig_ts, NULL);
+	if (ret != LATENCY_TRACKER_OK)
+		failed_event_in++;
+#ifdef DEBUG
+	printk("%llu switch_in %d (%s) (orig %llu)\n",
+			trace_clock_monotonic_wrapper(),
+			next->pid, next->comm, orig_ts);
+#endif
+
+switch_out:
+	/* switch out */
+	/*
+	 * If the task is still running, but just got preempted, it means that
+	 * it is still actively working on an event, so we continue tracking
+	 * its state until it blocks.
+	 */
+	if (prev->state == TASK_RUNNING)
+		goto end;
+
+	switch_key.pid = prev->pid;
+	switch_key.type = KEY_SWITCH;
+	ret = latency_tracker_event_out(tracker, &switch_key, sizeof(switch_key),
+			OUT_SWITCH_BLOCKED);
+#ifdef DEBUG
+	if (ret == 0)
+		printk("%llu switch_out %d (%s)\n",
+				trace_clock_monotonic_wrapper(),
+				prev->pid, prev->comm);
+#endif
 
 end:
 	rcu_read_unlock_sched_notrace();
@@ -469,7 +549,8 @@ int __init rt_init(void)
 		goto error;
 	latency_tracker_set_startup_events(tracker, 2000);
 	latency_tracker_set_max_resize(tracker, 10000);
-	latency_tracker_set_timer_period(tracker, 100000000);
+	/* FIXME: makes us crash after rmmod */
+	//latency_tracker_set_timer_period(tracker, 100000000);
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, rt_cb);
@@ -542,6 +623,7 @@ void __exit rt_exit(void)
 	skipped = latency_tracker_skipped_count(tracker);
 	latency_tracker_destroy(tracker);
 	printk("Missed events : %llu\n", skipped);
+	printk("Failed event in : %d\n", failed_event_in);
 	printk("Total rt alerts : %d\n", cnt);
 }
 module_exit(rt_exit);
