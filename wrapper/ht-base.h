@@ -155,6 +155,7 @@ struct latency_tracker_event *wrapper_ht_get_event(
 	struct hlist_node *next;
 	struct latency_tracker_event *s;
 	u32 k;
+	int ret;
 
 #if defined(LLFREELIST)
 	unsigned long flags;
@@ -167,7 +168,9 @@ struct latency_tracker_event *wrapper_ht_get_event(
 			continue;
 		if (tracker->match_fct(tkey->key, s->tkey.key, tkey->key_len))
 			continue;
-		kref_get_unless_zero(&s->refcount);
+		ret = kref_get_unless_zero(&s->refcount);
+		if (!ret)
+			s = NULL;
 		goto end;
 	}
 	s = NULL;

@@ -149,13 +149,16 @@ struct latency_tracker_event *wrapper_ht_get_event(
 	struct latency_tracker_event *s;
 	u32 k;
 	struct cds_lfht_iter iter;
+	int ret;
 
 	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
 
 	rcu_read_lock_sched_notrace();
 	cds_lfht_for_each_entry_duplicate(tracker->urcu_ht, k,
 			urcu_match, tkey, &iter, s, urcunode) {
-		kref_get_unless_zero(&s->refcount);
+		ret = kref_get_unless_zero(&s->refcount);
+		if (!ret)
+			s = NULL;
 		goto end;
 	}
 	s = NULL;
