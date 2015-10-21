@@ -28,13 +28,14 @@
 #include "rculfhash-internal.h"
 #include "urcu/wfcqueue.h"
 
-#define LATENCY_TRACKER_MAX_KEY_SIZE 128
+#define DEFAULT_STARTUP_ALLOC_EVENTS 100
+#define DEFAULT_THRESHOLD 1000000000
 
 struct latency_tracker_event_ctx;
 
 struct latency_tracker_key {
 	size_t key_len;
-	char key[LATENCY_TRACKER_MAX_KEY_SIZE];
+	char *key;
 };
 
 /*
@@ -84,25 +85,37 @@ int latency_tracker_enable(struct latency_tracker *tracker);
  * Most of these should be performed before the call to latency_tracker_enable.
  * FIXME: document which parameters can be changed at runtime.
  */
+/* default: memcmp */
 int latency_tracker_set_match_fct(struct latency_tracker *tracker,
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length));
+/* default: jhash */
 int latency_tracker_set_hash_fct(struct latency_tracker *tracker,
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval));
-int latency_tracker_set_startup_events(struct latency_tracker *tracker,
-		int startup_events);
-int latency_tracker_set_max_resize(struct latency_tracker *tracker,
-		int max_resize);
-int latency_tracker_set_priv(struct latency_tracker *tracker,
-		void *priv);
-int latency_tracker_set_timer_period(struct latency_tracker *tracker,
-		uint64_t timer_period);
-int latency_tracker_set_timeout(struct latency_tracker *tracker,
-		uint64_t timeout);
-int latency_tracker_set_threshold(struct latency_tracker *tracker,
-		uint64_t threshold);
-int latency_tracker_set_callback(struct latency_tracker *tracker,
-		void (*cb)(struct latency_tracker_event_ctx *ctx));
+
+int latency_tracker_set_startup_events(struct latency_tracker *tracker, int
+		startup_events);
+/* default: 0 */
+int latency_tracker_set_max_resize(struct latency_tracker *tracker, int
+		max_resize);
+/* default: NULL */
+int latency_tracker_set_priv(struct latency_tracker *tracker, void *priv);
+/* default: 0 */
+int latency_tracker_set_timer_period(struct latency_tracker *tracker, uint64_t
+		timer_period);
+/*
+ * nanoseconds default: 0 */
+int latency_tracker_set_timeout(struct latency_tracker *tracker, uint64_t
+		timeout);
+/*
+ * nanoseconds default: DEFAULT_THRESHOLD */
+int latency_tracker_set_threshold(struct latency_tracker *tracker, uint64_t
+		threshold);
+/* default: NULL */
+int latency_tracker_set_callback(struct latency_tracker *tracker, void
+		(*cb)(struct latency_tracker_event_ctx *ctx));
+/* default: sizeof(long) */
+int latency_tracker_set_key_size(struct latency_tracker *tracker, int size);
 
 /*
  * Update the tracker garbage collector parameters (ns).

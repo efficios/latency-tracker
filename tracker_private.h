@@ -38,6 +38,10 @@ struct latency_tracker {
 	int max_resize;
 	/* Flag to trigger the freelist resize work. */
 	int need_to_resize;
+	/*
+	 * Max size of the keys we can expect.
+	 */
+	int key_size;
 	/* How much event could not be tracked due to an empty free list. */
 	uint64_t skipped_count;
 #ifdef OLDFREELIST
@@ -158,13 +162,16 @@ struct latency_tracker_event {
 	struct kref refcount;
 	/* Timestamp of event creation. */
 	u64 start_ts;
-	/* Copy of the key. */
-	struct latency_tracker_key tkey;
 	/*
 	 * Private pointer set by the caller, passed when the callback is
 	 * called. Memory management left entirely to the user.
 	 */
 	void *priv;
+	/*
+	 * Copy of the key.
+	 * MUST BE THE LAST FIELD.
+	 */
+	struct latency_tracker_key tkey;
 };
 
 #if defined(OLDFREELIST)

@@ -37,6 +37,9 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
 		if (!e)
 			goto error;
+		e->tkey.key = kzalloc(tracker->key_size, GFP_KERNEL);
+		if (!e->tkey.key)
+			goto error;
 		if (tracker->max_resize && (i == max_events/2))
 			tracker->resize_event = e;
 		list_add(&e->list, &tracker->events_free_list);
@@ -69,6 +72,9 @@ void wrapper_resize_work(struct latency_tracker *tracker)
 	for (i = 0; i < max_events; i++) {
 		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
 		if (!e)
+			goto error;
+		e->tkey.key = kzalloc(tracker->key_size, GFP_KERNEL);
+		if (!e->tkey.key)
 			goto error;
 		if (i == max_events / 2)
 			tracker->resize_event = e;
@@ -103,6 +109,7 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 
 	list_for_each_entry_safe(e, n, &tracker->events_free_list, list) {
 		list_del(&e->list);
+		kfree(e->tkey.key);
 		kfree(e);
 		cnt++;
 	}
@@ -136,7 +143,12 @@ static
 void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 		struct latency_tracker_event *e)
 {
-	memset(e, 0, sizeof(struct latency_tracker_event));
+	/*
+	 * memset the event before putting it back inside the
+	 * list. Make sure not to override the allocated pointer
+	 * for the key.
+	 */
+	memset(e, 0, offsetof(struct latency_tracker_event, tkey));
 	list_add(&e->list, &tracker->events_free_list);
 }
 

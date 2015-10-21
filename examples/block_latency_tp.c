@@ -70,6 +70,8 @@ struct blkkey {
 	dev_t dev;
 	sector_t sector;
 } __attribute__((__packed__));
+#undef MAX_KEY_SIZE
+#define MAX_KEY_SIZE sizeof(struct blkkey)
 
 enum wake_reason {
 	BLOCK_TRACKER_WAKE_DATA = 0,
@@ -275,6 +277,7 @@ int __init block_latency_tp_init(void)
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, blk_cb);
+	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 	ret = latency_tracker_enable(tracker);
 	if (ret)
 		goto error;

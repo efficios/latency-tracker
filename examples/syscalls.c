@@ -86,6 +86,8 @@ static struct latency_tracker *tracker;
 struct sched_key_t {
 	pid_t pid;
 } __attribute__((__packed__));
+#undef MAX_KEY_SIZE
+#define MAX_KEY_SIZE sizeof(struct sched_key_t)
 
 struct process_key_t {
 	pid_t tgid;
@@ -366,6 +368,7 @@ int __init syscalls_init(void)
 	latency_tracker_set_priv(tracker, tracker_priv);
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_callback(tracker, syscall_cb);
+	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 	ret = latency_tracker_enable(tracker);
 	if (ret)
 		goto error;

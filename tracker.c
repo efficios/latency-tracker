@@ -38,8 +38,6 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
 
-#define DEFAULT_MAX_ALLOC_EVENTS 100
-
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_wakeup);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_offcpu_sched_switch);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_offcpu_sched_wakeup);
@@ -367,6 +365,17 @@ int latency_tracker_set_callback(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_callback);
 
+int latency_tracker_set_key_size(struct latency_tracker *tracker,
+		int size)
+{
+	if (tracker->enabled)
+		return -1;
+
+	tracker->key_size = size;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_set_key_size);
+
 struct latency_tracker *latency_tracker_create(void)
 {
 	struct latency_tracker *tracker;
@@ -379,7 +388,9 @@ struct latency_tracker *latency_tracker_create(void)
 	}
 	tracker->hash_fct = jhash;
 	tracker->match_fct = memcmp;
-	tracker->free_list_nelems = DEFAULT_MAX_ALLOC_EVENTS;
+	tracker->key_size = sizeof(long);
+	tracker->free_list_nelems = DEFAULT_STARTUP_ALLOC_EVENTS;
+	tracker->threshold = DEFAULT_THRESHOLD;
 	init_timer(&tracker->timer);
 	spin_lock_init(&tracker->lock);
 	wrapper_ht_init(tracker);
@@ -511,7 +522,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		ret = LATENCY_TRACKER_DISABLED;
 		goto end;
 	}
-	if (key_len > LATENCY_TRACKER_MAX_KEY_SIZE) {
+	if (key_len > tracker->key_size) {
 		ret = LATENCY_TRACKER_ERR;
 		goto end;
 	}
@@ -619,7 +630,7 @@ int _latency_tracker_event_out(struct latency_tracker *tracker,
 
 	now = trace_clock_monotonic_wrapper();
 	tkey.key_len = key_len;
-	memcpy(tkey.key, key, key_len);
+	tkey.key = key;
 	found = wrapper_ht_check_event(tracker, &tkey, id, now);
 
 	if (!found)
@@ -655,7 +666,7 @@ struct latency_tracker_event *latency_tracker_get_event(
 	struct latency_tracker_key tkey;
 
 	tkey.key_len = key_len;
-	memcpy(tkey.key, key, key_len);
+	tkey.key = key;
 
 	s = wrapper_ht_get_event(tracker, &tkey);
 
@@ -726,6 +737,9 @@ int test_tracker(void)
 	if (ret)
 		goto error;
 	ret = latency_tracker_set_timer_period(tracker, 100*1000*1000);
+	if (ret)
+		goto error;
+	ret = latency_tracker_set_key_size(tracker, strlen(k1) + 1);
 	if (ret)
 		goto error;
 	ret = latency_tracker_enable(tracker);

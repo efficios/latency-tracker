@@ -75,6 +75,8 @@ struct schedkey {
 	pid_t pid;
 	unsigned int cpu;
 } __attribute__((__packed__));
+#undef MAX_KEY_SIZE
+#define MAX_KEY_SIZE sizeof(struct schedkey)
 
 enum sched_exitcode {
 	SCHED_EXIT_NORMAL = 0,
@@ -303,6 +305,7 @@ int __init offcpu_init(void)
 	latency_tracker_set_callback(tracker, offcpu_cb);
 	latency_tracker_set_hash_fct(tracker, hash_fct);
 	latency_tracker_set_match_fct(tracker, match_fct);
+	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 	ret = latency_tracker_enable(tracker);
 	if (ret)
 		goto error;

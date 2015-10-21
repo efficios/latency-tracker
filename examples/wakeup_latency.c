@@ -72,6 +72,8 @@ MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 struct schedkey {
 	pid_t pid;
 } __attribute__((__packed__));
+#undef MAX_KEY_SIZE
+#define MAX_KEY_SIZE sizeof(struct schedkey)
 
 static struct latency_tracker *tracker;
 
@@ -182,6 +184,7 @@ int __init wakeup_latency_init(void)
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, wakeup_cb);
+	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 	ret = latency_tracker_enable(tracker);
 	if (ret)
 		goto error;

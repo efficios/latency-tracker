@@ -101,6 +101,10 @@ struct kprobe_key_t {
 	enum tracker_key_type type;
 } __attribute__((__packed__));
 
+/* Update this with the biggest key struct */
+#undef MAX_KEY_SIZE
+#define MAX_KEY_SIZE sizeof(struct blk_key_t)
+
 struct iohist {
 	uint64_t min;
 	uint64_t max;
