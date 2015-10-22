@@ -117,6 +117,7 @@ void callback(struct latency_tracker_event *s,
 		.cb_out_id = id,
 		.tkey = &s->tkey,
 		.priv = s->priv,
+		.priv_data = s->priv_data,
 	};
 
 	if (!tracker->cb)
