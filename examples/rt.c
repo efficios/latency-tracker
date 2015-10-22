@@ -69,6 +69,7 @@ enum rt_key_type {
 	KEY_SOFTIRQ = 3,
 	KEY_WAKEUP = 4,
 	KEY_SWITCH = 5,
+	KEY_DATA = 6,
 };
 
 enum event_out_types {
@@ -106,9 +107,23 @@ struct switch_key_t {
 	int pid;
 	enum rt_key_type type;
 } __attribute__((__packed__));
+
+/* special key to hold the data about the chain of events */
+struct event_data_key_t {
+	u64 orig_ts;
+	enum rt_key_type type;
+} __attribute__((__packed__));
 /* Keep up-to-date with the biggest struct, should use an union actually. */
 #undef MAX_KEY_SIZE
 #define MAX_KEY_SIZE sizeof(struct raise_softirq_key_t)
+
+#define MAX_DATA_LEN 1024
+struct event_data {
+	unsigned int pos;
+	unsigned int in_use;
+	u64 prev_ts;
+	char data[MAX_DATA_LEN];
+} __attribute__((__packed__));
 
 #if 0
 static int print_trace_stack(void *data, char *name)
@@ -179,13 +194,33 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int sk
 static
 void rt_cb(struct latency_tracker_event_ctx *ctx)
 {
+	struct event_data_key_t data_key;
+	struct latency_tracker_event *s;
+	struct event_data *data;
 	unsigned int cb_out_id = latency_tracker_event_ctx_get_cb_out_id(ctx);
 	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
 	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
+	char *payload = NULL;
 
 	if (cb_out_id == OUT_IRQHANDLER_NO_CB)
 		return;
-	printk("YO %s %llu\n", current->comm, end_ts - start_ts);
+
+	data_key.orig_ts = start_ts;
+	data_key.type = KEY_DATA;
+
+	s = latency_tracker_get_event(tracker, &data_key, sizeof(data_key));
+	if (s) {
+		data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+		if (!data) {
+			BUG_ON(1);
+			return;
+		}
+		payload = data->data;
+	}
+
+	printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
+			current->comm, current->pid,
+			end_ts - start_ts, payload);
 #if 0
 	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
 	struct schedkey *key = (struct schedkey *) latency_tracker_event_ctx_get_key(ctx)->key;
@@ -223,10 +258,34 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	enum latency_tracker_event_in_ret ret;
 	struct do_irq_key_t key;
+	struct event_data_key_t data_key;
+	struct latency_tracker_event *s;
+	u64 now = trace_clock_monotonic_wrapper();
 
 	key.cpu = smp_processor_id();
 	key.type = KEY_DO_IRQ;
-	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, 0, NULL);
+	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, now,
+			NULL);
+	if (ret != LATENCY_TRACKER_OK)
+		failed_event_in++;
+
+	data_key.orig_ts = now;
+	data_key.type = KEY_DATA;
+	/*
+	 * If we already have a data entry with this timestamp, warn and remove
+	 * it because we won't be able to distinguish between the two later.
+	 * We could do better than that, but let's stay pragmatic for now and
+	 * see if it's a real problem.
+	 */
+	s = latency_tracker_get_event(tracker, &data_key, sizeof(data_key));
+	if (s) {
+		printk("[latency_tracker] Conflict of timestamps, removing "
+				"data for this IRQ\n");
+		latency_tracker_event_out(tracker, &data_key, sizeof(data_key),
+				OUT_IRQHANDLER_NO_CB);
+	}
+	ret = _latency_tracker_event_in(tracker, &data_key, sizeof(data_key), 1,
+			now, NULL);
 	if (ret != LATENCY_TRACKER_OK)
 		failed_event_in++;
 #ifdef DEBUG
@@ -242,6 +301,67 @@ struct kretprobe probe_do_irq = {
 	.handler = NULL,
 	.kp.symbol_name = "do_IRQ",
 };
+
+static
+void append_delta_ts(u64 orig_ts, char *txt, int in_use)
+{
+	u64 now;
+	struct event_data *data;
+	struct latency_tracker_event *s;
+	char tmp[48];
+	size_t len;
+	struct event_data_key_t data_key;
+
+	data_key.orig_ts = orig_ts;
+	data_key.type = KEY_DATA;
+
+	now = trace_clock_monotonic_wrapper();
+	s = latency_tracker_get_event(tracker, &data_key, sizeof(data_key));
+	if (!s)
+		return;
+
+	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+	if (!data) {
+		BUG_ON(1);
+		return;
+	}
+	data->in_use = in_use;
+	/* the do_IRQ does not store the prev_ts, set it now */
+	if (!data->prev_ts)
+		data->prev_ts = orig_ts;
+
+	snprintf(tmp, 48, "%s = %llu, ", txt, now - data->prev_ts);
+	len = strlen(tmp);
+	if ((data->pos + len) > MAX_DATA_LEN)
+		return;
+	memcpy(data->data + data->pos, tmp, len);
+	data->pos += len;
+	data->prev_ts = now;
+}
+
+static
+void check_del_data_key(u64 orig_ts)
+{
+	struct event_data_key_t data_key;
+	struct latency_tracker_event *s;
+	struct event_data *data;
+
+	data_key.orig_ts = orig_ts;
+	data_key.type = KEY_DATA;
+
+	s = latency_tracker_get_event(tracker, &data_key, sizeof(data_key));
+	if (!s)
+		return;
+	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+	if (!data) {
+		BUG_ON(1);
+		return;
+	}
+	if (data->in_use)
+		return;
+	latency_tracker_event_out(tracker, &data_key, sizeof(data_key),
+			OUT_IRQHANDLER_NO_CB);
+}
 
 static
 void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
@@ -260,6 +380,7 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	if (!s)
 		return;
 	orig_ts = latency_tracker_event_get_start_ts(s);
+	append_delta_ts(orig_ts, "do_IRQ to irq_handler_entry", 0);
 	latency_tracker_put_event(s);
 	latency_tracker_event_out(tracker, &do_irq_key, sizeof(do_irq_key),
 			OUT_IRQHANDLER_NO_CB);
@@ -284,7 +405,9 @@ static
 void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 		int ret)
 {
+	struct latency_tracker_event *s;
 	struct hardirq_key_t hardirq_key;
+	u64 orig_ts;
 
 	/*
 	 * If there is an IRQ event corresponding to this CPU in the HT,
@@ -292,8 +415,15 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 	 * Otherwise it would have been removed from the softirq handler.
 	 */
 	hardirq_key.cpu = smp_processor_id();
+	s = latency_tracker_get_event(tracker, &hardirq_key, sizeof(hardirq_key));
+	if (!s)
+		return;
+	orig_ts = latency_tracker_event_get_start_ts(s);
+	latency_tracker_put_event(s);
+
 	latency_tracker_event_out(tracker, &hardirq_key, sizeof(hardirq_key),
 			OUT_IRQHANDLER_NO_CB);
+	check_del_data_key(orig_ts);
 }
 
 static
@@ -338,6 +468,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 		latency_tracker_put_event(s);
 		return;
 	}
+	append_delta_ts(orig_ts, "to softirq_raise", 1);
 
 	ret = _latency_tracker_event_in(tracker, &raise_softirq_key,
 			sizeof(raise_softirq_key), 1, orig_ts, NULL);
@@ -369,6 +500,7 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 	 * Get the original timestamp and remove the raise event.
 	 */
 	orig_ts = latency_tracker_event_get_start_ts(s);
+	append_delta_ts(orig_ts, "to softirq_entry", 0);
 	latency_tracker_put_event(s);
 	latency_tracker_event_out(tracker, &raise_softirq_key,
 			sizeof(raise_softirq_key), OUT_IRQHANDLER_NO_CB);
@@ -393,14 +525,22 @@ static
 void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 {
 	struct softirq_key_t softirq_key;
+	struct latency_tracker_event *s;
+	u64 orig_ts;
 
 	/*
 	 * Just cleanup the softirq_entry event
 	 */
 	softirq_key.cpu = smp_processor_id();
 	softirq_key.type = KEY_SOFTIRQ;
+	s = latency_tracker_get_event(tracker, &softirq_key, sizeof(softirq_key));
+	if (!s)
+		return;
+	orig_ts = latency_tracker_event_get_start_ts(s);
+	latency_tracker_put_event(s);
 	latency_tracker_event_out(tracker, &softirq_key, sizeof(softirq_key),
 			OUT_IRQHANDLER_NO_CB);
+	check_del_data_key(orig_ts);
 }
 
 static
@@ -441,6 +581,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		if (!s)
 			goto end;
 		orig_ts = latency_tracker_event_get_start_ts(s);
+		append_delta_ts(orig_ts, "to sched_wakeup", 1);
 		latency_tracker_put_event(s);
 #ifdef DEBUG
 		printk("%llu wakeup %d (%s) (orig %llu)\n", trace_clock_monotonic_wrapper(),
@@ -500,6 +641,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	if (!s)
 		goto switch_out;
 	orig_ts = latency_tracker_event_get_start_ts(s);
+	append_delta_ts(orig_ts, "to sched_switch_in", 1);
 	latency_tracker_put_event(s);
 	/* Clean-up the raise event */
 	latency_tracker_event_out(tracker, &wakeup_key, sizeof(wakeup_key),
@@ -529,8 +671,15 @@ switch_out:
 
 	switch_key.pid = prev->pid;
 	switch_key.type = KEY_SWITCH;
+	s = latency_tracker_get_event(tracker, &switch_key, sizeof(switch_key));
+	if (!s)
+		return;
+	orig_ts = latency_tracker_event_get_start_ts(s);
+	latency_tracker_put_event(s);
+	append_delta_ts(orig_ts, "to sched_switch_out", 0);
 	ret = latency_tracker_event_out(tracker, &switch_key, sizeof(switch_key),
 			OUT_SWITCH_BLOCKED);
+	check_del_data_key(orig_ts);
 #ifdef DEBUG
 	if (ret == 0)
 		printk("%llu switch_out %d (%s)\n",
@@ -558,6 +707,7 @@ int __init rt_init(void)
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, rt_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
+	latency_tracker_set_priv_data_size(tracker, sizeof(struct event_data));
 	ret = latency_tracker_enable(tracker);
 	if (ret)
 		goto error;
