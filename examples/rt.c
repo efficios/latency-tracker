@@ -198,7 +198,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	struct latency_tracker_event *s;
 	struct event_data *data;
 	unsigned int cb_out_id = latency_tracker_event_ctx_get_cb_out_id(ctx);
-	uint64_t end_ts = latency_tracker_event_ctx_get_end_ts(ctx);
+	uint64_t end_ts = 0;
 	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
 	char *payload = NULL;
 
@@ -215,42 +215,12 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 			BUG_ON(1);
 			return;
 		}
+		end_ts = data->prev_ts;
 		payload = data->data;
 	}
-
 	printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
 			current->comm, current->pid,
 			end_ts - start_ts, payload);
-#if 0
-	enum latency_tracker_cb_flag cb_flag = latency_tracker_event_ctx_get_cb_flag(ctx);
-	struct schedkey *key = (struct schedkey *) latency_tracker_event_ctx_get_key(ctx)->key;
-	struct rt_tracker *rt_priv =
-		(struct rt_tracker *) latency_tracker_get_priv(tracker);
-	struct task_struct *p;
-	char stacktxt[MAX_STACK_TXT];
-	u64 delay;
-
-	if (cb_flag != LATENCY_TRACKER_CB_NORMAL)
-		return;
-	if (cb_out_id == SCHED_EXIT_DIED)
-		return;
-
-	delay = (end_ts - start_ts) / 1000;
-
-	rcu_read_lock();
-	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
-	if (!p)
-		goto end;
-//	printk("rt: sched_switch %s (%d) %llu us\n", p->comm, key->pid, delay);
-	extract_stack(p, stacktxt, delay, 0);
-	trace_latency_tracker_rt_sched_switch(p->comm, key->pid, end_ts - start_ts,
-			cb_flag, stacktxt);
-	cnt++;
-	rt_handle_proc(rt_priv, end_ts);
-
-end:
-	rcu_read_unlock();
-#endif
 }
 
 static
