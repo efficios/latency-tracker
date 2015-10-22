@@ -376,6 +376,17 @@ int latency_tracker_set_key_size(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_key_size);
 
+int latency_tracker_set_priv_data_size(struct latency_tracker *tracker,
+		int size)
+{
+	if (tracker->enabled)
+		return -1;
+
+	tracker->priv_data_size = size;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_set_priv_data_size);
+
 struct latency_tracker *latency_tracker_create(void)
 {
 	struct latency_tracker *tracker;
@@ -480,6 +491,7 @@ void latency_tracker_timeout_cb(struct latency_tracker *tracker,
 		.cb_out_id = 0,
 		.tkey = &data->tkey,
 		.priv = data->priv,
+		.priv_data = data->priv_data,
 	};
 
 	if (unlikely(flush)) {
@@ -694,6 +706,13 @@ void *latency_tracker_event_get_priv(
 	return event->priv;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_event_get_priv);
+
+void *latency_tracker_event_get_priv_data(
+		struct latency_tracker_event *event)
+{
+	return event->priv_data;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_event_get_priv_data);
 
 uint64_t latency_tracker_event_get_start_ts(
 		struct latency_tracker_event *event)

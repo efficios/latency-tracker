@@ -42,6 +42,10 @@ struct latency_tracker {
 	 * Max size of the keys we can expect.
 	 */
 	int key_size;
+	/*
+	 * Size allocated for event->priv_data.
+	 */
+	int priv_data_size;
 	/* How much event could not be tracked due to an empty free list. */
 	uint64_t skipped_count;
 #ifdef OLDFREELIST
@@ -163,13 +167,22 @@ struct latency_tracker_event {
 	/* Timestamp of event creation. */
 	u64 start_ts;
 	/*
-	 * Private pointer set by the caller, passed when the callback is
-	 * called. Memory management left entirely to the user.
+	 * Private pointer set by the caller, available in the callback.
+	 * Memory management left entirely to the user.
 	 */
 	void *priv;
 	/*
+	 * Below are allocated pointers, the memset performed when we
+	 * put back an event must stop here.
+	 */
+	/*
+	 * Allocated data for the user, the size is determined when creating
+	 * the tracker, the memory is freed when the tracker is destroyed.
+	 * The data is memset to 0 when putting back the event.
+	 */
+	void *priv_data;
+	/*
 	 * Copy of the key.
-	 * MUST BE THE LAST FIELD.
 	 */
 	struct latency_tracker_key tkey;
 };

@@ -116,6 +116,9 @@ int latency_tracker_set_callback(struct latency_tracker *tracker, void
 		(*cb)(struct latency_tracker_event_ctx *ctx));
 /* default: sizeof(long) */
 int latency_tracker_set_key_size(struct latency_tracker *tracker, int size);
+/* default: 0 */
+int latency_tracker_set_priv_data_size(struct latency_tracker *tracker,
+		int size);
 
 /*
  * Update the tracker garbage collector parameters (ns).
@@ -137,6 +140,7 @@ struct latency_tracker_event_ctx {
 	enum latency_tracker_cb_flag cb_flag;
 	unsigned int cb_out_id;
 	struct latency_tracker_key *tkey;
+	void *priv_data;
 	void *priv;
 };
 
@@ -177,6 +181,13 @@ void *latency_tracker_event_ctx_get_priv(
 		struct latency_tracker_event_ctx *ctx)
 {
 	return ctx->priv;
+}
+
+static inline
+void *latency_tracker_event_ctx_get_priv_data(
+		struct latency_tracker_event_ctx *ctx)
+{
+	return ctx->priv_data;
 }
 
 /*
@@ -239,8 +250,15 @@ struct latency_tracker_event *latency_tracker_get_event(
  */
 void latency_tracker_put_event(struct latency_tracker_event *event);
 
-void *latency_tracker_event_get_priv(struct latency_tracker_event *event);
 uint64_t latency_tracker_event_get_start_ts(struct latency_tracker_event *event);
+/*
+ * Memory is guaranteed to be allocated even after the event_out if we hold the
+ * refcount on the event (get_event), but there is no exclusive access to these
+ * pointers, so use with caution if multiple callsites can access the same data
+ * at the same time.
+ */
+void *latency_tracker_event_get_priv(struct latency_tracker_event *event);
+void *latency_tracker_event_get_priv_data(struct latency_tracker_event *event);
 
 /*
  * Returns the number of skipped events due to an empty free list.
