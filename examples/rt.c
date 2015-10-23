@@ -310,7 +310,7 @@ static
 struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		void *key_out, int key_out_len, int del)
 {
-	struct latency_tracker_event *event_in, *event_out;
+	struct latency_tracker_event *event_in = NULL, *event_out = NULL;
 	struct event_data *data_in, *data_out;
 	u64 orig_ts;
 	int ret;

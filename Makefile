@@ -1,4 +1,4 @@
-ccflags-y += -I$(src)/include $(EXTCFLAGS) -g
+ccflags-y += -I$(src)/include $(EXTCFLAGS) -g -Wall
 
 latency_tracker-objs := tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o
 
