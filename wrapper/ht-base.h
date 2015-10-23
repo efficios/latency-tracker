@@ -154,7 +154,7 @@ struct latency_tracker_event *wrapper_ht_get_event(
 		struct latency_tracker_key *tkey)
 {
 	struct hlist_node *next;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *s = NULL;
 	u32 k;
 	int ret;
 
