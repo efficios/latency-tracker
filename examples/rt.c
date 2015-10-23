@@ -69,6 +69,8 @@ enum rt_key_type {
 	KEY_SOFTIRQ = 3,
 	KEY_WAKEUP = 4,
 	KEY_SWITCH = 5,
+	KEY_TIMER_INTERRUPT = 6,
+	KEY_HRTIMER = 7,
 };
 
 enum event_out_types {
@@ -77,6 +79,16 @@ enum event_out_types {
 };
 
 struct do_irq_key_t {
+	unsigned int cpu;
+	enum rt_key_type type;
+} __attribute__((__packed__));
+
+struct local_timer_key_t {
+	unsigned int cpu;
+	enum rt_key_type type;
+} __attribute__((__packed__));
+
+struct hrtimer_key_t {
 	unsigned int cpu;
 	enum rt_key_type type;
 } __attribute__((__packed__));
@@ -322,6 +334,48 @@ end:
 }
 
 static
+void probe_local_timer_entry(void *ignore, int vector)
+{
+	enum latency_tracker_event_in_ret ret;
+	struct local_timer_key_t key;
+	struct latency_tracker_event *s;
+	u64 now = trace_clock_monotonic_wrapper();
+
+	key.cpu = smp_processor_id();
+	key.type = KEY_TIMER_INTERRUPT;
+	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, now,
+			NULL);
+	if (ret != LATENCY_TRACKER_OK)
+		failed_event_in++;
+
+	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	if (!s) {
+		BUG_ON(1);
+		return;
+	}
+	append_delta_ts(s, "local_timer_entry", now);
+	latency_tracker_put_event(s);
+
+#ifdef DEBUG
+	printk("%llu local_timer_entry (cpu %u)\n", trace_clock_monotonic_wrapper(),
+			key.cpu);
+#endif
+
+	return;
+}
+
+static
+void probe_local_timer_exit(void *ignore, int vector)
+{
+	struct local_timer_key_t local_timer_key;
+
+	local_timer_key.cpu = smp_processor_id();
+	local_timer_key.type = KEY_TIMER_INTERRUPT;
+	latency_tracker_event_out(tracker, &local_timer_key,
+			sizeof(local_timer_key), OUT_IRQHANDLER_NO_CB);
+}
+
+static
 void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 {
 	struct do_irq_key_t do_irq_key;
@@ -404,7 +458,7 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 
 	/*
 	 * Insert the softirq_entry event.
-	 * Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
+	 * TODO: Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
 	 */
 	softirq_key.cpu = smp_processor_id();
 	softirq_key.type = KEY_SOFTIRQ;
@@ -418,6 +472,37 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 
 #ifdef DEBUG
 	printk("%llu softirq_entry %u\n", trace_clock_monotonic_wrapper(),
+			vec_nr);
+#endif
+}
+
+static
+void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
+		ktime_t *now)
+{
+	struct local_timer_key_t local_timer_key;
+	struct hrtimer_key_t hrtimer_key;
+	struct latency_tracker_event *s;
+
+	local_timer_key.cpu = smp_processor_id();
+	local_timer_key.type = KEY_TIMER_INTERRUPT;
+
+	/*
+	 * Insert the hrtimer_expire_entry event.
+	 * TODO: Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
+	 */
+	hrtimer_key.cpu = smp_processor_id();
+	hrtimer_key.type = KEY_HRTIMER;
+
+	s = event_transition(&local_timer_key, sizeof(local_timer_key),
+			&hrtimer_key, sizeof(hrtimer_key), 0);
+	if (!s)
+		return;
+	append_delta_ts(s, "to hrtimer_expire_entry", 0);
+	latency_tracker_put_event(s);
+
+#ifdef DEBUG
+	printk("%llu hrtimer_entry %u\n", trace_clock_monotonic_wrapper(),
 			vec_nr);
 #endif
 }
@@ -444,6 +529,45 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 }
 
 static
+void softirq_wakeup(struct wakeup_key_t *wakeup_key)
+{
+	struct softirq_key_t softirq_key;
+	struct latency_tracker_event *s;
+
+	/* TODO: PREEMPT_RT */
+	softirq_key.cpu = smp_processor_id();
+	softirq_key.type = KEY_SOFTIRQ;
+
+	s = event_transition(&softirq_key, sizeof(softirq_key),
+			wakeup_key, sizeof(wakeup_key), 0);
+	if (!s)
+		return;
+	append_delta_ts(s, "to sched_wakeup", 0);
+	latency_tracker_put_event(s);
+#ifdef DEBUG
+	printk("%llu wakeup %d (%s)\n", trace_clock_monotonic_wrapper(),
+			p->pid, p->comm);
+#endif
+}
+
+static
+void hrtimer_wakeup(struct wakeup_key_t *wakeup_key)
+{
+	struct hrtimer_key_t hrtimer_key;
+	struct latency_tracker_event *s;
+
+	/* TODO: PREEMPT_RT */
+	hrtimer_key.cpu = smp_processor_id();
+	hrtimer_key.type = KEY_HRTIMER;
+	s = event_transition(&hrtimer_key, sizeof(hrtimer_key),
+			wakeup_key, sizeof(wakeup_key), 0);
+	if (!s)
+		return;
+	append_delta_ts(s, "to sched_wakeup", 0);
+	latency_tracker_put_event(s);
+}
+
+static
 void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 {
 	/*
@@ -454,7 +578,6 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	 * On a PREEMPT_RT we match on the PID of the current task instead
 	 * of the CPU.
 	 */
-	struct softirq_key_t softirq_key;
 	struct wakeup_key_t wakeup_key;
 	struct latency_tracker_event *s;
 
@@ -485,26 +608,10 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		/* TODO */
 		goto end;
 	} else if (in_serving_softirq()) {
-		/* TODO: PREEMPT_RT */
-		softirq_key.cpu = smp_processor_id();
-		softirq_key.type = KEY_SOFTIRQ;
-
-		s = event_transition(&softirq_key, sizeof(softirq_key),
-				&wakeup_key, sizeof(wakeup_key), 0);
-		if (!s)
-			return;
-		append_delta_ts(s, "to sched_wakeup", 0);
-		latency_tracker_put_event(s);
-#ifdef DEBUG
-		printk("%llu wakeup %d (%s)\n", trace_clock_monotonic_wrapper(),
-				p->pid, p->comm);
-#endif
+		softirq_wakeup(&wakeup_key);
 	} else {
-		/*
-		 * In thread context (swapper most likely), we cannot link
-		 * to anything, we need the sched_waking event instead.
-		 */
-		goto end;
+		/* hrtimer or thread wakeup */
+		hrtimer_wakeup(&wakeup_key);
 	}
 
 end:
@@ -597,6 +704,15 @@ int __init rt_init(void)
 	if (ret)
 		goto error;
 
+	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
+			probe_local_timer_entry, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register("local_timer_exit",
+			probe_local_timer_exit, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
+			probe_hrtimer_expire_entry, NULL);
+	WARN_ON(ret);
 	ret = lttng_wrapper_tracepoint_probe_register("irq_handler_entry",
 			probe_irq_handler_entry, NULL);
 	WARN_ON(ret);
@@ -643,6 +759,12 @@ void __exit rt_exit(void)
 	uint64_t skipped;
 	//struct rt_tracker *rt_priv;
 
+	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
+			probe_local_timer_entry, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
+			probe_local_timer_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
+			probe_hrtimer_expire_entry, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("sched_wakeup",
