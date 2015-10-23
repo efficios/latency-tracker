@@ -186,14 +186,17 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int sk
 #endif
 
 static
-void append_delta_ts(struct latency_tracker_event *s, char *txt)
+void append_delta_ts(struct latency_tracker_event *s, char *txt, u64 ts)
 {
 	u64 now;
 	struct event_data *data;
 	char tmp[48];
 	size_t len;
 
-	now = trace_clock_monotonic_wrapper();
+	if (ts)
+		now = ts;
+	else
+		now = trace_clock_monotonic_wrapper();
 	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
 	if (!data) {
 		BUG_ON(1);
@@ -250,7 +253,7 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 		BUG_ON(1);
 		return 0;
 	}
-	append_delta_ts(s, "do_IRQ");
+	append_delta_ts(s, "do_IRQ", now);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -335,7 +338,7 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 			sizeof(hardirq_key), 1);
 	if (!s)
 		return;
-	append_delta_ts(s, "to irq_handler_entry");
+	append_delta_ts(s, "to irq_handler_entry", 0);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -379,7 +382,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			&raise_softirq_key, sizeof(raise_softirq_key), 0);
 	if (!s)
 		return;
-	append_delta_ts(s, "to softirq_raise");
+	append_delta_ts(s, "to softirq_raise", 0);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -410,7 +413,7 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 			&softirq_key, sizeof(softirq_key), 1);
 	if (!s)
 		return;
-	append_delta_ts(s, "to softirq_entry");
+	append_delta_ts(s, "to softirq_entry", 0);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -490,7 +493,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 				&wakeup_key, sizeof(wakeup_key), 0);
 		if (!s)
 			return;
-		append_delta_ts(s, "to sched_wakeup");
+		append_delta_ts(s, "to sched_wakeup", 0);
 		latency_tracker_put_event(s);
 #ifdef DEBUG
 		printk("%llu wakeup %d (%s)\n", trace_clock_monotonic_wrapper(),
@@ -534,7 +537,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	s = event_transition(&wakeup_key, sizeof(wakeup_key), &switch_key,
 			sizeof(switch_key), 1);
 	if (s) {
-		append_delta_ts(s, "to sched_switch_in");
+		append_delta_ts(s, "to sched_switch_in", 0);
 		latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -559,7 +562,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	if (!s)
 		return;
 	latency_tracker_put_event(s);
-	append_delta_ts(s, "to sched_switch_out");
+	append_delta_ts(s, "to sched_switch_out", 0);
 	ret = latency_tracker_event_out(tracker, &switch_key, sizeof(switch_key),
 			OUT_SWITCH_BLOCKED);
 #ifdef DEBUG
