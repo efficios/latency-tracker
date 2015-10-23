@@ -123,12 +123,15 @@ struct switch_key_t {
 #undef MAX_KEY_SIZE
 #define MAX_KEY_SIZE sizeof(struct raise_softirq_key_t)
 
-#define MAX_DATA_LEN 1024
+#if !defined(MAX_FILTER_STR_VAL)
+#define MAX_FILTER_STR_VAL 256
+#endif
+
 struct event_data {
 	unsigned int pos;
 	unsigned int in_use;
 	u64 prev_ts;
-	char data[MAX_DATA_LEN];
+	char data[MAX_FILTER_STR_VAL];
 } __attribute__((__packed__));
 
 #if 0
@@ -217,7 +220,7 @@ void append_delta_ts(struct latency_tracker_event *s, char *txt, u64 ts)
 
 	snprintf(tmp, 48, "%s = %llu, ", txt, now - data->prev_ts);
 	len = strlen(tmp);
-	if ((data->pos + len) > MAX_DATA_LEN)
+	if ((data->pos + len) > MAX_FILTER_STR_VAL)
 		return;
 	memcpy(data->data + data->pos, tmp, len);
 	data->pos += len;
@@ -240,9 +243,13 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 		return;
 	}
 	end_ts = data->prev_ts;
+	trace_latency_tracker_rt(current->comm, current->pid,
+			end_ts - start_ts, data->data);
+	/*
 	printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
 			current->comm, current->pid,
 			end_ts - start_ts, data->data);
+			*/
 }
 
 static

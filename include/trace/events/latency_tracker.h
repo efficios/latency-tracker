@@ -194,6 +194,25 @@ TRACE_EVENT(
 		__entry->comm, __entry->pid, __entry->stack)
    );
 
+TRACE_EVENT(
+	latency_tracker_rt,
+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay, char breakdown[1024]),
+	TP_ARGS(comm, pid, delay, breakdown),
+	TP_STRUCT__entry(
+		__array(char, comm, TASK_COMM_LEN)
+		__field(int, pid)
+		__field(u64, delay)
+		__array(char, breakdown, MAX_FILTER_STR_VAL)
+	),
+	TP_fast_assign(
+		memcpy(__entry->comm, comm, TASK_COMM_LEN);
+		entry->pid = pid;
+		entry->delay = delay;
+		memcpy(__entry->breakdown, breakdown, MAX_FILTER_STR_VAL);
+	),
+	TP_printk("comm=%s, pid=%d, delay=%llu, breakdown={%s}", __entry->comm,
+		__entry->pid, __entry->delay, __entry->breakdown)
+   );
 
 #endif /* _TRACE_LATENCY_TRACKER_H */
 
