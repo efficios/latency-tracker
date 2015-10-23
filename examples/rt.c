@@ -45,6 +45,8 @@
  */
 #define DEFAULT_USEC_RT_TIMEOUT 0
 
+#define DEFAULT_TIMER_TRACING 0
+
 /*
  * microseconds because we can't guarantee the passing of 64-bit
  * arguments to insmod on all architectures.
@@ -56,6 +58,10 @@ MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 static unsigned long usec_timeout = DEFAULT_USEC_RT_TIMEOUT;
 module_param(usec_timeout, ulong, 0644);
 MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
+
+static unsigned long timer_tracing = DEFAULT_TIMER_TRACING;
+module_param(timer_tracing, ulong, 0644);
+MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts and hrtimer latency");
 
 static struct latency_tracker *tracker;
 
@@ -711,15 +717,17 @@ int __init rt_init(void)
 	if (ret)
 		goto error;
 
-	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
-			probe_local_timer_entry, NULL);
-	WARN_ON(ret);
-	ret = lttng_wrapper_tracepoint_probe_register("local_timer_exit",
-			probe_local_timer_exit, NULL);
-	WARN_ON(ret);
-	ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
-			probe_hrtimer_expire_entry, NULL);
-	WARN_ON(ret);
+	if (timer_tracing) {
+		ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
+				probe_local_timer_entry, NULL);
+		WARN_ON(ret);
+		ret = lttng_wrapper_tracepoint_probe_register("local_timer_exit",
+				probe_local_timer_exit, NULL);
+		WARN_ON(ret);
+		ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
+				probe_hrtimer_expire_entry, NULL);
+		WARN_ON(ret);
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("irq_handler_entry",
 			probe_irq_handler_entry, NULL);
 	WARN_ON(ret);
@@ -764,14 +772,15 @@ static
 void __exit rt_exit(void)
 {
 	uint64_t skipped;
-	//struct rt_tracker *rt_priv;
 
-	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
-			probe_local_timer_entry, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
-			probe_local_timer_exit, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
-			probe_hrtimer_expire_entry, NULL);
+	if (timer_tracing) {
+		lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
+				probe_local_timer_entry, NULL);
+		lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
+				probe_local_timer_exit, NULL);
+		lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
+				probe_hrtimer_expire_entry, NULL);
+	}
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("sched_wakeup",
