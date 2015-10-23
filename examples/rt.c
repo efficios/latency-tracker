@@ -45,7 +45,7 @@
  */
 #define DEFAULT_USEC_RT_TIMEOUT 0
 
-#define DEFAULT_TIMER_TRACING 0
+#define DEFAULT_TIMER_TRACING 1
 
 /*
  * microseconds because we can't guarantee the passing of 64-bit
@@ -270,8 +270,10 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	key.type = KEY_DO_IRQ;
 	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, now,
 			NULL);
-	if (ret != LATENCY_TRACKER_OK)
+	if (ret != LATENCY_TRACKER_OK) {
 		failed_event_in++;
+		return 0;
+	}
 
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s) {
@@ -325,8 +327,10 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 
 	ret = _latency_tracker_event_in(tracker, key_out,
 			key_out_len, 1, orig_ts, NULL);
-	if (ret != LATENCY_TRACKER_OK)
+	if (ret != LATENCY_TRACKER_OK) {
+		goto end_del;
 		failed_event_in++;
+	}
 	event_out = latency_tracker_get_event(tracker, key_out, key_out_len);
 	if (!event_out)
 		return NULL;
@@ -338,6 +342,7 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	memcpy(data_out, data_in, sizeof(struct event_data));
 
 	latency_tracker_put_event(event_in);
+end_del:
 	if (del)
 		latency_tracker_event_out(tracker, key_in, key_in_len,
 				OUT_IRQHANDLER_NO_CB);
@@ -358,8 +363,10 @@ void probe_local_timer_entry(void *ignore, int vector)
 	key.type = KEY_TIMER_INTERRUPT;
 	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, now,
 			NULL);
-	if (ret != LATENCY_TRACKER_OK)
+	if (ret != LATENCY_TRACKER_OK) {
 		failed_event_in++;
+		return;
+	}
 
 	s = latency_tracker_get_event(tracker, &key, sizeof(key));
 	if (!s) {
