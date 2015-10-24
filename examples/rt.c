@@ -134,14 +134,15 @@ struct switch_key_t {
 #define MAX_FILTER_STR_VAL 256
 #endif
 
+#define MAX_PAYLOAD (4 * MAX_FILTER_STR_VAL)
+
 struct event_data {
 	unsigned int pos;
 	unsigned int in_use;
 	unsigned int preempt_count;
 	unsigned breakdown_idx;
 	u64 prev_ts;
-	char breakdown1[MAX_FILTER_STR_VAL];
-	char breakdown2[MAX_FILTER_STR_VAL];
+	char breakdown[MAX_PAYLOAD];
 } __attribute__((__packed__));
 
 #if 0
@@ -216,9 +217,8 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 {
 	u64 now;
 	struct event_data *data;
-	char tmp[48];
+	char tmp[64];
 	size_t len;
-	char *field;
 
 	if (ts)
 		now = ts;
@@ -229,48 +229,38 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 		BUG_ON(1);
 		return;
 	}
-	if (data->pos == MAX_FILTER_STR_VAL) {
+	if (data->pos == MAX_PAYLOAD) {
 		data->prev_ts = now;
 		return;
 	}
 
 	switch (type) {
 	case KEY_DO_IRQ:
-		snprintf(tmp, 48, "%s = %llu, ", txt, now - data->prev_ts);
+		snprintf(tmp, 64, "%s = %llu, ", txt, now - data->prev_ts);
 		break;
 	case KEY_HARDIRQ:
 	case KEY_RAISE_SOFTIRQ:
 	case KEY_SOFTIRQ:
 	case KEY_WAKEUP:
-		snprintf(tmp, 48, "%s(%d) = %llu, ", txt, field1,
+		snprintf(tmp, 64, "%s(%d) = %llu, ", txt, field1,
 				now - data->prev_ts);
 		break;
 	case KEY_SWITCH:
-		snprintf(tmp, 48, "%s(%s-%d, %d) = %llu, ", txt, field2,
+		snprintf(tmp, 64, "%s(%s-%d, %d) = %llu, ", txt, field2,
 				field1, field3, now - data->prev_ts);
 		break;
 	case KEY_TIMER_INTERRUPT:
 	case KEY_HRTIMER:
-		snprintf(tmp, 48, "%s = %llu, ", txt, now - data->prev_ts);
+		snprintf(tmp, 64, "%s = %llu, ", txt, now - data->prev_ts);
 		break;
 	}
 	len = strlen(tmp);
-	if (data->breakdown_idx == 0)
-		field = data->breakdown1;
-	else
-		field = data->breakdown2;
-	if ((data->pos + len) > MAX_FILTER_STR_VAL) {
-		if (data->breakdown_idx == 0) {
-			data->breakdown_idx = 1;
-			data->pos = 0;
-			field = data->breakdown2;
-		} else {
-			data->breakdown2[data->pos] = '+';
-			data->pos = MAX_FILTER_STR_VAL;
-			return;
-		}
+	if ((data->pos + len) > MAX_PAYLOAD) {
+		data->breakdown[data->pos] = '+';
+		data->pos = MAX_PAYLOAD;
+		return;
 	}
-	memcpy(field + data->pos, tmp, len);
+	memcpy(data->breakdown + data->pos, tmp, len);
 	data->pos += len;
 	data->prev_ts = now;
 }
@@ -293,7 +283,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	end_ts = data->prev_ts;
 	trace_latency_tracker_rt(current->comm, current->pid,
 			end_ts - start_ts, data->preempt_count,
-			data->breakdown1, data->breakdown2);
+			data->breakdown);
 	/*
 	printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
 			current->comm, current->pid,
