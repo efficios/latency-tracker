@@ -115,7 +115,7 @@ struct softirq_key_t {
 	enum rt_key_type type;
 } __attribute__((__packed__));
 
-struct wakeup_key_t {
+struct waking_key_t {
 	int pid;
 	enum rt_key_type type;
 } __attribute__((__packed__));
@@ -136,6 +136,7 @@ struct switch_key_t {
 struct event_data {
 	unsigned int pos;
 	unsigned int in_use;
+	unsigned int preempt_count;
 	u64 prev_ts;
 	char data[MAX_FILTER_STR_VAL];
 } __attribute__((__packed__));
@@ -223,11 +224,18 @@ void append_delta_ts(struct latency_tracker_event *s, char *txt, u64 ts)
 		BUG_ON(1);
 		return;
 	}
+	if (data->pos == MAX_FILTER_STR_VAL) {
+		data->prev_ts = now;
+		return;
+	}
 
 	snprintf(tmp, 48, "%s = %llu, ", txt, now - data->prev_ts);
 	len = strlen(tmp);
-	if ((data->pos + len) > MAX_FILTER_STR_VAL)
+	if ((data->pos + len) > MAX_FILTER_STR_VAL) {
+		data->data[data->pos] = '+';
+		data->pos = MAX_FILTER_STR_VAL;
 		return;
+	}
 	memcpy(data->data + data->pos, tmp, len);
 	data->pos += len;
 	data->prev_ts = now;
@@ -250,7 +258,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	}
 	end_ts = data->prev_ts;
 	trace_latency_tracker_rt(current->comm, current->pid,
-			end_ts - start_ts, data->data);
+			end_ts - start_ts, data->preempt_count, data->data);
 	/*
 	printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
 			current->comm, current->pid,
@@ -549,7 +557,7 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 }
 
 static
-void softirq_wakeup(struct wakeup_key_t *wakeup_key)
+void softirq_waking(struct waking_key_t *waking_key)
 {
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *s;
@@ -559,19 +567,19 @@ void softirq_wakeup(struct wakeup_key_t *wakeup_key)
 	softirq_key.type = KEY_SOFTIRQ;
 
 	s = event_transition(&softirq_key, sizeof(softirq_key),
-			wakeup_key, sizeof(wakeup_key), 0);
+			waking_key, sizeof(waking_key), 0);
 	if (!s)
 		return;
-	append_delta_ts(s, "to sched_wakeup", 0);
+	append_delta_ts(s, "to sched_waking", 0);
 	latency_tracker_put_event(s);
 #ifdef DEBUG
-	printk("%llu wakeup %d (%s)\n", trace_clock_monotonic_wrapper(),
+	printk("%llu waking %d (%s)\n", trace_clock_monotonic_wrapper(),
 			p->pid, p->comm);
 #endif
 }
 
 static
-void hrtimer_wakeup(struct wakeup_key_t *wakeup_key)
+void hrtimer_waking(struct waking_key_t *waking_key)
 {
 	struct hrtimer_key_t hrtimer_key;
 	struct latency_tracker_event *s;
@@ -580,15 +588,15 @@ void hrtimer_wakeup(struct wakeup_key_t *wakeup_key)
 	hrtimer_key.cpu = smp_processor_id();
 	hrtimer_key.type = KEY_HRTIMER;
 	s = event_transition(&hrtimer_key, sizeof(hrtimer_key),
-			wakeup_key, sizeof(wakeup_key), 0);
+			waking_key, sizeof(waking_key), 0);
 	if (!s)
 		return;
-	append_delta_ts(s, "to sched_wakeup", 0);
+	append_delta_ts(s, "to sched_waking", 0);
 	latency_tracker_put_event(s);
 }
 
 static
-void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
+void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 {
 	/*
 	 * On a non-RT kernel, if we are here while handling a softirq, lookup
@@ -598,7 +606,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	 * On a PREEMPT_RT we match on the PID of the current task instead
 	 * of the CPU.
 	 */
-	struct wakeup_key_t wakeup_key;
+	struct waking_key_t waking_key;
 	struct latency_tracker_event *s;
 
 	/* FIXME: is it the right RCU magic to make sure p stays alive ? */
@@ -606,15 +614,15 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	if (!p)
 		goto end;
 
-	wakeup_key.pid = p->pid;
-	wakeup_key.type = KEY_WAKEUP;
+	waking_key.pid = p->pid;
+	waking_key.type = KEY_WAKEUP;
 
 	/*
 	 * If the process was already woken up, we cannot link
-	 * its wakeup to the current event, so we exit here.
+	 * its waking to the current event, so we exit here.
 	 */
-	s = latency_tracker_get_event(tracker, &wakeup_key,
-			sizeof(wakeup_key));
+	s = latency_tracker_get_event(tracker, &waking_key,
+			sizeof(waking_key));
 	if (s) {
 		latency_tracker_put_event(s);
 		goto end;
@@ -628,10 +636,10 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		/* TODO */
 		goto end;
 	} else if (in_serving_softirq()) {
-		softirq_wakeup(&wakeup_key);
+		softirq_waking(&waking_key);
 	} else {
-		/* hrtimer or thread wakeup */
-		hrtimer_wakeup(&wakeup_key);
+		/* hrtimer or thread waking */
+		hrtimer_waking(&waking_key);
 	}
 
 end:
@@ -639,42 +647,71 @@ end:
 }
 
 static
-void probe_sched_switch(void *ignore, struct task_struct *prev,
-		struct task_struct *next)
+void sched_switch_in(struct task_struct *next)
 {
-	struct wakeup_key_t wakeup_key;
-	struct switch_key_t switch_key;
+	struct waking_key_t waking_key;
 	struct latency_tracker_event *s;
-	int ret;
-
-	/* FIXME: is it the right RCU magic */
-	rcu_read_lock_sched_notrace();
-	if (!prev || !next)
-		goto end;
-
-	/* FIXME: wakeup key is not usable with sched_switch in/out chains */
-	/* TODO check RT prio */
-	/* sched in */
-	wakeup_key.pid = next->pid;
-	wakeup_key.type = KEY_WAKEUP;
+	struct switch_key_t switch_key;
 
 	switch_key.pid = next->pid;
 	switch_key.type = KEY_SWITCH;
 
-	s = event_transition(&wakeup_key, sizeof(wakeup_key), &switch_key,
+	/* We can switch from a wakeup/waking or after being preempted */
+
+	/* sched in */
+	waking_key.pid = next->pid;
+	waking_key.type = KEY_WAKEUP;
+
+	s = event_transition(&waking_key, sizeof(waking_key), &switch_key,
 			sizeof(switch_key), 1);
 	if (s) {
+		/* switch_in after a waking */
 		append_delta_ts(s, "to sched_switch_in", 0);
 		latency_tracker_put_event(s);
-
-#ifdef DEBUG
-		printk("%llu switch_in %d (%s)\n",
-				trace_clock_monotonic_wrapper(),
-				next->pid, next->comm);
-#endif
+	} else {
+		/* switch after a preempt */
+		s = latency_tracker_get_event(tracker, &switch_key, sizeof(switch_key));
+		if (!s)
+			goto end;
+		append_delta_ts(s, "to sched_switch_in", 0);
+		latency_tracker_put_event(s);
 	}
 
+#ifdef DEBUG
+	printk("%llu switch_in %d (%s)\n",
+			trace_clock_monotonic_wrapper(),
+			next->pid, next->comm);
+#endif
+end:
+		return;
+}
+
+static
+void sched_switch_out(struct task_struct *prev)
+{
+	struct latency_tracker_event *s;
+	struct switch_key_t switch_key;
+	int ret;
+
 	/* switch out */
+	switch_key.pid = prev->pid;
+	switch_key.type = KEY_SWITCH;
+	s = latency_tracker_get_event(tracker, &switch_key, sizeof(switch_key));
+	if (!s)
+		goto end;
+	if (prev->state == TASK_RUNNING) {
+		struct event_data *data;
+
+		append_delta_ts(s, "to sched_switch_out", 0);
+		data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+		if (!data)
+			return;
+		data->preempt_count++;
+	} else {
+		append_delta_ts(s, "to sched_switch_out_blocked", 0);
+	}
+	latency_tracker_put_event(s);
+
 	/*
 	 * If the task is still running, but just got preempted, it means that
 	 * it is still actively working on an event, so we continue tracking
@@ -683,13 +720,6 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	if (prev->state == TASK_RUNNING)
 		goto end;
 
-	switch_key.pid = prev->pid;
-	switch_key.type = KEY_SWITCH;
-	s = latency_tracker_get_event(tracker, &switch_key, sizeof(switch_key));
-	if (!s)
-		return;
-	latency_tracker_put_event(s);
-	append_delta_ts(s, "to sched_switch_out", 0);
 	ret = latency_tracker_event_out(tracker, &switch_key, sizeof(switch_key),
 			OUT_SWITCH_BLOCKED);
 #ifdef DEBUG
@@ -698,6 +728,21 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 				trace_clock_monotonic_wrapper(),
 				prev->pid, prev->comm);
 #endif
+end:
+	return;
+}
+
+static
+void probe_sched_switch(void *ignore, struct task_struct *prev,
+		struct task_struct *next)
+{
+	/* FIXME: is it the right RCU magic */
+	rcu_read_lock_sched_notrace();
+	if (!prev || !next)
+		goto end;
+
+	sched_switch_in(next);
+	sched_switch_out(prev);
 
 end:
 	rcu_read_unlock_sched_notrace();
@@ -759,8 +804,8 @@ int __init rt_init(void)
 			probe_sched_switch, NULL);
 	WARN_ON(ret);
 
-	ret = lttng_wrapper_tracepoint_probe_register("sched_wakeup",
-			probe_sched_wakeup, NULL);
+	ret = lttng_wrapper_tracepoint_probe_register("sched_waking",
+			probe_sched_waking, NULL);
 	WARN_ON(ret);
 
 	ret = register_kretprobe(&probe_do_irq);
@@ -790,8 +835,8 @@ void __exit rt_exit(void)
 	}
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("sched_wakeup",
-			probe_sched_wakeup, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("sched_waking",
+			probe_sched_waking, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("irq_handler_entry",
 			probe_irq_handler_entry, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("irq_handler_exit",
