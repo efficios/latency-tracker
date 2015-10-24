@@ -194,28 +194,38 @@ TRACE_EVENT(
 		__entry->comm, __entry->pid, __entry->stack)
    );
 
+#if !defined(MAX_FILTER_STR_VAL)
+#define MAX_FILTER_STR_VAL 256
+#endif
+
 TRACE_EVENT(
 	latency_tracker_rt,
 	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
-		unsigned int preempt_count, char breakdown[1024]),
-	TP_ARGS(comm, pid, delay, preempt_count, breakdown),
+		unsigned int preempt_count,
+		char breakdown1[MAX_FILTER_STR_VAL],
+		char breakdown2[MAX_FILTER_STR_VAL]),
+	TP_ARGS(comm, pid, delay, preempt_count, breakdown1, breakdown2),
 	TP_STRUCT__entry(
 		__array(char, comm, TASK_COMM_LEN)
 		__field(int, pid)
 		__field(u64, delay)
 		__field(unsigned int, preempt_count)
-		__array(char, breakdown, MAX_FILTER_STR_VAL)
+		__array(char, breakdown1, MAX_FILTER_STR_VAL)
+		__array(char, breakdown2, MAX_FILTER_STR_VAL)
 	),
 	TP_fast_assign(
 		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 		entry->pid = pid;
 		entry->delay = delay;
 		entry->preempt_count = preempt_count;
-		memcpy(__entry->breakdown, breakdown, MAX_FILTER_STR_VAL);
+		memcpy(__entry->breakdown1, breakdown1, MAX_FILTER_STR_VAL);
+		memcpy(__entry->breakdown2, breakdown2, MAX_FILTER_STR_VAL);
 	),
-	TP_printk("comm=%s, pid=%d, delay=%llu, preempt_count=%u, breakdown={%s}",
+	TP_printk("comm=%s, pid=%d, delay=%llu, preempt_count=%u, "
+			"breakdown1={%s}, breakdown2={%s}",
 		__entry->comm, __entry->pid, __entry->delay,
-		__entry->preempt_count, __entry->breakdown)
+		__entry->preempt_count, __entry->breakdown1,
+		__entry->breakdown2)
    );
 
 #endif /* _TRACE_LATENCY_TRACKER_H */

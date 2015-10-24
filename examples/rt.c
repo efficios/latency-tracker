@@ -137,8 +137,10 @@ struct event_data {
 	unsigned int pos;
 	unsigned int in_use;
 	unsigned int preempt_count;
+	unsigned breakdown_idx;
 	u64 prev_ts;
-	char data[MAX_FILTER_STR_VAL];
+	char breakdown1[MAX_FILTER_STR_VAL];
+	char breakdown2[MAX_FILTER_STR_VAL];
 } __attribute__((__packed__));
 
 #if 0
@@ -208,12 +210,14 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int sk
 #endif
 
 static
-void append_delta_ts(struct latency_tracker_event *s, char *txt, u64 ts)
+void append_delta_ts(struct latency_tracker_event *s, char *txt, u64 ts,
+		int num)
 {
 	u64 now;
 	struct event_data *data;
 	char tmp[48];
 	size_t len;
+	char *field;
 
 	if (ts)
 		now = ts;
@@ -229,14 +233,24 @@ void append_delta_ts(struct latency_tracker_event *s, char *txt, u64 ts)
 		return;
 	}
 
-	snprintf(tmp, 48, "%s = %llu, ", txt, now - data->prev_ts);
+	if (num > 0)
+		snprintf(tmp, 48, "%s(%d) = %llu, ", txt, num, now - data->prev_ts);
+	else
+		snprintf(tmp, 48, "%s = %llu, ", txt, now - data->prev_ts);
 	len = strlen(tmp);
+	field = data->breakdown1;
 	if ((data->pos + len) > MAX_FILTER_STR_VAL) {
-		data->data[data->pos] = '+';
-		data->pos = MAX_FILTER_STR_VAL;
-		return;
+		if (data->breakdown_idx == 0) {
+			data->breakdown_idx = 1;
+			data->pos = 0;
+			field = data->breakdown2;
+		} else {
+			data->breakdown2[data->pos] = '+';
+			data->pos = MAX_FILTER_STR_VAL;
+			return;
+		}
 	}
-	memcpy(data->data + data->pos, tmp, len);
+	memcpy(field + data->pos, tmp, len);
 	data->pos += len;
 	data->prev_ts = now;
 }
@@ -258,7 +272,8 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	}
 	end_ts = data->prev_ts;
 	trace_latency_tracker_rt(current->comm, current->pid,
-			end_ts - start_ts, data->preempt_count, data->data);
+			end_ts - start_ts, data->preempt_count,
+			data->breakdown1, data->breakdown2);
 	/*
 	printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
 			current->comm, current->pid,
@@ -288,7 +303,7 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 		BUG_ON(1);
 		return 0;
 	}
-	append_delta_ts(s, "do_IRQ", now);
+	append_delta_ts(s, "do_IRQ", now, -1);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -381,7 +396,7 @@ void probe_local_timer_entry(void *ignore, int vector)
 		BUG_ON(1);
 		return;
 	}
-	append_delta_ts(s, "local_timer_entry", now);
+	append_delta_ts(s, "local_timer_entry", now, vector);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -420,7 +435,7 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 			sizeof(hardirq_key), 1);
 	if (!s)
 		return;
-	append_delta_ts(s, "to irq_handler_entry", 0);
+	append_delta_ts(s, "to irq_handler_entry", 0, irq);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -464,7 +479,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			&raise_softirq_key, sizeof(raise_softirq_key), 0);
 	if (!s)
 		return;
-	append_delta_ts(s, "to softirq_raise", 0);
+	append_delta_ts(s, "to softirq_raise", 0, vec_nr);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -495,7 +510,7 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 			&softirq_key, sizeof(softirq_key), 1);
 	if (!s)
 		return;
-	append_delta_ts(s, "to softirq_entry", 0);
+	append_delta_ts(s, "to softirq_entry", 0, vec_nr);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -526,7 +541,7 @@ void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
 			&hrtimer_key, sizeof(hrtimer_key), 0);
 	if (!s)
 		return;
-	append_delta_ts(s, "to hrtimer_expire_entry", 0);
+	append_delta_ts(s, "to hrtimer_expire_entry", 0, -1);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -570,7 +585,7 @@ void softirq_waking(struct waking_key_t *waking_key)
 			waking_key, sizeof(waking_key), 0);
 	if (!s)
 		return;
-	append_delta_ts(s, "to sched_waking", 0);
+	append_delta_ts(s, "to sched_waking", 0, waking_key->pid);
 	latency_tracker_put_event(s);
 #ifdef DEBUG
 	printk("%llu waking %d (%s)\n", trace_clock_monotonic_wrapper(),
@@ -578,8 +593,11 @@ void softirq_waking(struct waking_key_t *waking_key)
 #endif
 }
 
+/*
+ * Return 0 if the waking did not originate from a hrtimer
+ */
 static
-void hrtimer_waking(struct waking_key_t *waking_key)
+int hrtimer_waking(struct waking_key_t *waking_key)
 {
 	struct hrtimer_key_t hrtimer_key;
 	struct latency_tracker_event *s;
@@ -590,9 +608,33 @@ void hrtimer_waking(struct waking_key_t *waking_key)
 	s = event_transition(&hrtimer_key, sizeof(hrtimer_key),
 			waking_key, sizeof(waking_key), 0);
 	if (!s)
-		return;
-	append_delta_ts(s, "to sched_waking", 0);
+		return 0;
+	append_delta_ts(s, "to sched_waking", 0, waking_key->pid);
 	latency_tracker_put_event(s);
+	return 1;
+}
+
+/*
+ * A thread is waking up another thread.
+ * If we are interested in the waking, we should have tracked
+ * the switch_in of the current process.
+ */
+static
+void thread_waking(struct waking_key_t *waking_key)
+{
+	struct switch_key_t switch_key;
+	struct latency_tracker_event *s;
+
+	switch_key.pid = current->pid;
+	switch_key.type = KEY_SWITCH;
+
+	s = event_transition(&switch_key, sizeof(switch_key), waking_key,
+			sizeof(waking_key), 0);
+	if (s) {
+		/* switch_in after a waking */
+		append_delta_ts(s, "to sched_waking", 0, waking_key->pid);
+		latency_tracker_put_event(s);
+	}
 }
 
 static
@@ -638,8 +680,12 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 	} else if (in_serving_softirq()) {
 		softirq_waking(&waking_key);
 	} else {
+		int ret;
 		/* hrtimer or thread waking */
-		hrtimer_waking(&waking_key);
+		ret = hrtimer_waking(&waking_key);
+		if (ret)
+			goto end;
+		thread_waking(&waking_key);
 	}
 
 end:
@@ -666,14 +712,14 @@ void sched_switch_in(struct task_struct *next)
 			sizeof(switch_key), 1);
 	if (s) {
 		/* switch_in after a waking */
-		append_delta_ts(s, "to sched_switch_in", 0);
+		append_delta_ts(s, "to switch_in", 0, next->pid);
 		latency_tracker_put_event(s);
 	} else {
 		/* switch after a preempt */
 		s = latency_tracker_get_event(tracker, &switch_key, sizeof(switch_key));
 		if (!s)
 			goto end;
-		append_delta_ts(s, "to sched_switch_in", 0);
+		append_delta_ts(s, "to switch_in", 0, next->pid);
 		latency_tracker_put_event(s);
 	}
 
@@ -702,13 +748,13 @@ void sched_switch_out(struct task_struct *prev)
 	if (prev->state == TASK_RUNNING) {
 		struct event_data *data;
 
-		append_delta_ts(s, "to sched_switch_out", 0);
+		append_delta_ts(s, "to switch_out", 0, prev->pid);
 		data = (struct event_data *) latency_tracker_event_get_priv_data(s);
 		if (!data)
 			return;
 		data->preempt_count++;
 	} else {
-		append_delta_ts(s, "to sched_switch_out_blocked", 0);
+		append_delta_ts(s, "to switch_out_blocked", 0, prev->pid);
 	}
 	latency_tracker_put_event(s);
 
