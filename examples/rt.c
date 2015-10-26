@@ -113,6 +113,7 @@ struct raise_softirq_key_t {
 
 struct softirq_key_t {
 	unsigned int cpu;
+	int pid;
 	enum rt_key_type type;
 } __attribute__((__packed__));
 
@@ -325,9 +326,22 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 }
 
 static
+int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
+{
+	struct do_irq_key_t key;
+
+	key.cpu = smp_processor_id();
+	key.type = KEY_DO_IRQ;
+	latency_tracker_event_out(tracker, &key,
+			sizeof(key), OUT_IRQHANDLER_NO_CB);
+
+	return 0;
+}
+
+static
 struct kretprobe probe_do_irq = {
 	.entry_handler = entry_do_irq,
-	.handler = NULL,
+	.handler = exit_do_irq,
 	.kp.symbol_name = "do_IRQ",
 };
 
@@ -443,7 +457,7 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	hardirq_key.type = KEY_HARDIRQ;
 
 	s = event_transition(&do_irq_key, sizeof(do_irq_key), &hardirq_key,
-			sizeof(hardirq_key), 1);
+			sizeof(hardirq_key), 0);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_HARDIRQ, "to irq_handler_entry", 0, irq,
@@ -461,18 +475,53 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 		int ret)
 {
 	struct hardirq_key_t hardirq_key;
+	struct latency_tracker_event *s;
 
-	/*
-	 * If there is an IRQ event corresponding to this CPU in the HT,
-	 * it means that the IRQ was not related to a RT user-space process.
-	 * Otherwise it would have been removed from the softirq handler.
-	 */
 	hardirq_key.cpu = smp_processor_id();
 	hardirq_key.type = KEY_HARDIRQ;
+
+	s = latency_tracker_get_event(tracker, &hardirq_key, sizeof(hardirq_key));
+	if (!s)
+		goto end;
+	append_delta_ts(s, KEY_HARDIRQ, "to irq_handler_exit", 0, irq, NULL, 0);
+	latency_tracker_put_event(s);
+
 	latency_tracker_event_out(tracker, &hardirq_key, sizeof(hardirq_key),
 			OUT_IRQHANDLER_NO_CB);
+
+end:
+	return;
 }
 
+#ifdef CONFIG_PREEMPT
+static
+void probe_softirq_raise(void *ignore, unsigned int vec_nr)
+{
+	struct raise_softirq_key_t raise_softirq_key;
+	struct switch_key_t switch_key;
+	struct latency_tracker_event *s;
+
+	switch_key.pid = current->pid;
+	switch_key.type = KEY_SWITCH;
+
+	raise_softirq_key.cpu = smp_processor_id();
+	raise_softirq_key.vector = vec_nr;
+	raise_softirq_key.type = KEY_RAISE_SOFTIRQ;
+
+	s = event_transition(&switch_key, sizeof(switch_key),
+			&raise_softirq_key, sizeof(raise_softirq_key), 0);
+	if (!s)
+		return;
+	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0, vec_nr,
+			NULL, 0);
+	latency_tracker_put_event(s);
+
+#ifdef DEBUG
+	printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
+			vec_nr);
+#endif
+}
+#else
 static
 void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 {
@@ -500,6 +549,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			vec_nr);
 #endif
 }
+#endif /* CONFIG_PREEMPT */
 
 static
 void probe_softirq_entry(void *ignore, unsigned int vec_nr)
@@ -517,6 +567,9 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 	 * TODO: Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
 	 */
 	softirq_key.cpu = smp_processor_id();
+#ifdef CONFIG_PREEMPT
+	softirq_key.pid = current->pid;
+#endif
 	softirq_key.type = KEY_SOFTIRQ;
 
 	s = event_transition(&raise_softirq_key, sizeof(raise_softirq_key),
@@ -575,6 +628,9 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 	 * Just cleanup the softirq_entry event
 	 */
 	softirq_key.cpu = smp_processor_id();
+#ifdef CONFIG_PREEMPT
+	softirq_key.pid = current->pid;
+#endif
 	softirq_key.type = KEY_SOFTIRQ;
 	s = latency_tracker_get_event(tracker, &softirq_key, sizeof(softirq_key));
 	if (!s)
@@ -586,13 +642,35 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 }
 
 static
+void irq_waking(struct waking_key_t *waking_key)
+{
+	struct latency_tracker_event *s;
+	struct do_irq_key_t do_irq_key;
+
+	do_irq_key.cpu = smp_processor_id();
+	do_irq_key.type = KEY_DO_IRQ;
+
+	s = event_transition(&do_irq_key, sizeof(do_irq_key),
+			waking_key, sizeof(waking_key), 0);
+	if (!s)
+		return;
+	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
+			NULL, 0);
+	latency_tracker_put_event(s);
+#ifdef DEBUG
+	printk("%llu waking %d (%s)\n", trace_clock_monotonic_wrapper(),
+			p->pid, p->comm);
+#endif
+}
+
+static
 void softirq_waking(struct waking_key_t *waking_key)
 {
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *s;
 
-	/* TODO: PREEMPT_RT */
 	softirq_key.cpu = smp_processor_id();
+	softirq_key.pid = current->pid;
 	softirq_key.type = KEY_SOFTIRQ;
 
 	s = event_transition(&softirq_key, sizeof(softirq_key),
@@ -701,8 +779,7 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 		/* TODO */
 		goto end;
 	} else if (in_irq()) {
-		/* TODO */
-		goto end;
+		irq_waking(&waking_key);
 	} else if (in_serving_softirq()) {
 		softirq_waking(&waking_key);
 	} else {
