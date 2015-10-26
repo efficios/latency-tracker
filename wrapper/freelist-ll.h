@@ -159,6 +159,7 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	 * for the key.
 	 */
 	memset(e, 0, offsetof(struct latency_tracker_event, priv_data));
+	memset(e->tkey.key, 0, tracker->key_size);
 	if (e->priv_data)
 		memset(e->priv_data, 0, tracker->priv_data_size);
 	llist_add(&e->llist, &tracker->ll_events_free_list);
