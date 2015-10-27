@@ -208,30 +208,20 @@ TRACE_EVENT(
 		__field(int, pid)
 		__field(u64, delay)
 		__field(unsigned int, preempt_count)
-		__array(char, breakdown1, MAX_FILTER_STR_VAL)
-		__array(char, breakdown2, MAX_FILTER_STR_VAL)
-		__array(char, breakdown3, MAX_FILTER_STR_VAL)
-		__array(char, breakdown4, MAX_FILTER_STR_VAL)
+		__dynamic_array(char, buf, 4* MAX_FILTER_STR_VAL)
 	),
 	TP_fast_assign(
 		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 		entry->pid = pid;
 		entry->delay = delay;
 		entry->preempt_count = preempt_count;
-		memcpy(__entry->breakdown1, breakdown, MAX_FILTER_STR_VAL);
-		memcpy(__entry->breakdown2, breakdown + MAX_FILTER_STR_VAL,
-			MAX_FILTER_STR_VAL);
-		memcpy(__entry->breakdown3, breakdown + 2 * MAX_FILTER_STR_VAL,
-			MAX_FILTER_STR_VAL);
-		memcpy(__entry->breakdown4, breakdown + 3 * MAX_FILTER_STR_VAL,
-			MAX_FILTER_STR_VAL);
+		memcpy(__get_dynamic_array(buf), breakdown, 4* MAX_FILTER_STR_VAL);
 	),
 	TP_printk("comm=%s, pid=%d, delay=%llu, preempt_count=%u, "
-			"breakdown={%s%s%s%s}",
+			"breakdown={%s}",
 		__entry->comm, __entry->pid, __entry->delay,
-		__entry->preempt_count, __entry->breakdown1,
-		__entry->breakdown2, __entry->breakdown3,
-		__entry->breakdown4)
+		__entry->preempt_count, __get_str(buf)
+		)
    );
 
 #endif /* _TRACE_LATENCY_TRACKER_H */

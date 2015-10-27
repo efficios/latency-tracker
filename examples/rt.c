@@ -141,7 +141,7 @@ struct event_data {
 	unsigned int pos;
 	unsigned int in_use;
 	unsigned int preempt_count;
-	unsigned breakdown_idx;
+	unsigned int breakdown_idx;
 	u64 prev_ts;
 	char breakdown[MAX_PAYLOAD];
 } __attribute__((__packed__));
@@ -237,22 +237,22 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 
 	switch (type) {
 	case KEY_DO_IRQ:
-		snprintf(tmp, 64, "%s = %llu, ", txt, now - data->prev_ts);
+		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(), now - data->prev_ts);
 		break;
 	case KEY_HARDIRQ:
 	case KEY_RAISE_SOFTIRQ:
 	case KEY_SOFTIRQ:
 	case KEY_WAKEUP:
-		snprintf(tmp, 64, "%s(%d) = %llu, ", txt, field1,
+		snprintf(tmp, 64, "%s(%d) [%03d] = %llu, ", txt, field1, smp_processor_id(),
 				now - data->prev_ts);
 		break;
 	case KEY_SWITCH:
-		snprintf(tmp, 64, "%s(%s-%d, %d) = %llu, ", txt, field2,
-				field1, field3, now - data->prev_ts);
+		snprintf(tmp, 64, "%s(%s-%d, %d) [%03d] = %llu, ", txt, field2,
+				field1, field3, smp_processor_id(), now - data->prev_ts);
 		break;
 	case KEY_TIMER_INTERRUPT:
 	case KEY_HRTIMER:
-		snprintf(tmp, 64, "%s = %llu, ", txt, now - data->prev_ts);
+		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(), now - data->prev_ts);
 		break;
 	}
 	len = strlen(tmp);
@@ -521,7 +521,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			vec_nr);
 #endif
 }
-#else
+#else /* CONFIG_PREEMPT */
 static
 void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 {
@@ -635,6 +635,7 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 	s = latency_tracker_get_event(tracker, &softirq_key, sizeof(softirq_key));
 	if (!s)
 		return;
+	append_delta_ts(s, KEY_SOFTIRQ, "to softirq_exit", 0, vec_nr, NULL, 0);
 	orig_ts = latency_tracker_event_get_start_ts(s);
 	latency_tracker_put_event(s);
 	latency_tracker_event_out(tracker, &softirq_key, sizeof(softirq_key),
@@ -755,8 +756,7 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 	struct waking_key_t waking_key;
 	struct latency_tracker_event *s;
 
-	/* FIXME: is it the right RCU magic to make sure p stays alive ? */
-	rcu_read_lock_sched_notrace();
+	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!p)
 		goto end;
 
@@ -779,11 +779,22 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 		/* TODO */
 		goto end;
 	} else if (in_irq()) {
+		int ret;
+
+		/*
+		 * Apparently hrtimer are in irq context in PREEMPT_RT,
+		 * XXX: is it PREEMPT_RT specific ? it seems to be also
+		 * possible to have it outside of an irq context.
+		 */
+		ret = hrtimer_waking(&waking_key);
+		if (ret)
+			goto end;
 		irq_waking(&waking_key);
 	} else if (in_serving_softirq()) {
 		softirq_waking(&waking_key);
 	} else {
 		int ret;
+
 		/* hrtimer or thread waking */
 		ret = hrtimer_waking(&waking_key);
 		if (ret)
@@ -792,7 +803,7 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 	}
 
 end:
-	rcu_read_unlock_sched_notrace();
+	return;
 }
 
 static
@@ -890,8 +901,7 @@ static
 void probe_sched_switch(void *ignore, struct task_struct *prev,
 		struct task_struct *next)
 {
-	/* FIXME: is it the right RCU magic */
-	rcu_read_lock_sched_notrace();
+	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!prev || !next)
 		goto end;
 
@@ -899,7 +909,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	sched_switch_out(prev, next);
 
 end:
-	rcu_read_unlock_sched_notrace();
+	return;
 }
 
 static
@@ -910,7 +920,7 @@ int __init rt_init(void)
 	tracker = latency_tracker_create();
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 2000);
+	latency_tracker_set_startup_events(tracker, 10000);
 	latency_tracker_set_max_resize(tracker, 10000);
 	/* FIXME: makes us crash after rmmod */
 	//latency_tracker_set_timer_period(tracker, 100000000);
