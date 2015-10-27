@@ -28,11 +28,15 @@
 #ifdef CONFIG_KALLSYMS
 
 #include <linux/kallsyms.h>
+#include <linux/sched/rt.h>
 #include "kallsyms.h"
 
 static inline
 int wrapper_task_prio(struct task_struct *t)
 {
+	return t->prio - MAX_RT_PRIO;
+	/*
+	 * FIXME: need to lookup outside of the critical path
 	int (*wrapper_task_prio_sym)(struct task_struct *t);
 
 	wrapper_task_prio_sym = (void *) kallsyms_lookup_funcptr("task_prio");
@@ -41,6 +45,7 @@ int wrapper_task_prio(struct task_struct *t)
 		return -EINVAL;
 	}
 	return wrapper_task_prio_sym(t);
+	*/
 }
 
 #else
