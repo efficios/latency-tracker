@@ -62,7 +62,8 @@ MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
 static unsigned long timer_tracing = DEFAULT_TIMER_TRACING;
 module_param(timer_tracing, ulong, 0644);
-MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts and hrtimer latency");
+MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts "
+		"and hrtimer latency");
 
 static struct latency_tracker *tracker;
 
@@ -567,9 +568,7 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 	 * TODO: Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
 	 */
 	softirq_key.cpu = smp_processor_id();
-#ifdef CONFIG_PREEMPT
 	softirq_key.pid = current->pid;
-#endif
 	softirq_key.type = KEY_SOFTIRQ;
 
 	s = event_transition(&raise_softirq_key, sizeof(raise_softirq_key),
@@ -628,9 +627,7 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 	 * Just cleanup the softirq_entry event
 	 */
 	softirq_key.cpu = smp_processor_id();
-#ifdef CONFIG_PREEMPT
 	softirq_key.pid = current->pid;
-#endif
 	softirq_key.type = KEY_SOFTIRQ;
 	s = latency_tracker_get_event(tracker, &softirq_key, sizeof(softirq_key));
 	if (!s)
