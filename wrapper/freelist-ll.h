@@ -136,10 +136,26 @@ end:
 }
 
 static
+int free_event_list(struct llist_node *list)
+{
+	struct latency_tracker_event *e, *n;
+	int cnt = 0;
+
+	llist_for_each_entry_safe(e, n, list, llist) {
+		kfree(e->tkey.key);
+		if (e->priv_data)
+			kfree(e->priv_data);
+		kfree(e);
+		cnt++;
+	}
+
+	return cnt;
+}
+
+static
 int free_per_cpu_llist(struct latency_tracker *tracker)
 {
 	struct llist_head *l;
-	struct latency_tracker_event *e, *n;
 	struct llist_node *list;
 	int total_cnt = 0;
 	int cpu;
@@ -151,18 +167,13 @@ int free_per_cpu_llist(struct latency_tracker *tracker)
 		list = llist_del_all(l);
 		if (!list)
 			continue;
-		llist_for_each_entry_safe(e, n, list, llist) {
-			kfree(e->tkey.key);
-			if (e->priv_data)
-				kfree(e->priv_data);
-			kfree(e);
-			cnt++;
-		}
+		cnt = free_event_list(list);
 		printk("freed %d on cpu %d\n", cnt, cpu);
 		total_cnt += cnt;
 	}
 	put_online_cpus();
 
+	free_percpu(tracker->ll_events_per_cpu_free_list);
 	return total_cnt;
 }
 
@@ -174,18 +185,9 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 
 	list = llist_del_all(&tracker->ll_events_free_list);
 	if (list) {
-		struct latency_tracker_event *e, *n;
-
-		llist_for_each_entry_safe(e, n, list, llist) {
-			kfree(e->tkey.key);
-			if (e->priv_data)
-				kfree(e->priv_data);
-			kfree(e);
-			cnt++;
-		}
+		cnt = free_event_list(list);
 	}
 	cnt += free_per_cpu_llist(tracker);
-	free_percpu(tracker->ll_events_per_cpu_free_list);
 	printk("latency_tracker: LL freed %d events (%lu bytes)\n", cnt,
 			cnt * (sizeof(struct latency_tracker_event) +
 				tracker->key_size + tracker->priv_data_size));
