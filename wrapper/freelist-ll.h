@@ -23,6 +23,33 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <linux/percpu.h>
+#include <linux/cpu.h>
+#include "percpu-defs.h"
+
+static
+int init_per_cpu_llist(struct latency_tracker *tracker)
+{
+	struct llist_head *l;
+	int cpu;
+
+	tracker->ll_events_per_cpu_free_list = alloc_percpu(struct llist_head);
+	if (!tracker->ll_events_per_cpu_free_list)
+		goto error;
+
+	get_online_cpus();
+	for_each_online_cpu(cpu) {
+		l = per_cpu_ptr(tracker->ll_events_per_cpu_free_list, cpu);
+		init_llist_head(l);
+	}
+	put_online_cpus();
+
+	return 0;
+
+error:
+	return -ENOMEM;
+}
+
 /*
  * Returns the number of event still active at destruction time.
  */
@@ -31,6 +58,9 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 {
 	int i;
 	struct latency_tracker_event *e;
+
+	if (init_per_cpu_llist(tracker) < 0)
+		goto error;
 
 	init_llist_head(&tracker->ll_events_free_list);
 	for (i = 0; i < max_events; i++) {
@@ -123,9 +153,25 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 		kfree(e);
 		cnt++;
 	}
+	free_percpu(tracker->ll_events_per_cpu_free_list);
 	printk("latency_tracker: LL freed %d events (%lu bytes)\n", cnt,
 			cnt * (sizeof(struct latency_tracker_event) +
 				tracker->key_size + tracker->priv_data_size));
+}
+
+/*
+ * Try to get an entry from the local CPU pool, if empty, use
+ * the global pool.
+ */
+struct llist_node *per_cpu_get(struct latency_tracker *tracker)
+{
+	struct llist_node *node;
+
+	node = llist_del_first(lttng_this_cpu_ptr(
+				tracker->ll_events_per_cpu_free_list));
+	if (node)
+		return node;
+	return llist_del_first(&tracker->ll_events_free_list);
 }
 
 static inline
@@ -136,7 +182,7 @@ struct latency_tracker_event *wrapper_freelist_get_event(
 	struct llist_node *node;
 	
 	rcu_read_lock_sched_notrace();
-	node = llist_del_first(&tracker->ll_events_free_list);
+	node = per_cpu_get(tracker);
 	rcu_read_unlock_sched_notrace();
 	if (!node)
 		goto error;
@@ -162,7 +208,8 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	memset(e->tkey.key, 0, tracker->key_size);
 	if (e->priv_data)
 		memset(e->priv_data, 0, tracker->priv_data_size);
-	llist_add(&e->llist, &tracker->ll_events_free_list);
+	llist_add(&e->llist, lttng_this_cpu_ptr(
+				tracker->ll_events_per_cpu_free_list));
 }
 
 static
