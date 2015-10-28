@@ -169,20 +169,20 @@ int free_per_cpu_llist(struct latency_tracker *tracker)
 static inline
 void wrapper_freelist_destroy(struct latency_tracker *tracker)
 {
-	struct latency_tracker_event *e, *n;
 	struct llist_node *list;
 	int cnt = 0;
 
 	list = llist_del_all(&tracker->ll_events_free_list);
-	if (!list) {
-		return;
-	}
-	llist_for_each_entry_safe(e, n, list, llist) {
-		kfree(e->tkey.key);
-		if (e->priv_data)
-			kfree(e->priv_data);
-		kfree(e);
-		cnt++;
+	if (list) {
+		struct latency_tracker_event *e, *n;
+
+		llist_for_each_entry_safe(e, n, list, llist) {
+			kfree(e->tkey.key);
+			if (e->priv_data)
+				kfree(e->priv_data);
+			kfree(e);
+			cnt++;
+		}
 	}
 	cnt += free_per_cpu_llist(tracker);
 	free_percpu(tracker->ll_events_per_cpu_free_list);
