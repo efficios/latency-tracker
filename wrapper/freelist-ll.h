@@ -33,13 +33,13 @@ int init_per_cpu_llist(struct latency_tracker *tracker)
 	struct llist_head *l;
 	int cpu;
 
-	tracker->ll_events_per_cpu_free_list = alloc_percpu(struct llist_head);
-	if (!tracker->ll_events_per_cpu_free_list)
+	tracker->per_cpu_ll = alloc_percpu(struct per_cpu_ll);
+	if (!tracker->per_cpu_ll)
 		goto error;
 
 	get_online_cpus();
 	for_each_online_cpu(cpu) {
-		l = per_cpu_ptr(tracker->ll_events_per_cpu_free_list, cpu);
+		l = per_cpu_ptr(&tracker->per_cpu_ll->llist, cpu);
 		init_llist_head(l);
 	}
 	put_online_cpus();
@@ -155,25 +155,29 @@ int free_event_list(struct llist_node *list)
 static
 int free_per_cpu_llist(struct latency_tracker *tracker)
 {
-	struct llist_head *l;
+	struct llist_head *list_head;
 	struct llist_node *list;
+	struct per_cpu_ll *ll;
+
 	int total_cnt = 0;
 	int cpu;
 
 	get_online_cpus();
 	for_each_online_cpu(cpu) {
 		int cnt = 0;
-		l = per_cpu_ptr(tracker->ll_events_per_cpu_free_list, cpu);
-		list = llist_del_all(l);
+
+		ll = per_cpu_ptr(tracker->per_cpu_ll, cpu);
+		list_head = &ll->llist;
+		list = llist_del_all(list_head);
 		if (!list)
 			continue;
 		cnt = free_event_list(list);
-		printk("freed %d on cpu %d\n", cnt, cpu);
+		printk("freed %d on cpu %d (%d)\n", cnt, cpu, ll->current_count);
 		total_cnt += cnt;
 	}
 	put_online_cpus();
 
-	free_percpu(tracker->ll_events_per_cpu_free_list);
+	free_percpu(tracker->per_cpu_ll);
 	return total_cnt;
 }
 
@@ -200,11 +204,14 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 struct llist_node *per_cpu_get(struct latency_tracker *tracker)
 {
 	struct llist_node *node;
+	struct per_cpu_ll *ll;
 
-	node = llist_del_first(lttng_this_cpu_ptr(
-				tracker->ll_events_per_cpu_free_list));
-	if (node)
+	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll);
+	node = llist_del_first(&ll->llist);
+	if (node) {
+		ll->current_count--;
 		return node;
+	}
 	return llist_del_first(&tracker->ll_events_free_list);
 }
 
@@ -233,6 +240,8 @@ static
 void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 		struct latency_tracker_event *e)
 {
+	struct per_cpu_ll *ll;
+
 	/*
 	 * memset the event before putting it back inside the
 	 * list. Make sure not to override the allocated pointer
@@ -242,8 +251,9 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	memset(e->tkey.key, 0, tracker->key_size);
 	if (e->priv_data)
 		memset(e->priv_data, 0, tracker->priv_data_size);
-	llist_add(&e->llist, lttng_this_cpu_ptr(
-				tracker->ll_events_per_cpu_free_list));
+	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll);
+	ll->current_count++;
+	llist_add(&e->llist, &ll->llist);
 }
 
 static

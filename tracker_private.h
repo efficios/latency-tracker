@@ -11,6 +11,13 @@
 #include "rculfhash-internal.h"
 #include "urcu/wfcqueue.h"
 
+#ifndef OLDFREELIST
+struct per_cpu_ll {
+	int current_count;
+	struct llist_head llist;
+};
+#endif
+
 struct latency_tracker {
 	/*  basic kernel HT */
         struct hlist_head ht[DEFAULT_LATENCY_TABLE_SIZE];
@@ -51,7 +58,8 @@ struct latency_tracker {
 #ifdef OLDFREELIST
 	struct list_head events_free_list;
 #else
-	struct llist_head __percpu *ll_events_per_cpu_free_list;
+	int per_cpu_alloc;
+	struct per_cpu_ll __percpu *per_cpu_ll;
 	struct llist_head ll_events_free_list;
 #endif
 	/*
