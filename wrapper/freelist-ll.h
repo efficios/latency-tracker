@@ -112,13 +112,18 @@ void wrapper_resize_work(struct latency_tracker *tracker)
 		if (!e)
 			goto error;
 		e->tkey.key = kzalloc(tracker->key_size, GFP_KERNEL);
-		if (!e->tkey.key)
+		if (!e->tkey.key) {
+			kfree(e);
 			goto error;
+		}
 		if (tracker->priv_data_size) {
 			e->priv_data = kzalloc(tracker->priv_data_size,
 					GFP_KERNEL);
-			if (!e->priv_data)
+			if (!e->priv_data) {
+				kfree(e->tkey.key);
+				kfree(e);
 				goto error;
+			}
 		}
 		if (i == max_events / 2)
 			tracker->resize_event = e;
