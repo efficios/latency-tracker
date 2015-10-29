@@ -59,6 +59,7 @@ struct latency_tracker {
 	struct list_head events_free_list;
 #else
 	int per_cpu_alloc;
+	int nr_cpus;
 	struct per_cpu_ll __percpu *per_cpu_ll;
 	struct llist_head ll_events_free_list;
 #endif

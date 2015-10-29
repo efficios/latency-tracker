@@ -25,8 +25,10 @@
 
 #include <linux/percpu.h>
 #include <linux/cpu.h>
+#include <linux/smp.h>
 #include "percpu-defs.h"
 
+/* TODO: CPU hotplug */
 static
 int init_per_cpu_llist(struct latency_tracker *tracker)
 {
@@ -41,6 +43,7 @@ int init_per_cpu_llist(struct latency_tracker *tracker)
 	for_each_online_cpu(cpu) {
 		l = per_cpu_ptr(&tracker->per_cpu_ll->llist, cpu);
 		init_llist_head(l);
+		tracker->nr_cpus++;
 	}
 	put_online_cpus();
 
@@ -82,6 +85,7 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 		llist_add(&e->llist, &tracker->ll_events_free_list);
 	}
 	tracker->free_list_nelems = max_events;
+	tracker->per_cpu_alloc = max_events / tracker->nr_cpus;
 	wrapper_vmalloc_sync_all();
 
 	return 0;
@@ -172,7 +176,8 @@ int free_per_cpu_llist(struct latency_tracker *tracker)
 		if (!list)
 			continue;
 		cnt = free_event_list(list);
-		printk("freed %d on cpu %d (%d)\n", cnt, cpu, ll->current_count);
+		printk("freed %d on cpu %d (%d)\n", cnt, cpu,
+				ll->current_count);
 		total_cnt += cnt;
 	}
 	put_online_cpus();
@@ -252,8 +257,23 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	if (e->priv_data)
 		memset(e->priv_data, 0, tracker->priv_data_size);
 	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll);
-	ll->current_count++;
 	llist_add(&e->llist, &ll->llist);
+	ll->current_count++;
+	/* put back events in the global list if we have too much */
+	if (ll->current_count > 2*tracker->per_cpu_alloc) {
+		struct llist_node *node;
+		int i;
+
+		for (i = 0; i < tracker->per_cpu_alloc; i++) {
+			node = llist_del_first(&ll->llist);
+			if (!node) {
+				BUG_ON(1);
+				return;
+			}
+			llist_add(node, &tracker->ll_events_free_list);
+			ll->current_count--;
+		}
+	}
 }
 
 static
