@@ -40,7 +40,6 @@ int init_per_cpu_llist(struct latency_tracker *tracker)
 		goto error;
 
 	for_each_possible_cpu(cpu) {
-		printk("LA %d\n", cpu);
 		l = per_cpu_ptr(&tracker->per_cpu_ll->llist, cpu);
 		init_llist_head(l);
 		tracker->nr_cpus++;
