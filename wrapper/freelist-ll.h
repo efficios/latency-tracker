@@ -39,13 +39,12 @@ int init_per_cpu_llist(struct latency_tracker *tracker)
 	if (!tracker->per_cpu_ll)
 		goto error;
 
-	get_online_cpus();
-	for_each_online_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
+		printk("LA %d\n", cpu);
 		l = per_cpu_ptr(&tracker->per_cpu_ll->llist, cpu);
 		init_llist_head(l);
 		tracker->nr_cpus++;
 	}
-	put_online_cpus();
 
 	return 0;
 
@@ -166,8 +165,7 @@ int free_per_cpu_llist(struct latency_tracker *tracker)
 	int total_cnt = 0;
 	int cpu;
 
-	get_online_cpus();
-	for_each_online_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		int cnt = 0;
 
 		ll = per_cpu_ptr(tracker->per_cpu_ll, cpu);
@@ -180,7 +178,6 @@ int free_per_cpu_llist(struct latency_tracker *tracker)
 				ll->current_count);
 		total_cnt += cnt;
 	}
-	put_online_cpus();
 
 	free_percpu(tracker->per_cpu_ll);
 	return total_cnt;
