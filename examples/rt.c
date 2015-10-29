@@ -389,13 +389,13 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	}
 	memcpy(data_out, data_in, sizeof(struct event_data));
 
-	latency_tracker_put_event(event_in);
 end_del:
 	if (del)
 		latency_tracker_event_out(tracker, key_in, key_in_len,
 				OUT_IRQHANDLER_NO_CB);
 
 end:
+	latency_tracker_put_event(event_in);
 	return event_out;
 }
 
