@@ -28,7 +28,6 @@
 #include <linux/smp.h>
 #include "percpu-defs.h"
 
-/* TODO: CPU hotplug */
 static
 int init_per_cpu_llist(struct latency_tracker *tracker)
 {
