@@ -68,13 +68,18 @@ int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 		if (!e)
 			goto error;
 		e->tkey.key = kzalloc(tracker->key_size, GFP_KERNEL);
-		if (!e->tkey.key)
+		if (!e->tkey.key) {
+			kfree(e);
 			goto error;
+		}
 		if (tracker->priv_data_size) {
 			e->priv_data = kzalloc(tracker->priv_data_size,
 					GFP_KERNEL);
-			if (!e->priv_data)
+			if (!e->priv_data) {
+				kfree(e->tkey.key);
+				kfree(e);
 				goto error;
+			}
 		}
 		if (tracker->max_resize && (i == max_events/2)) {
 			tracker->resize_event = e;
