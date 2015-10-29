@@ -28,6 +28,10 @@
 #include <linux/smp.h>
 #include "percpu-defs.h"
 
+#define FREELIST_MOVE_BATCH	16
+#define FREELIST_PERCPU_MIN	1
+#define FREELIST_PERCPU_MAX	32
+
 static
 int init_per_cpu_llist(struct latency_tracker *tracker)
 {
@@ -207,6 +211,25 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 				tracker->key_size + tracker->priv_data_size));
 }
 
+static inline
+unsigned int free_list_move_n(struct llist_head *dest_head,
+		struct llist_head *src_head,
+		unsigned int nr)
+{
+	unsigned int count = 0;
+
+	while (count < nr) {
+		struct llist_node *node;
+
+		node = llist_del_first(src_head);
+		if (!node)
+			break;
+		llist_add(node, dest_head);
+		count++;
+	}
+	return count;
+}
+
 /*
  * Try to get an entry from the local CPU pool, if empty, use
  * the global pool.
@@ -218,8 +241,14 @@ struct llist_node *per_cpu_get(struct latency_tracker *tracker)
 
 	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll);
 	node = llist_del_first(&ll->llist);
+
 	if (node) {
 		ll->current_count--;
+		if (ll->current_count < FREELIST_PERCPU_MIN) {
+			ll->current_count += free_list_move_n(&ll->llist,
+				&tracker->ll_events_free_list,
+				FREELIST_MOVE_BATCH);
+		}
 		return node;
 	}
 	return llist_del_first(&tracker->ll_events_free_list);
@@ -265,19 +294,11 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	llist_add(&e->llist, &ll->llist);
 	ll->current_count++;
 	/* put back events in the global list if we have too much */
-	if (ll->current_count > 2*tracker->per_cpu_alloc) {
-		struct llist_node *node;
-		int i;
-
-		for (i = 0; i < tracker->per_cpu_alloc; i++) {
-			node = llist_del_first(&ll->llist);
-			if (!node) {
-				BUG_ON(1);
-				return;
-			}
-			llist_add(node, &tracker->ll_events_free_list);
-			ll->current_count--;
-		}
+	if (ll->current_count > FREELIST_PERCPU_MAX) {
+		ll->current_count -=
+			free_list_move_n(&tracker->ll_events_free_list,
+				&ll->llist,
+				FREELIST_MOVE_BATCH);
 	}
 }
 
