@@ -795,17 +795,11 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 		/* TODO */
 		goto end;
 	} else if (in_irq()) {
-#ifdef CONFIG_PREEMPT
-		/*
-		 * Apparently hrtimer can run either in irq context or thread
-		 * context with PREEMPT_RT.
-		 */
 		int ret;
 
 		ret = hrtimer_waking(&waking_key);
 		if (ret)
 			goto end;
-#endif
 		irq_waking(&waking_key);
 	} else if (in_serving_softirq()) {
 		softirq_waking(&waking_key);
