@@ -617,6 +617,25 @@ void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
 }
 
 static
+void probe_hrtimer_expire_exit(void *ignore, struct timer_list *timer)
+{
+	struct hrtimer_key_t hrtimer_key;
+
+	hrtimer_key.cpu = smp_processor_id();
+	hrtimer_key.type = KEY_HRTIMER;
+
+	/*
+	 * Insert the hrtimer_expire_entry event.
+	 * TODO: Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
+	 */
+	hrtimer_key.cpu = smp_processor_id();
+	hrtimer_key.type = KEY_HRTIMER;
+
+	latency_tracker_event_out(tracker, &hrtimer_key, sizeof(hrtimer_key),
+			OUT_IRQHANDLER_NO_CB);
+}
+
+static
 void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 {
 	struct softirq_key_t softirq_key;
@@ -941,6 +960,9 @@ int __init rt_init(void)
 		ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
 				probe_hrtimer_expire_entry, NULL);
 		WARN_ON(ret);
+		ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_exit",
+				probe_hrtimer_expire_exit, NULL);
+		WARN_ON(ret);
 	}
 	ret = lttng_wrapper_tracepoint_probe_register("irq_handler_entry",
 			probe_irq_handler_entry, NULL);
@@ -994,6 +1016,8 @@ void __exit rt_exit(void)
 				probe_local_timer_exit, NULL);
 		lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
 				probe_hrtimer_expire_entry, NULL);
+		lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_exit",
+				probe_hrtimer_expire_exit, NULL);
 	}
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
