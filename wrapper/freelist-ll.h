@@ -172,6 +172,8 @@ void wrapper_resize_work(struct latency_tracker *tracker)
 		llist_add(&e->llist, &tracker->ll_events_free_list);
 	}
 	tracker->free_list_nelems += max_events;
+	tracker->per_cpu_alloc = (tracker->free_list_nelems -
+			(tracker->nr_cpus * FREELIST_PERCPU_BATCH)) / tracker->nr_cpus;
 	wrapper_vmalloc_sync_all();
 	goto end;
 
