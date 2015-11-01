@@ -928,7 +928,7 @@ int __init rt_init(void)
 {
 	int ret;
 
-	tracker = latency_tracker_create();
+	tracker = latency_tracker_create("rt");
 	if (!tracker)
 		goto error;
 	latency_tracker_set_startup_events(tracker, 10000);

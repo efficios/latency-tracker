@@ -62,9 +62,10 @@ enum latency_tracker_cb_flag {
  * The default parameters are enough to start (FIXME: document the
  * defaultshere), but we can override with the latency_tracker_set_* functions.
  * When all the settings are done, call latency_tracker_enable to start the
- * tracking.
+ * tracking. The name needs to be unique, it is used to create the debugfs
+ * directory, it is copied (max: 32 chars).
  */
-struct latency_tracker *latency_tracker_create(void);
+struct latency_tracker *latency_tracker_create(const char *name);
 
 /*
  * Destroy and free a tracker and all the current events in the HT.
@@ -107,10 +108,12 @@ int latency_tracker_set_timer_period(struct latency_tracker *tracker, uint64_t
  * nanoseconds default: 0 */
 int latency_tracker_set_timeout(struct latency_tracker *tracker, uint64_t
 		timeout);
+uint64_t latency_tracker_get_timeout(struct latency_tracker *tracker);
 /*
  * nanoseconds default: DEFAULT_THRESHOLD */
 int latency_tracker_set_threshold(struct latency_tracker *tracker, uint64_t
 		threshold);
+uint64_t latency_tracker_get_threshold(struct latency_tracker *tracker);
 /* default: NULL */
 int latency_tracker_set_callback(struct latency_tracker *tracker, void
 		(*cb)(struct latency_tracker_event_ctx *ctx));

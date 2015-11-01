@@ -100,6 +100,14 @@ struct latency_tracker {
 	 * Function pointer to the callback
 	 */
 	void (*cb)(struct latency_tracker_event_ctx *ctx);
+	/*
+	 * name of the tracker (for debugfs)
+	 */
+	char tracker_name[32];
+	/*
+	 * debugfs control dir
+	 */
+	struct dentry *debugfs_dir;
 
 	/* GC and resize work */
         struct timer_list timer;

@@ -174,7 +174,7 @@ int __init wakeup_latency_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create();
+	tracker = latency_tracker_create("wakeup");
 	if (!tracker)
 		goto error;
 	latency_tracker_set_timer_period(tracker, 100000000);

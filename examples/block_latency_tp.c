@@ -269,7 +269,7 @@ int __init block_latency_tp_init(void)
 	/* limit to 1 evt/sec */
 	block_priv->ns_rate_limit = 1000000000;
 
-	tracker = latency_tracker_create();
+	tracker = latency_tracker_create("block_latency");
 	if (!tracker)
 		goto error;
 	latency_tracker_set_startup_events(tracker, 100);

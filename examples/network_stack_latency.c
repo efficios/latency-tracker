@@ -222,7 +222,7 @@ int __init net_latency_tp_init(void)
 	int ret;
 	void (*kfree_skbmem_sym)(struct sk_buff *skb);
 
-	tracker = latency_tracker_create();
+	tracker = latency_tracker_create("net");
 	if (!tracker)
 		goto error;
 	latency_tracker_set_startup_events(tracker, 100);

@@ -321,7 +321,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	struct sched_key_t sched_key;
 	struct latency_tracker_event *s;
 	char stacktxt[MAX_STACK_TXT];
-	u64 now, delta;
+	u64 now, delta, threshold;
 
 	if (!task)
 		goto end;
@@ -333,7 +333,8 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 		goto end;
 	now = trace_clock_read64();
 	delta = now - latency_tracker_event_get_start_ts(s);
-	if (delta > ((usec_threshold * 1000)/2)) {
+	threshold = latency_tracker_get_threshold(tracker);
+	if (delta > ((threshold * 1000)/2)) {
 		get_stack_txt(stacktxt, task);
 		trace_latency_tracker_syscall_stack(
 				task->comm, task->pid, latency_tracker_event_get_start_ts(s),
@@ -359,7 +360,7 @@ int __init syscalls_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create();
+	tracker = latency_tracker_create("syscalls");
 	if (!tracker)
 		goto error;
 	latency_tracker_set_timer_period(tracker, 100000000);

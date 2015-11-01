@@ -64,11 +64,11 @@ static pid_t current_pid[NR_CPUS];
  * arguments to insmod on all architectures.
  */
 static unsigned long usec_threshold = DEFAULT_USEC_OFFCPU_THRESH;
-module_param(usec_threshold, ulong, 0644);
+module_param(usec_threshold, ulong, 0444);
 MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 
 static unsigned long usec_timeout = DEFAULT_USEC_OFFCPU_TIMEOUT;
-module_param(usec_timeout, ulong, 0644);
+module_param(usec_timeout, ulong, 0444);
 MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
 struct schedkey {
@@ -293,7 +293,7 @@ int __init offcpu_init(void)
 		goto end;
 	}
 
-	tracker = latency_tracker_create();
+	tracker = latency_tracker_create("offcpu");
 	if (!tracker)
 		goto error;
 	latency_tracker_set_startup_events(tracker, 2000);

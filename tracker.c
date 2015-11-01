@@ -29,12 +29,14 @@
 #include <linux/jhash.h>
 #include <linux/module.h>
 #include <linux/workqueue.h>
+#include <linux/debugfs.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
 #include "wrapper/tracepoint.h"
 #include "wrapper/ht.h"
 #include "wrapper/freelist.h"
 #include "tracker_private.h"
+#include "tracker_debugfs.h"
 #define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
 
@@ -358,6 +360,19 @@ int latency_tracker_set_threshold(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_threshold);
 
+uint64_t latency_tracker_get_timeout(struct latency_tracker *tracker)
+{
+	return tracker->timeout;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_get_timeout);
+
+
+uint64_t latency_tracker_get_threshold(struct latency_tracker *tracker)
+{
+	return tracker->threshold;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_get_threshold);
+
 int latency_tracker_set_callback(struct latency_tracker *tracker,
 		void (*cb)(struct latency_tracker_event_ctx *ctx))
 {
@@ -388,7 +403,25 @@ int latency_tracker_set_priv_data_size(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_priv_data_size);
 
-struct latency_tracker *latency_tracker_create(void)
+int create_debugsfs_entries(struct latency_tracker *tracker)
+{
+	struct dentry *dir;
+
+	dir = debugfs_create_u64("threshold", S_IRUSR|S_IWUSR,
+			tracker->debugfs_dir, &tracker->threshold);
+	if (!dir)
+		goto error;
+	dir = debugfs_create_u64("timeout", S_IRUSR|S_IWUSR,
+			tracker->debugfs_dir, &tracker->timeout);
+	if (!dir)
+		goto error;
+
+	return 0;
+error:
+	return -1;
+}
+
+struct latency_tracker *latency_tracker_create(const char *name)
 {
 	struct latency_tracker *tracker;
 	int ret;
@@ -403,6 +436,18 @@ struct latency_tracker *latency_tracker_create(void)
 	tracker->key_size = sizeof(long);
 	tracker->free_list_nelems = DEFAULT_STARTUP_ALLOC_EVENTS;
 	tracker->threshold = DEFAULT_THRESHOLD;
+	if (!name)
+		goto error_free;
+	strncpy(tracker->tracker_name, name, 32);
+	tracker->debugfs_dir = latency_tracker_debugfs_add_tracker(
+			tracker->tracker_name);
+	if (!tracker->debugfs_dir) {
+		printk("latency_tracker: debugfs creation error\n");
+		goto error_free;
+	}
+	ret = create_debugsfs_entries(tracker);
+	if (ret != 0)
+		goto error_debugfs;
 	init_timer(&tracker->timer);
 	spin_lock_init(&tracker->lock);
 	wrapper_ht_init(tracker);
@@ -413,9 +458,11 @@ struct latency_tracker *latency_tracker_create(void)
 
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
-		goto error_free;
+		goto error_debugfs;
 	goto end;
 
+error_debugfs:
+	latency_tracker_debugfs_remove_tracker(tracker->debugfs_dir);
 error_free:
 	kfree(tracker);
 error:
@@ -467,6 +514,8 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 
 	if (tracker->timer_period)
 		latency_tracker_handle_timeouts(tracker, 1);
+
+	latency_tracker_debugfs_remove_tracker(tracker->debugfs_dir);
 	/*
 	 * Wait for all call_rcu_sched issued within wrapper_ht_clear to have
 	 * completed.
@@ -750,7 +799,7 @@ int test_tracker(void)
 	int ret, i;
 	struct latency_tracker *tracker;
 
-	tracker = latency_tracker_create();
+	tracker = latency_tracker_create("test");
 	if (!tracker)
 		goto error;
 	ret = latency_tracker_set_startup_events(tracker, 300);
@@ -807,18 +856,23 @@ int __init latency_tracker_init(void)
 {
 	int ret;
 
+	ret = latency_tracker_debugfs_setup();
+	if (ret < 0)
+		goto end;
 	ret = test_tracker();
 
 	ret = lttng_tracepoint_init();
 	if (ret)
 		return ret;
 
+end:
 	return ret;
 }
 
 static
 void __exit latency_tracker_exit(void)
 {
+	latency_tracker_debugfs_cleanup();
 	lttng_tracepoint_exit();
 }
 
