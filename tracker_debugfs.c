@@ -18,6 +18,8 @@
 
 #include <linux/debugfs.h>
 #include "tracker_debugfs.h"
+#include "latency_tracker.h"
+#include "tracker_private.h"
 
 #define DEBUGFSNAME "latency"
 
@@ -35,20 +37,75 @@ error:
 	return -1;
 }
 
-struct dentry *latency_tracker_debugfs_add_tracker(
-		const char *name)
-{
-	return debugfs_create_dir(name, debugfs_root);
-}
-
-void latency_tracker_debugfs_remove_tracker(struct dentry *dir)
-{
-	if (!dir)
-		return;
-	debugfs_remove_recursive(dir);
-}
-
 void latency_tracker_debugfs_cleanup(void)
 {
 	debugfs_remove_recursive(debugfs_root);
+}
+
+int setup_default_entries(struct latency_tracker *tracker)
+{
+	struct dentry *dir;
+
+	dir = debugfs_create_u64("threshold", S_IRUSR|S_IWUSR,
+			tracker->debugfs_dir, &tracker->threshold);
+	if (!dir)
+		goto error;
+	dir = debugfs_create_u64("timeout", S_IRUSR|S_IWUSR,
+			tracker->debugfs_dir, &tracker->timeout);
+	if (!dir)
+		goto error;
+
+	return 0;
+error:
+	return -1;
+}
+
+
+int latency_tracker_debugfs_add_tracker(
+		struct latency_tracker *tracker)
+{
+	struct dentry *dir;
+	int ret;
+
+	dir = debugfs_create_dir(tracker->tracker_name, debugfs_root);
+	if (!dir)
+		goto error;
+	tracker->debugfs_dir = dir;
+
+	ret = setup_default_entries(tracker);
+	if (ret != 0)
+		goto error_cleanup;
+
+	return 0;
+
+error_cleanup:
+	latency_tracker_debugfs_remove_tracker(tracker);
+
+error:
+	return -1;
+}
+
+void latency_tracker_debugfs_remove_tracker(struct latency_tracker *tracker)
+{
+	if (!tracker->debugfs_dir)
+		return;
+	debugfs_remove_recursive(tracker->debugfs_dir);
+}
+
+struct dentry *latency_tracker_debugfs_add_subfolder(
+		struct latency_tracker *tracker, const char *name)
+{
+	struct dentry *dir;
+
+	if (!tracker->debugfs_dir)
+		goto error;
+
+	dir = debugfs_create_dir(name, tracker->debugfs_dir);
+	if (!dir)
+		goto error;
+
+	return dir;
+
+error:
+	return NULL;
 }

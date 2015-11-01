@@ -33,7 +33,7 @@ obj-m += latency_tracker_network_stack.o
 latency_tracker_critical_timing-objs := examples/critical_timing.o examples/critical_timing_proc.o wrapper/trace-clock.o
 obj-m += latency_tracker_critical_timing.o
 
-latency_tracker_rt-objs := examples/rt.o wrapper/trace-clock.o
+latency_tracker_rt-objs := examples/rt.o wrapper/trace-clock.o tracker_debugfs.o
 obj-m += latency_tracker_rt.o
 
 

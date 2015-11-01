@@ -7,9 +7,9 @@
 
 #include <linux/workqueue.h>
 
-#include "wrapper/ht.h"
-#include "rculfhash-internal.h"
-#include "urcu/wfcqueue.h"
+//#include "wrapper/ht.h"
+//#include "rculfhash-internal.h"
+//#include "urcu/wfcqueue.h"
 
 #ifndef OLDFREELIST
 struct per_cpu_ll {
@@ -206,10 +206,8 @@ struct latency_tracker_event {
 };
 
 #if defined(OLDFREELIST)
-static
 void latency_tracker_event_destroy(struct kref *kref);
 #endif
-static
 void __latency_tracker_event_destroy(struct kref *kref);
 
 #endif /* _TRACKER_PRIVATE_H */

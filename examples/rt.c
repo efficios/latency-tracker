@@ -28,6 +28,7 @@
 #include <linux/kprobes.h>
 #include <asm/stacktrace.h>
 #include "../latency_tracker.h"
+#include "../tracker_debugfs.h"
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/task_prio.h"
@@ -66,6 +67,7 @@ MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts "
 		"and hrtimer latency");
 
 static struct latency_tracker *tracker;
+static struct dentry *debugfs_dir;
 
 static int cnt = 0;
 static int failed_event_in = 0;
@@ -924,6 +926,20 @@ end:
 }
 
 static
+int setup_debugfs_extras(void)
+{
+	debugfs_dir = latency_tracker_debugfs_add_subfolder(tracker,
+			"filters");
+	if (!debugfs_dir)
+		goto error;
+
+	return 0;
+
+error:
+	return -1;
+}
+
+static
 int __init rt_init(void)
 {
 	int ret;
@@ -940,6 +956,10 @@ int __init rt_init(void)
 	latency_tracker_set_callback(tracker, rt_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 	latency_tracker_set_priv_data_size(tracker, sizeof(struct event_data));
+	ret = setup_debugfs_extras();
+	if (ret != 0)
+		goto error;
+
 	ret = latency_tracker_enable(tracker);
 	if (ret)
 		goto error;

@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "latency_tracker.h"
+
 /*
  * debugfs structure:
  * root: /sys/kernel/debug/latency
@@ -28,8 +30,13 @@
 int latency_tracker_debugfs_setup(void);
 void latency_tracker_debugfs_cleanup(void);
 
-struct dentry *latency_tracker_debugfs_add_tracker(const char *name);
-void latency_tracker_debugfs_remove_tracker(struct dentry *dir);
-
+int latency_tracker_debugfs_add_tracker(
+		struct latency_tracker *tracker);
+int latency_tracker_debugfs_default_entries(struct latency_tracker *tracker);
+struct dentry *latency_tracker_debugfs_add_subfolder(
+		struct latency_tracker *tracker,
+		const char *name);
+void latency_tracker_debugfs_remove_tracker(struct latency_tracker
+		*tracker);
 
 #endif /* LATENCY_DEBUGFS_H */

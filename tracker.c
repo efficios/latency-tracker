@@ -29,7 +29,6 @@
 #include <linux/jhash.h>
 #include <linux/module.h>
 #include <linux/workqueue.h>
-#include <linux/debugfs.h>
 #include "latency_tracker.h"
 #include "wrapper/jiffies.h"
 #include "wrapper/tracepoint.h"
@@ -140,7 +139,6 @@ void tracker_call_rcu_workqueue(struct work_struct *work)
 /*
  * Must be called with proper locking.
  */
-static
 void __latency_tracker_event_destroy(struct kref *kref)
 {
 	struct latency_tracker *tracker;
@@ -152,7 +150,6 @@ void __latency_tracker_event_destroy(struct kref *kref)
 }
 
 #if defined(OLDFREELIST)
-static
 void latency_tracker_event_destroy(struct kref *kref)
 {
 	unsigned long flags;
@@ -403,24 +400,6 @@ int latency_tracker_set_priv_data_size(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_priv_data_size);
 
-int create_debugsfs_entries(struct latency_tracker *tracker)
-{
-	struct dentry *dir;
-
-	dir = debugfs_create_u64("threshold", S_IRUSR|S_IWUSR,
-			tracker->debugfs_dir, &tracker->threshold);
-	if (!dir)
-		goto error;
-	dir = debugfs_create_u64("timeout", S_IRUSR|S_IWUSR,
-			tracker->debugfs_dir, &tracker->timeout);
-	if (!dir)
-		goto error;
-
-	return 0;
-error:
-	return -1;
-}
-
 struct latency_tracker *latency_tracker_create(const char *name)
 {
 	struct latency_tracker *tracker;
@@ -439,15 +418,11 @@ struct latency_tracker *latency_tracker_create(const char *name)
 	if (!name)
 		goto error_free;
 	strncpy(tracker->tracker_name, name, 32);
-	tracker->debugfs_dir = latency_tracker_debugfs_add_tracker(
-			tracker->tracker_name);
-	if (!tracker->debugfs_dir) {
+	ret = latency_tracker_debugfs_add_tracker(tracker);
+	if (ret != 0) {
 		printk("latency_tracker: debugfs creation error\n");
 		goto error_free;
 	}
-	ret = create_debugsfs_entries(tracker);
-	if (ret != 0)
-		goto error_debugfs;
 	init_timer(&tracker->timer);
 	spin_lock_init(&tracker->lock);
 	wrapper_ht_init(tracker);
@@ -462,7 +437,7 @@ struct latency_tracker *latency_tracker_create(const char *name)
 	goto end;
 
 error_debugfs:
-	latency_tracker_debugfs_remove_tracker(tracker->debugfs_dir);
+	latency_tracker_debugfs_remove_tracker(tracker);
 error_free:
 	kfree(tracker);
 error:
@@ -515,7 +490,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	if (tracker->timer_period)
 		latency_tracker_handle_timeouts(tracker, 1);
 
-	latency_tracker_debugfs_remove_tracker(tracker->debugfs_dir);
+	latency_tracker_debugfs_remove_tracker(tracker);
 	/*
 	 * Wait for all call_rcu_sched issued within wrapper_ht_clear to have
 	 * completed.
