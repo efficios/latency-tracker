@@ -39,4 +39,6 @@ struct dentry *latency_tracker_debugfs_add_subfolder(
 void latency_tracker_debugfs_remove_tracker(struct latency_tracker
 		*tracker);
 
+int latency_open_generic(struct inode *inode, struct file *filp);
+
 #endif /* LATENCY_DEBUGFS_H */

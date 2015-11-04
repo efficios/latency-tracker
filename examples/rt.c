@@ -26,6 +26,7 @@
 #include <linux/sched.h>
 #include <linux/stacktrace.h>
 #include <linux/kprobes.h>
+#include <linux/debugfs.h>
 #include <asm/stacktrace.h>
 #include "../latency_tracker.h"
 #include "../tracker_debugfs.h"
@@ -67,10 +68,31 @@ MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts "
 		"and hrtimer latency");
 
 static struct latency_tracker *tracker;
-static struct dentry *debugfs_dir;
+static struct dentry *filters_dir;
 
 static int cnt = 0;
 static int failed_event_in = 0;
+
+struct tracker_config {
+	/* enable/disable tracing of local_timer and hrtimer events */
+	int timer_tracing;
+	/* enable/disable tracing of do_IRQ and irq_handler_* */
+	int irq_tracing;
+	/* output an event when a woken up task gets blocked */
+	int switch_out_blocked;
+	/*
+	 * output an event and stop the tracking as soon as a chain of
+	 * event results in a user-space entry.
+	 */
+	int enter_userspace;
+};
+
+static struct tracker_config config  = {
+	.timer_tracing = 1,
+	.irq_tracing = 1,
+	.switch_out_blocked = 1,
+	.enter_userspace = 0,
+};
 
 enum rt_key_type {
 	KEY_DO_IRQ = 0,
@@ -86,6 +108,7 @@ enum rt_key_type {
 enum event_out_types {
 	OUT_IRQHANDLER_NO_CB = 0,
 	OUT_SWITCH_BLOCKED = 1,
+	OUT_ENTER_USERSPACE = 2,
 };
 
 struct do_irq_key_t {
@@ -145,6 +168,8 @@ struct event_data {
 	unsigned int in_use;
 	unsigned int preempt_count;
 	unsigned int breakdown_idx;
+	/* if we entered in userspace during the chain */
+	unsigned int touched_userspace;
 	u64 prev_ts;
 	char breakdown[MAX_PAYLOAD];
 } __attribute__((__packed__));
@@ -277,13 +302,25 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
 	uint64_t end_ts = 0;
 
-	if (cb_out_id == OUT_IRQHANDLER_NO_CB)
-		return;
-
 	if (!data) {
 		BUG_ON(1);
 		return;
 	}
+	switch(cb_out_id) {
+	case OUT_IRQHANDLER_NO_CB:
+		return;
+	case OUT_SWITCH_BLOCKED:
+		if (!config.switch_out_blocked)
+			return;
+		break;
+	case OUT_ENTER_USERSPACE:
+		if (!config.enter_userspace)
+			return;
+		break;
+	}
+	if (cb_out_id == OUT_IRQHANDLER_NO_CB)
+		return;
+
 	end_ts = data->prev_ts;
 	trace_latency_tracker_rt(current->comm, current->pid,
 			end_ts - start_ts, data->preempt_count,
@@ -301,8 +338,12 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	enum latency_tracker_event_in_ret ret;
 	struct do_irq_key_t key;
 	struct latency_tracker_event *s;
-	u64 now = trace_clock_monotonic_wrapper();
+	u64 now;
 
+	if (!config.irq_tracing)
+		return 0;
+
+	now = trace_clock_monotonic_wrapper();
 	key.cpu = smp_processor_id();
 	key.type = KEY_DO_IRQ;
 	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, now,
@@ -333,6 +374,8 @@ int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	struct do_irq_key_t key;
 
+	if (!config.irq_tracing)
+		return 0;
 	key.cpu = smp_processor_id();
 	key.type = KEY_DO_IRQ;
 	latency_tracker_event_out(tracker, &key,
@@ -407,8 +450,12 @@ void probe_local_timer_entry(void *ignore, int vector)
 	enum latency_tracker_event_in_ret ret;
 	struct local_timer_key_t key;
 	struct latency_tracker_event *s;
-	u64 now = trace_clock_monotonic_wrapper();
+	u64 now;
 
+	if (!config.timer_tracing)
+		return;
+
+	now = trace_clock_monotonic_wrapper();
 	key.cpu = smp_processor_id();
 	key.type = KEY_TIMER_INTERRUPT;
 	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, now,
@@ -440,6 +487,8 @@ void probe_local_timer_exit(void *ignore, int vector)
 {
 	struct local_timer_key_t local_timer_key;
 
+	if (!config.timer_tracing)
+		return;
 	local_timer_key.cpu = smp_processor_id();
 	local_timer_key.type = KEY_TIMER_INTERRUPT;
 	latency_tracker_event_out(tracker, &local_timer_key,
@@ -452,6 +501,9 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	struct do_irq_key_t do_irq_key;
 	struct hardirq_key_t hardirq_key;
 	struct latency_tracker_event *s;
+
+	if (!config.irq_tracing)
+		return;
 
 	do_irq_key.cpu = smp_processor_id();
 	do_irq_key.type = KEY_DO_IRQ;
@@ -479,6 +531,9 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 {
 	struct hardirq_key_t hardirq_key;
 	struct latency_tracker_event *s;
+
+	if (!config.irq_tracing)
+		return;
 
 	hardirq_key.cpu = smp_processor_id();
 	hardirq_key.type = KEY_HARDIRQ;
@@ -594,6 +649,8 @@ void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
 	struct hrtimer_key_t hrtimer_key;
 	struct latency_tracker_event *s;
 
+	if (!config.timer_tracing)
+		return;
 	local_timer_key.cpu = smp_processor_id();
 	local_timer_key.type = KEY_TIMER_INTERRUPT;
 
@@ -623,6 +680,8 @@ void probe_hrtimer_expire_exit(void *ignore, struct timer_list *timer)
 {
 	struct hrtimer_key_t hrtimer_key;
 
+	if (!config.timer_tracing)
+		return;
 	hrtimer_key.cpu = smp_processor_id();
 	hrtimer_key.type = KEY_HRTIMER;
 
@@ -842,9 +901,15 @@ void sched_switch_in(struct task_struct *next)
 		append_delta_ts(s, KEY_SWITCH, "to switch_in", 0, next->pid,
 				next->comm, wrapper_task_prio(next));
 		latency_tracker_put_event(s);
+		if (config.enter_userspace && next->mm) {
+			latency_tracker_event_out(tracker, &switch_key,
+					sizeof(switch_key),
+					OUT_ENTER_USERSPACE);
+		}
 	} else {
 		/* switch after a preempt */
-		s = latency_tracker_get_event(tracker, &switch_key, sizeof(switch_key));
+		s = latency_tracker_get_event(tracker, &switch_key,
+				sizeof(switch_key));
 		if (!s)
 			goto end;
 		append_delta_ts(s, KEY_SWITCH, "to switch_in", 0, next->pid,
@@ -858,7 +923,7 @@ void sched_switch_in(struct task_struct *next)
 			next->pid, next->comm);
 #endif
 end:
-		return;
+	return;
 }
 
 static
@@ -924,13 +989,71 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 end:
 	return;
 }
+/*
+static ssize_t
+read_enter_userspace(struct file *filp, char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	struct tracker_config *cfg = filp->private_data;
+	char buf[64];
+	int r;
+
+	r = snprintf(buf, 64, "%d\n", cfg->enter_userspace);
+	return simple_read_from_buffer(ubuf, count, ppos, buf, r);
+}
+
+static ssize_t
+write_enter_userspace(struct file *filp, const char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	struct tracker_config *cfg = filp->private_data;
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul_from_user(ubuf, cnt, 10, &val);
+	if (ret)
+		return ret;
+	cfg->enter_userspace = !!val;
+
+	return cnt;
+}
+
+static const struct file_operations enter_userspace_fops = {
+	.open           = latency_open_generic,
+	.read           = read_enter_userspace,
+	.write          = write_enter_userspace,
+	.llseek         = default_llseek,
+};
+*/
 
 static
 int setup_debugfs_extras(void)
 {
-	debugfs_dir = latency_tracker_debugfs_add_subfolder(tracker,
+	struct dentry *file;
+
+	filters_dir = latency_tracker_debugfs_add_subfolder(tracker,
 			"filters");
-	if (!debugfs_dir)
+	if (!filters_dir)
+		goto error;
+
+	file = debugfs_create_u32("timer_tracing",
+			S_IRUSR|S_IWUSR, filters_dir, &config.timer_tracing);
+	if (!file)
+		goto error;
+
+	file = debugfs_create_u32("irq_tracing",
+			S_IRUSR|S_IWUSR, filters_dir, &config.irq_tracing);
+	if (!file)
+		goto error;
+
+	file = debugfs_create_u32("switch_out_blocked",
+			S_IRUSR|S_IWUSR, filters_dir, &config.switch_out_blocked);
+	if (!file)
+		goto error;
+
+	file = debugfs_create_u32("enter_userspace",
+			S_IRUSR|S_IWUSR, filters_dir, &config.enter_userspace);
+	if (!file)
 		goto error;
 
 	return 0;
@@ -964,20 +1087,21 @@ int __init rt_init(void)
 	if (ret)
 		goto error;
 
-	if (timer_tracing) {
-		ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
-				probe_local_timer_entry, NULL);
-		WARN_ON(ret);
-		ret = lttng_wrapper_tracepoint_probe_register("local_timer_exit",
-				probe_local_timer_exit, NULL);
-		WARN_ON(ret);
-		ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
-				probe_hrtimer_expire_entry, NULL);
-		WARN_ON(ret);
-		ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_exit",
-				probe_hrtimer_expire_exit, NULL);
-		WARN_ON(ret);
-	}
+	if (!timer_tracing)
+		config.timer_tracing = 0;
+
+	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
+			probe_local_timer_entry, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register("local_timer_exit",
+			probe_local_timer_exit, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
+			probe_hrtimer_expire_entry, NULL);
+	WARN_ON(ret);
+	ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_exit",
+			probe_hrtimer_expire_exit, NULL);
+	WARN_ON(ret);
 	ret = lttng_wrapper_tracepoint_probe_register("irq_handler_entry",
 			probe_irq_handler_entry, NULL);
 	WARN_ON(ret);
@@ -1023,16 +1147,14 @@ void __exit rt_exit(void)
 {
 	uint64_t skipped;
 
-	if (timer_tracing) {
-		lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
-				probe_local_timer_entry, NULL);
-		lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
-				probe_local_timer_exit, NULL);
-		lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
-				probe_hrtimer_expire_entry, NULL);
-		lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_exit",
-				probe_hrtimer_expire_exit, NULL);
-	}
+	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
+			probe_local_timer_entry, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
+			probe_local_timer_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
+			probe_hrtimer_expire_entry, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_exit",
+			probe_hrtimer_expire_exit, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("sched_waking",

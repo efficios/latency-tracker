@@ -109,3 +109,9 @@ struct dentry *latency_tracker_debugfs_add_subfolder(
 error:
 	return NULL;
 }
+
+int latency_open_generic(struct inode *inode, struct file *filp)
+{
+	filp->private_data = inode->i_private;
+	return 0;
+}
