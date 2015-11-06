@@ -317,12 +317,15 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	case OUT_SWITCH_BLOCKED:
 		if (!config.switch_out_blocked)
 			return;
+		if (config.procname_filter_size)
+			if (strncmp(data->userspace_proc, config.procname_filter,
+						TASK_COMM_LEN) != 0)
+				return;
 		break;
 	case OUT_ENTER_USERSPACE:
 		if (!config.enter_userspace)
 			return;
 		if (config.procname_filter_size)
-			printk("%s vs %s\n", data->userspace_proc, config.procname_filter);
 			if (strncmp(data->userspace_proc, config.procname_filter,
 						TASK_COMM_LEN) != 0)
 				return;
