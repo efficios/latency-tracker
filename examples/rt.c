@@ -26,6 +26,7 @@
 #include <linux/sched.h>
 #include <linux/stacktrace.h>
 #include <linux/kprobes.h>
+#include <linux/kernel.h>
 #include <linux/debugfs.h>
 #include <asm/stacktrace.h>
 #include "../latency_tracker.h"
@@ -85,6 +86,8 @@ struct tracker_config {
 	 * event results in a user-space entry.
 	 */
 	int enter_userspace;
+	char procname_filter[TASK_COMM_LEN];
+	int procname_filter_size;
 };
 
 static struct tracker_config config  = {
@@ -92,6 +95,7 @@ static struct tracker_config config  = {
 	.irq_tracing = 1,
 	.switch_out_blocked = 1,
 	.enter_userspace = 0,
+	.procname_filter_size = 0,
 };
 
 enum rt_key_type {
@@ -171,6 +175,7 @@ struct event_data {
 	/* if we entered in userspace during the chain */
 	unsigned int touched_userspace;
 	u64 prev_ts;
+	char userspace_proc[TASK_COMM_LEN];
 	char breakdown[MAX_PAYLOAD];
 } __attribute__((__packed__));
 
@@ -316,6 +321,11 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	case OUT_ENTER_USERSPACE:
 		if (!config.enter_userspace)
 			return;
+		if (config.procname_filter_size)
+			printk("%s vs %s\n", data->userspace_proc, config.procname_filter);
+			if (strncmp(data->userspace_proc, config.procname_filter,
+						TASK_COMM_LEN) != 0)
+				return;
 		break;
 	}
 	if (cb_out_id == OUT_IRQHANDLER_NO_CB)
@@ -901,6 +911,12 @@ void sched_switch_in(struct task_struct *next)
 		/* switch_in after a waking */
 		append_delta_ts(s, KEY_SWITCH, "to switch_in", 0, next->pid,
 				next->comm, wrapper_task_prio(next));
+		if (config.procname_filter_size) {
+			struct event_data *data;
+
+			data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+			strncpy(data->userspace_proc, next->comm, TASK_COMM_LEN);
+		}
 		latency_tracker_put_event(s);
 		if (config.enter_userspace && next->mm) {
 			latency_tracker_event_out(tracker, &switch_key,
@@ -990,42 +1006,47 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 end:
 	return;
 }
-/*
+
 static ssize_t
-read_enter_userspace(struct file *filp, char __user *ubuf,
+read_procname_filter(struct file *filp, char __user *ubuf,
 		size_t count, loff_t *ppos)
 {
 	struct tracker_config *cfg = filp->private_data;
-	char buf[64];
+	char buf[TASK_COMM_LEN + 1];
 	int r;
 
-	r = snprintf(buf, 64, "%d\n", cfg->enter_userspace);
+	r = snprintf(buf, TASK_COMM_LEN, "%s\n", cfg->procname_filter);
 	return simple_read_from_buffer(ubuf, count, ppos, buf, r);
 }
 
 static ssize_t
-write_enter_userspace(struct file *filp, const char __user *ubuf,
+write_procname_filter(struct file *filp, const char __user *ubuf,
 		size_t cnt, loff_t *ppos)
 {
 	struct tracker_config *cfg = filp->private_data;
-	unsigned long val;
-	int ret;
+	int ret, r;
+	char buf[TASK_COMM_LEN];
 
-	ret = kstrtoul_from_user(ubuf, cnt, 10, &val);
+	r = min_t(unsigned int, cnt, TASK_COMM_LEN);
+	ret = copy_from_user(buf, ubuf, r);
 	if (ret)
 		return ret;
-	cfg->enter_userspace = !!val;
+
+	memset(cfg->procname_filter, 0, TASK_COMM_LEN);
+	snprintf(cfg->procname_filter, r, "%s", buf);
+	cfg->procname_filter_size = r - 1;
+	if (cfg->procname_filter[0] == '\0')
+		cfg->procname_filter_size = 0;
 
 	return cnt;
 }
 
-static const struct file_operations enter_userspace_fops = {
+static const struct file_operations procname_filter_fops = {
 	.open           = latency_open_generic,
-	.read           = read_enter_userspace,
-	.write          = write_enter_userspace,
+	.read           = read_procname_filter,
+	.write          = write_procname_filter,
 	.llseek         = default_llseek,
 };
-*/
 
 static
 int setup_debugfs_extras(void)
@@ -1056,6 +1077,9 @@ int setup_debugfs_extras(void)
 			S_IRUSR|S_IWUSR, filters_dir, &config.enter_userspace);
 	if (!file)
 		goto error;
+
+	file = debugfs_create_file("procname", S_IRUSR,
+			filters_dir, &config, &procname_filter_fops);
 
 	latency_tracker_debugfs_setup_wakeup_pipe(tracker);
 	return 0;

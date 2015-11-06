@@ -114,6 +114,7 @@ const struct file_operations wakeup_pipe_fops = {
 	.release	= release_wakeup_pipe,
 	.read           = read_wakeup_pipe,
 	.llseek         = default_llseek,
+	/* TODO: poll */
 };
 
 static
