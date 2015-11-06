@@ -325,6 +325,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	trace_latency_tracker_rt(current->comm, current->pid,
 			end_ts - start_ts, data->preempt_count,
 			data->breakdown);
+	latency_tracker_debugfs_wakeup_pipe(tracker);
 	/*
 	printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
 			current->comm, current->pid,
@@ -1056,6 +1057,7 @@ int setup_debugfs_extras(void)
 	if (!file)
 		goto error;
 
+	latency_tracker_debugfs_setup_wakeup_pipe(tracker);
 	return 0;
 
 error:

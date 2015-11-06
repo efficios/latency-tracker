@@ -6,6 +6,7 @@
 #define DEFAULT_LATENCY_TABLE_SIZE 2048
 
 #include <linux/workqueue.h>
+#include <linux/irq_work.h>
 
 //#include "wrapper/ht.h"
 //#include "rculfhash-internal.h"
@@ -108,6 +109,16 @@ struct latency_tracker {
 	 * debugfs control dir
 	 */
 	struct dentry *debugfs_dir;
+	/*
+	 * debugfs wakeup_pipe stuff
+	 */
+	struct dentry *wakeup_pipe;
+	struct irq_work wake_irq;
+	bool got_alert;
+	wait_queue_head_t read_wait;
+	unsigned int wakeup_rate_limit_ns;
+	u64 last_wakeup_ts;
+	atomic_t wakeup_readers;
 
 	/* GC and resize work */
         struct timer_list timer;

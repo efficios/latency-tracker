@@ -38,6 +38,8 @@ struct dentry *latency_tracker_debugfs_add_subfolder(
 		const char *name);
 void latency_tracker_debugfs_remove_tracker(struct latency_tracker
 		*tracker);
+void latency_tracker_debugfs_wakeup_pipe(struct latency_tracker *tracker);
+int latency_tracker_debugfs_setup_wakeup_pipe(struct latency_tracker *tracker);
 
 int latency_open_generic(struct inode *inode, struct file *filp);
 
