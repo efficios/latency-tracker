@@ -398,7 +398,7 @@ int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	key.cpu = smp_processor_id();
 	key.type = KEY_DO_IRQ;
 	latency_tracker_event_out(tracker, &key,
-			sizeof(key), OUT_IRQHANDLER_NO_CB);
+			sizeof(key), OUT_IRQHANDLER_NO_CB, 0);
 
 	return 0;
 }
@@ -456,7 +456,7 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 end_del:
 	if (del)
 		latency_tracker_event_out(tracker, key_in, key_in_len,
-				OUT_IRQHANDLER_NO_CB);
+				OUT_IRQHANDLER_NO_CB, 0);
 
 end:
 	latency_tracker_put_event(event_in);
@@ -511,7 +511,7 @@ void probe_local_timer_exit(void *ignore, int vector)
 	local_timer_key.cpu = smp_processor_id();
 	local_timer_key.type = KEY_TIMER_INTERRUPT;
 	latency_tracker_event_out(tracker, &local_timer_key,
-			sizeof(local_timer_key), OUT_IRQHANDLER_NO_CB);
+			sizeof(local_timer_key), OUT_IRQHANDLER_NO_CB, 0);
 }
 
 static
@@ -564,7 +564,7 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 	latency_tracker_put_event(s);
 
 	latency_tracker_event_out(tracker, &hardirq_key, sizeof(hardirq_key),
-			OUT_IRQHANDLER_NO_CB);
+			OUT_IRQHANDLER_NO_CB, 0);
 
 end:
 	return;
@@ -712,7 +712,7 @@ void probe_hrtimer_expire_exit(void *ignore, struct timer_list *timer)
 	hrtimer_key.type = KEY_HRTIMER;
 
 	latency_tracker_event_out(tracker, &hrtimer_key, sizeof(hrtimer_key),
-			OUT_IRQHANDLER_NO_CB);
+			OUT_IRQHANDLER_NO_CB, 0);
 }
 
 static
@@ -735,7 +735,7 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 	orig_ts = latency_tracker_event_get_start_ts(s);
 	latency_tracker_put_event(s);
 	latency_tracker_event_out(tracker, &softirq_key, sizeof(softirq_key),
-			OUT_IRQHANDLER_NO_CB);
+			OUT_IRQHANDLER_NO_CB, 0);
 }
 
 static
@@ -904,6 +904,7 @@ void sched_switch_in(struct task_struct *next)
 	struct latency_tracker_event *s;
 	struct switch_key_t switch_key;
 	struct event_data *data;
+	u64 now = trace_clock_monotonic_wrapper();
 
 	switch_key.pid = next->pid;
 	switch_key.type = KEY_SWITCH;
@@ -918,7 +919,7 @@ void sched_switch_in(struct task_struct *next)
 			sizeof(switch_key), 1);
 	if (s) {
 		/* switch_in after a waking */
-		append_delta_ts(s, KEY_SWITCH, "to switch_in", 0, next->pid,
+		append_delta_ts(s, KEY_SWITCH, "to switch_in", now, next->pid,
 				next->comm, wrapper_task_prio(next));
 		data = (struct event_data *) latency_tracker_event_get_priv_data(s);
 		strncpy(data->userspace_proc, next->comm, TASK_COMM_LEN);
@@ -926,7 +927,7 @@ void sched_switch_in(struct task_struct *next)
 		if (config.enter_userspace && next->mm) {
 			latency_tracker_event_out(tracker, &switch_key,
 					sizeof(switch_key),
-					OUT_ENTER_USERSPACE);
+					OUT_ENTER_USERSPACE, now);
 		}
 	} else {
 		/* switch after a preempt */
@@ -934,7 +935,7 @@ void sched_switch_in(struct task_struct *next)
 				sizeof(switch_key));
 		if (!s)
 			goto end;
-		append_delta_ts(s, KEY_SWITCH, "to switch_in", 0, next->pid,
+		append_delta_ts(s, KEY_SWITCH, "to switch_in", now, next->pid,
 				next->comm, wrapper_task_prio(next));
 		latency_tracker_put_event(s);
 	}
@@ -954,6 +955,7 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 	struct latency_tracker_event *s;
 	struct switch_key_t switch_key;
 	int ret;
+	u64 now = trace_clock_monotonic_wrapper();
 
 	/* switch out */
 	switch_key.pid = prev->pid;
@@ -964,14 +966,14 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 	if (prev->state == TASK_RUNNING) {
 		struct event_data *data;
 
-		append_delta_ts(s, KEY_SWITCH, "to switch_out", 0, next->pid,
+		append_delta_ts(s, KEY_SWITCH, "to switch_out", now, next->pid,
 				next->comm, wrapper_task_prio(next));
 		data = (struct event_data *) latency_tracker_event_get_priv_data(s);
 		if (!data)
 			return;
 		data->preempt_count++;
 	} else {
-		append_delta_ts(s, KEY_SWITCH, "to switch_out_blocked", 0,
+		append_delta_ts(s, KEY_SWITCH, "to switch_out_blocked", now,
 				next->pid, next->comm,
 				wrapper_task_prio(next));
 	}
@@ -986,7 +988,7 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 		goto end;
 
 	ret = latency_tracker_event_out(tracker, &switch_key, sizeof(switch_key),
-			OUT_SWITCH_BLOCKED);
+			OUT_SWITCH_BLOCKED, now);
 #ifdef DEBUG
 	if (ret == 0)
 		printk("%llu switch_out %d (%s)\n",

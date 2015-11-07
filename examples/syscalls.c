@@ -301,7 +301,7 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 {
 	struct sched_key_t key;
 	key.pid = current->pid;
-	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
 }
 
 static

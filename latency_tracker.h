@@ -232,9 +232,11 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
  * rcu_read_lock_sched_notrace.
  */
 int latency_tracker_event_out(struct latency_tracker *tracker,
-		void *key, unsigned int key_len, unsigned int id);
+		void *key, unsigned int key_len, unsigned int id,
+		u64 ts_override);
 int _latency_tracker_event_out(struct latency_tracker *tracker,
-		void *key, unsigned int key_len, unsigned int id);
+		void *key, unsigned int key_len, unsigned int id,
+		u64 ts_override);
 
 /*
  * Lookup if the key is in the tracker HT and return the associated event if

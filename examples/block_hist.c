@@ -202,7 +202,7 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 					lttng_this_cpu_ptr(&current_hist));
 		}
 		latency_tracker_put_event(s);
-		latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+		latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
 	}
 
 	/* Start tracking the request at the block level */
@@ -364,7 +364,7 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 	latency_tracker_put_event(s);
 
 end:
-	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
 	return;
 }
 
@@ -486,7 +486,7 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 	latency_tracker_put_event(s);
 
 end:
-	latency_tracker_event_out(tracker, &key, sizeof(key), 0);
+	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
 }
 
 static int block_hist_show(struct seq_file *m, void *v)
