@@ -4,7 +4,7 @@ destroy()
 	echo 0 >/sys/kernel/debug/tracing/tracing_on
 	echo 0  >/sys/kernel/debug/tracing/events/latency_tracker/latency_tracker_syscall_stack/enable
 	echo 0  >/sys/kernel/debug/tracing/events/latency_tracker/latency_tracker_syscall/enable
-	cat /sys/kernel/debug/tracing/trace_pipe >/dev/null
+	echo > /sys/kernel/debug/tracing/trace
 	exit 0
 }
 

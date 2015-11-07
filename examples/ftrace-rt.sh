@@ -9,7 +9,19 @@
 #echo 1 > /sys/kernel/debug/tracing/events/timer/hrtimer_expire_entry/enable
 #echo 1 > /sys/kernel/debug/tracing/events/timer/hrtimer_expire_exit/enable
 
+destroy()
+{
+	echo 0 >/sys/kernel/debug/tracing/tracing_on
+	echo > /sys/kernel/debug/tracing/trace
+	exit 0
+}
+
+trap "destroy" SIGINT SIGTERM SIGPIPE SIGHUP
+
 echo 1 >/sys/kernel/debug/tracing/events/latency_tracker/latency_tracker_rt/enable
 echo 1 > /sys/kernel/debug/tracing/tracing_on 
-cat /sys/kernel/debug/tracing/trace_pipe 
+
+while true; do
+	cat /sys/kernel/debug/tracing/trace_pipe
+done
 
