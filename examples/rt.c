@@ -306,6 +306,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	unsigned int cb_out_id = latency_tracker_event_ctx_get_cb_out_id(ctx);
 	uint64_t start_ts = latency_tracker_event_ctx_get_start_ts(ctx);
 	uint64_t end_ts = 0;
+	char *comm;
 
 	if (!data) {
 		BUG_ON(1);
@@ -321,6 +322,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 			if (strncmp(data->userspace_proc, config.procname_filter,
 						TASK_COMM_LEN) != 0)
 				return;
+		comm = current->comm;
 		break;
 	case OUT_ENTER_USERSPACE:
 		if (!config.enter_userspace)
@@ -329,13 +331,16 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 			if (strncmp(data->userspace_proc, config.procname_filter,
 						TASK_COMM_LEN) != 0)
 				return;
+		comm = data->userspace_proc;
 		break;
+	default:
+		return;
 	}
 	if (cb_out_id == OUT_IRQHANDLER_NO_CB)
 		return;
 
 	end_ts = data->prev_ts;
-	trace_latency_tracker_rt(current->comm, current->pid,
+	trace_latency_tracker_rt(comm, current->pid,
 			end_ts - start_ts, data->preempt_count,
 			data->breakdown);
 	latency_tracker_debugfs_wakeup_pipe(tracker);
@@ -898,6 +903,7 @@ void sched_switch_in(struct task_struct *next)
 	struct waking_key_t waking_key;
 	struct latency_tracker_event *s;
 	struct switch_key_t switch_key;
+	struct event_data *data;
 
 	switch_key.pid = next->pid;
 	switch_key.type = KEY_SWITCH;
@@ -914,12 +920,8 @@ void sched_switch_in(struct task_struct *next)
 		/* switch_in after a waking */
 		append_delta_ts(s, KEY_SWITCH, "to switch_in", 0, next->pid,
 				next->comm, wrapper_task_prio(next));
-		if (config.procname_filter_size) {
-			struct event_data *data;
-
-			data = (struct event_data *) latency_tracker_event_get_priv_data(s);
-			strncpy(data->userspace_proc, next->comm, TASK_COMM_LEN);
-		}
+		data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+		strncpy(data->userspace_proc, next->comm, TASK_COMM_LEN);
 		latency_tracker_put_event(s);
 		if (config.enter_userspace && next->mm) {
 			latency_tracker_event_out(tracker, &switch_key,
