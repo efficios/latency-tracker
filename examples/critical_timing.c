@@ -35,12 +35,13 @@
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
+#include "../tracker_debugfs.h"
 
 #include <trace/events/latency_tracker.h>
 
 #define MAX_STACK_TXT 256
 
-struct critical_timing_tracker *critical_timing_priv;
+static struct latency_tracker *tracker;
 
 static int cnt = 0;
 
@@ -114,13 +115,12 @@ void probe_core_critical_timing_hit(void *ignore, unsigned long ip,
 {
 	struct task_struct *p = current;
 	char stacktxt[MAX_STACK_TXT];
-	u64 end_ts = trace_clock_monotonic_wrapper();
 
 	rcu_read_lock();
 	extract_stack(p, stacktxt, 0);
 	trace_latency_tracker_critical_timing_stack(current->comm, current->pid, stacktxt);
 	cnt++;
-	critical_timing_handle_proc(critical_timing_priv, end_ts);
+	latency_tracker_debugfs_wakeup_pipe(tracker);
 	rcu_read_unlock();
 }
 
@@ -129,21 +129,19 @@ int __init critical_timing_init(void)
 {
 	int ret;
 
-	critical_timing_priv = critical_timing_alloc_priv();
-	if (!critical_timing_priv) {
-		ret = -ENOMEM;
-		goto end;
-	}
+	tracker = latency_tracker_create("critical_timings");
+	if (!tracker)
+		goto error;
+	latency_tracker_debugfs_setup_wakeup_pipe(tracker);
 
 	ret = lttng_wrapper_tracepoint_probe_register("core_critical_timing_hit",
 			probe_core_critical_timing_hit, NULL);
 	WARN_ON(ret);
 
-	ret = critical_timing_setup_priv(critical_timing_priv);
-	WARN_ON(ret);
-
 	goto end;
 
+error:
+	ret = -1;
 end:
 	return ret;
 }
@@ -155,7 +153,7 @@ void __exit critical_timing_exit(void)
 	lttng_wrapper_tracepoint_probe_unregister("core_critical_timing_hit",
 			probe_core_critical_timing_hit, NULL);
 	tracepoint_synchronize_unregister();
-	critical_timing_destroy_priv(critical_timing_priv);
+	latency_tracker_destroy(tracker);
 	printk("Total critical_timing alerts : %d\n", cnt);
 }
 module_exit(critical_timing_exit);
