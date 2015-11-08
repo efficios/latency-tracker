@@ -18,6 +18,7 @@
 
 #include <linux/debugfs.h>
 #include <linux/sched.h>
+#include <linux/fs.h>
 
 #include "tracker_debugfs.h"
 #include "latency_tracker.h"
@@ -207,4 +208,60 @@ int latency_open_generic(struct inode *inode, struct file *filp)
 {
 	filp->private_data = inode->i_private;
 	return 0;
+}
+
+static
+ssize_t read_int(struct file *filp, char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	int r, ret;
+	char buf[64];
+	int *val = filp->private_data;
+
+	r = snprintf(buf, min_t(size_t, count, 64), "%d\n", *val);
+
+	ret = simple_read_from_buffer(ubuf, count, ppos, buf, r);
+	return ret;
+}
+
+static
+ssize_t write_int(struct file *filp, const char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	int val, ret;
+	int *out_val;
+
+	ret = kstrtoint_from_user(ubuf, count, 10, &val);
+	if (ret)
+		return ret;
+
+	/* must have at least 1 entry */
+	if (!val)
+		return -EINVAL;
+	out_val = filp->private_data;
+	*out_val = val;
+
+	return count;
+}
+
+static
+int open_int(struct inode *inode, struct file *filp)
+{
+	filp->private_data = inode->i_private;
+	return 0;
+}
+
+static
+const struct file_operations fops_int = {
+	.open           = open_int,
+	.read           = read_int,
+	.write		= write_int,
+	.llseek         = default_llseek,
+	/* TODO: poll */
+};
+
+struct dentry *debugfs_create_int(const char *name, umode_t mode,
+		struct dentry *parent, int *value)
+{
+	return debugfs_create_file(name, mode, parent, value, &fops_int);
 }

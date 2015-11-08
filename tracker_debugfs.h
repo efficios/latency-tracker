@@ -43,4 +43,8 @@ int latency_tracker_debugfs_setup_wakeup_pipe(struct latency_tracker *tracker);
 
 int latency_open_generic(struct inode *inode, struct file *filp);
 
+struct dentry *debugfs_create_int(const char *name, umode_t mode,
+		struct dentry *parent, int *value);
+
+
 #endif /* LATENCY_DEBUGFS_H */
