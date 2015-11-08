@@ -257,7 +257,6 @@ const struct file_operations fops_int = {
 	.read           = read_int,
 	.write		= write_int,
 	.llseek         = default_llseek,
-	/* TODO: poll */
 };
 
 struct dentry *debugfs_create_int(const char *name, umode_t mode,

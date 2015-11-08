@@ -79,6 +79,10 @@ struct tracker_config {
 	int timer_tracing;
 	/* enable/disable tracing of do_IRQ and irq_handler_* */
 	int irq_tracing;
+	/* irq number to track (-1 for all) */
+	int irq_filter;
+	/* softirq number to track (-1 for all) */
+	int softirq_filter;
 	/* output an event when a woken up task gets blocked */
 	int switch_out_blocked;
 	/*
@@ -90,11 +94,14 @@ struct tracker_config {
 	int procname_filter_size;
 };
 
-static struct tracker_config config  = {
-	.timer_tracing = 1,
+static
+struct tracker_config config  = {
+	.timer_tracing = 0,
 	.irq_tracing = 1,
-	.switch_out_blocked = 1,
-	.enter_userspace = 0,
+	.switch_out_blocked = 0,
+	.enter_userspace = 1,
+	.irq_filter = -1,
+	.softirq_filter = -1,
 	.procname_filter_size = 0,
 };
 
@@ -524,6 +531,11 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	if (!config.irq_tracing)
 		return;
 
+	if (config.irq_filter > 0 && config.irq_filter != irq) {
+		exit_do_irq(NULL, NULL);
+		return;
+	}
+
 	do_irq_key.cpu = smp_processor_id();
 	do_irq_key.type = KEY_DO_IRQ;
 
@@ -554,6 +566,11 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 	if (!config.irq_tracing)
 		return;
 
+	if (config.irq_filter > 0 && config.irq_filter != irq) {
+		exit_do_irq(NULL, NULL);
+		return;
+	}
+
 	hardirq_key.cpu = smp_processor_id();
 	hardirq_key.type = KEY_HARDIRQ;
 
@@ -577,6 +594,9 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	struct raise_softirq_key_t raise_softirq_key;
 	struct switch_key_t switch_key;
 	struct latency_tracker_event *s;
+
+	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
+		return;
 
 	switch_key.pid = current->pid;
 	switch_key.type = KEY_SWITCH;
@@ -606,6 +626,9 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	struct raise_softirq_key_t raise_softirq_key;
 	struct latency_tracker_event *s;
 
+	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
+		return;
+
 	hardirq_key.cpu = smp_processor_id();
 	hardirq_key.type = KEY_HARDIRQ;
 
@@ -634,6 +657,9 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 	struct raise_softirq_key_t raise_softirq_key;
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *s;
+
+	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
+		return;
 
 	raise_softirq_key.cpu = smp_processor_id();
 	raise_softirq_key.vector = vec_nr;
@@ -721,6 +747,9 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *s;
 	u64 orig_ts;
+
+	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
+		return;
 
 	/*
 	 * Just cleanup the softirq_entry event
@@ -1087,6 +1116,16 @@ int setup_debugfs_extras(void)
 
 	file = debugfs_create_file("procname", S_IRUSR,
 			filters_dir, &config, &procname_filter_fops);
+
+	file = debugfs_create_int("irq_filter",
+			S_IRUSR|S_IWUSR, filters_dir, &config.irq_filter);
+	if (!file)
+		goto error;
+
+	file = debugfs_create_int("softirq_filter",
+			S_IRUSR|S_IWUSR, filters_dir, &config.softirq_filter);
+	if (!file)
+		goto error;
 
 	latency_tracker_debugfs_setup_wakeup_pipe(tracker);
 	return 0;
