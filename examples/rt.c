@@ -34,6 +34,7 @@
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/task_prio.h"
+#include "../wrapper/lt_probe.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -1021,16 +1022,20 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 #ifdef DEBUG
 	if (ret == 0)
 		printk("%llu switch_out %d (%s)\n",
-				trace_clock_monotonic_wrapper(),
+				trace_clock_read64(),
 				prev->pid, prev->comm);
 #endif
 end:
 	return;
 }
 
-static
-void probe_sched_switch(void *ignore, struct task_struct *prev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+LT_PROBE_DEFINE(sched_switch, bool preempt, struct task_struct *prev,
 		struct task_struct *next)
+#else
+LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
+		struct task_struct *next)
+#endif
 {
 	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!prev || !next)
