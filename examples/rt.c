@@ -588,7 +588,7 @@ end:
 	return;
 }
 
-#ifdef CONFIG_PREEMPT
+#ifdef CONFIG_PREEMPT_RT_FULL
 static
 void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 {
@@ -619,7 +619,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			vec_nr);
 #endif
 }
-#else /* CONFIG_PREEMPT */
+#else /* CONFIG_PREEMPT_RT_FULL */
 static
 void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 {
@@ -650,7 +650,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			vec_nr);
 #endif
 }
-#endif /* CONFIG_PREEMPT */
+#endif /* CONFIG_PREEMPT_RT_FULL */
 
 static
 void probe_softirq_entry(void *ignore, unsigned int vec_nr)
