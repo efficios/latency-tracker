@@ -70,7 +70,6 @@ MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts "
 		"and hrtimer latency");
 
 static struct latency_tracker *tracker;
-static struct dentry *filters_dir;
 
 static int cnt = 0;
 static int failed_event_in = 0;
@@ -86,6 +85,8 @@ struct tracker_config {
 	int softirq_filter;
 	/* output an event when a woken up task gets blocked */
 	int switch_out_blocked;
+	/* output an event when a target process write to the work_done file */
+	int out_work_done;
 	/*
 	 * output an event and stop the tracking as soon as a chain of
 	 * event results in a user-space entry.
@@ -100,6 +101,7 @@ struct tracker_config config  = {
 	.timer_tracing = 0,
 	.irq_tracing = 1,
 	.switch_out_blocked = 0,
+	.out_work_done = 0,
 	.enter_userspace = 1,
 	.irq_filter = -1,
 	.softirq_filter = -1,
@@ -115,12 +117,14 @@ enum rt_key_type {
 	KEY_SWITCH = 5,
 	KEY_TIMER_INTERRUPT = 6,
 	KEY_HRTIMER = 7,
+	KEY_WORK_DONE = 8,
 };
 
 enum event_out_types {
 	OUT_IRQHANDLER_NO_CB = 0,
 	OUT_SWITCH_BLOCKED = 1,
 	OUT_ENTER_USERSPACE = 2,
+	OUT_WORK_DONE = 3,
 };
 
 struct do_irq_key_t {
@@ -179,9 +183,6 @@ struct event_data {
 	unsigned int pos;
 	unsigned int in_use;
 	unsigned int preempt_count;
-	unsigned int breakdown_idx;
-	/* if we entered in userspace during the chain */
-	unsigned int touched_userspace;
 	u64 prev_ts;
 	char userspace_proc[TASK_COMM_LEN];
 	char breakdown[MAX_PAYLOAD];
@@ -295,6 +296,9 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 	case KEY_HRTIMER:
 		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(), now - data->prev_ts);
 		break;
+	case KEY_WORK_DONE:
+		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(), now - data->prev_ts);
+		break;
 	}
 	len = strlen(tmp);
 	if ((data->pos + len) > MAX_PAYLOAD) {
@@ -335,6 +339,13 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	case OUT_ENTER_USERSPACE:
 		if (!config.enter_userspace)
 			return;
+		if (config.procname_filter_size)
+			if (strncmp(data->userspace_proc, config.procname_filter,
+						TASK_COMM_LEN) != 0)
+				return;
+		comm = data->userspace_proc;
+		break;
+	case OUT_WORK_DONE:
 		if (config.procname_filter_size)
 			if (strncmp(data->userspace_proc, config.procname_filter,
 						TASK_COMM_LEN) != 0)
@@ -1048,8 +1059,8 @@ end:
 	return;
 }
 
-static ssize_t
-read_procname_filter(struct file *filp, char __user *ubuf,
+static
+ssize_t read_procname_filter(struct file *filp, char __user *ubuf,
 		size_t count, loff_t *ppos)
 {
 	struct tracker_config *cfg = filp->private_data;
@@ -1082,7 +1093,8 @@ write_procname_filter(struct file *filp, const char __user *ubuf,
 	return cnt;
 }
 
-static const struct file_operations procname_filter_fops = {
+static const
+struct file_operations procname_filter_fops = {
 	.open           = latency_open_generic,
 	.read           = read_procname_filter,
 	.write          = write_procname_filter,
@@ -1090,13 +1102,73 @@ static const struct file_operations procname_filter_fops = {
 };
 
 static
+ssize_t write_work_done(struct file *filp, const char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	int ret, r;
+	char buf[TASK_COMM_LEN];
+	struct switch_key_t switch_key;
+	struct latency_tracker_event *s;
+	//struct tracker_config *cfg = filp->private_data;
+	struct event_data *data;
+	u64 now = trace_clock_monotonic_wrapper();
+
+	if (!config.out_work_done)
+		return -EINVAL;
+
+	/*
+	 * The data is unused for now, but it might become an ID
+	 * someday on which we could apply filters.
+	 */
+	r = min_t(unsigned int, cnt, TASK_COMM_LEN);
+	ret = copy_from_user(buf, ubuf, r);
+	if (ret)
+		return ret;
+
+	switch_key.pid = current->pid;
+	switch_key.type = KEY_SWITCH;
+	s = latency_tracker_get_event(tracker, &switch_key,
+			sizeof(switch_key));
+	if (!s)
+		goto out;
+
+	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+	if (!data) {
+		BUG_ON(1);
+		goto out;
+	}
+	append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0, NULL, 0);
+	latency_tracker_put_event(s);
+
+	ret = latency_tracker_event_out(tracker, &switch_key, sizeof(switch_key),
+			OUT_WORK_DONE, 0);
+	printk("ret: %d\n", ret);
+
+out:
+	return cnt;
+}
+
+static const
+struct file_operations work_done_fops = {
+	.open           = latency_open_generic,
+	.write          = write_work_done,
+};
+
+static
 int setup_debugfs_extras(void)
 {
 	struct dentry *file;
+	static struct dentry *filters_dir, *actions_dir;
+	int ret;
 
 	filters_dir = latency_tracker_debugfs_add_subfolder(tracker,
 			"filters");
 	if (!filters_dir)
+		goto error;
+
+	actions_dir = latency_tracker_debugfs_add_subfolder(tracker,
+			"actions");
+	if (!actions_dir)
 		goto error;
 
 	file = debugfs_create_u32("timer_tracing",
@@ -1114,6 +1186,11 @@ int setup_debugfs_extras(void)
 	if (!file)
 		goto error;
 
+	file = debugfs_create_u32("out_work_done",
+			S_IRUSR|S_IWUSR, filters_dir, &config.out_work_done);
+	if (!file)
+		goto error;
+
 	file = debugfs_create_u32("enter_userspace",
 			S_IRUSR|S_IWUSR, filters_dir, &config.enter_userspace);
 	if (!file)
@@ -1121,6 +1198,8 @@ int setup_debugfs_extras(void)
 
 	file = debugfs_create_file("procname", S_IRUSR,
 			filters_dir, &config, &procname_filter_fops);
+	if (!file)
+		goto error;
 
 	file = debugfs_create_int("irq_filter",
 			S_IRUSR|S_IWUSR, filters_dir, &config.irq_filter);
@@ -1132,7 +1211,15 @@ int setup_debugfs_extras(void)
 	if (!file)
 		goto error;
 
-	latency_tracker_debugfs_setup_wakeup_pipe(tracker);
+	file = debugfs_create_file("work_done", S_IWUSR,
+			actions_dir, &config, &work_done_fops);
+	if (!file)
+		goto error;
+
+	ret = latency_tracker_debugfs_setup_wakeup_pipe(tracker);
+	if (ret != 0)
+		goto error;
+
 	return 0;
 
 error:
