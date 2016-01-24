@@ -446,6 +446,7 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	u64 orig_ts;
 	int ret;
 
+	/* TODO: loop here to handle duplicates when del == 1 */
 	event_in = latency_tracker_get_event(tracker, key_in, key_in_len);
 	if (!event_in)
 		return NULL;
@@ -896,6 +897,12 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!p)
 		goto end;
+
+	/*
+	 * TODO: allow non-unique inserts here.
+	 * This would allow multiple processes to be waiting for the same
+	 * target process.
+	 */
 
 	waking_key.pid = p->pid;
 	waking_key.type = KEY_WAKEUP;
