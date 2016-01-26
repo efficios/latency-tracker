@@ -1152,8 +1152,8 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 	 * The data is unused for now, but it might become an ID
 	 * someday on which we could apply filters.
 	 */
-	r = min_t(unsigned int, cnt, TASK_COMM_LEN);
-	memset(&work_begin_key.cookie, 0, TASK_COMM_LEN);
+	r = min_t(unsigned int, cnt, sizeof(work_begin_key.cookie));
+	memset(&work_begin_key.cookie, 0, sizeof(work_begin_key.cookie));
 	ret = copy_from_user(&work_begin_key.cookie, ubuf, r);
 	if (ret)
 		return ret;
@@ -1167,7 +1167,6 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 				work_begin_key.cookie[0] == '\0')) {
 		struct switch_key_t switch_key;
 
-		printk("empty lookup\n");
 		/*
 		 * The current process should be tracked otherwise we can't
 		 * link this event to an origin.
@@ -1184,7 +1183,6 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 				sizeof(switch_key),
 				OUT_WORK_DONE, now);
 	} else {
-		printk("match key\n");
 		work_begin_key.cookie_size = r;
 		work_begin_key.type = KEY_WORK_BEGIN;
 
@@ -1192,7 +1190,6 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 				sizeof(work_begin_key));
 		if (!s)
 			goto out;
-		printk("matched\n");
 		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0, NULL, 0);
 
 		ret = latency_tracker_event_out(tracker, &work_begin_key,
@@ -1227,8 +1224,8 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	struct latency_tracker_event *s;
 	u64 now = trace_clock_monotonic_wrapper();
 
-	r = min_t(unsigned int, cnt, TASK_COMM_LEN);
-	memset(&work_begin_key.cookie, 0, TASK_COMM_LEN);
+	r = min_t(unsigned int, cnt, sizeof(work_begin_key.cookie));
+	memset(&work_begin_key.cookie, 0, sizeof(work_begin_key.cookie));
 	ret = copy_from_user(&work_begin_key.cookie, ubuf, r);
 	if (ret)
 		return ret;
@@ -1254,7 +1251,6 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 			&work_begin_key, sizeof(work_begin_key), 1);
 	if (!s)
 		goto out;
-	printk("inserted key (%d) %s\n", work_begin_key.cookie_size, work_begin_key.cookie);
 	append_delta_ts(s, KEY_WORK_BEGIN, "to work_begin", now, 0, NULL, 0);
 	latency_tracker_put_event(s);
 
