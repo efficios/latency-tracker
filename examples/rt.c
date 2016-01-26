@@ -1157,11 +1157,10 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 	ret = copy_from_user(&work_begin_key.cookie, ubuf, r);
 	if (ret)
 		return ret;
-	printk("sizeof(r): %d\n", r);
 
 	/*
-	 * If we got \n or \0 lookup we don't expect to find a cookie
-	 * created by work_begin, so lookup the current process instead.
+	 * If we got \n or \0, we don't expect to find a cookie created
+	 * by work_begin, so lookup the current process instead.
 	 */
 	if (r == 1 && (work_begin_key.cookie[0] == '\n' ||
 				work_begin_key.cookie[0] == '\0')) {
@@ -1176,8 +1175,9 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		s = latency_tracker_get_event(tracker, &switch_key,
 				sizeof(switch_key));
 		if (!s)
-			goto out;
-		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0, NULL, 0);
+			return -ENOENT;
+		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
+				NULL, 0);
 
 		ret = latency_tracker_event_out(tracker, &switch_key,
 				sizeof(switch_key),
@@ -1189,16 +1189,15 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		s = latency_tracker_get_event(tracker, &work_begin_key,
 				sizeof(work_begin_key));
 		if (!s)
-			goto out;
-		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0, NULL, 0);
+			return -ENOENT;
+		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
+				NULL, 0);
 
 		ret = latency_tracker_event_out(tracker, &work_begin_key,
 				sizeof(work_begin_key),
 				OUT_WORK_DONE, now);
 	}
 
-
-out:
 	return cnt;
 }
 
@@ -1230,6 +1229,11 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	if (ret)
 		return ret;
 
+	/*
+	 * Cookies must be strings, just a "echo > work_begin" is not
+	 * accepted, empty strings are valid for work_done if no cookie was
+	 * created.
+	 */
 	if (r == 1 && (work_begin_key.cookie[0] == '\n' ||
 				work_begin_key.cookie[0] == '\0'))
 		return -EINVAL;
@@ -1250,11 +1254,10 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	s = event_transition(&switch_key, sizeof(switch_key),
 			&work_begin_key, sizeof(work_begin_key), 1);
 	if (!s)
-		goto out;
+		return -ENOENT;
 	append_delta_ts(s, KEY_WORK_BEGIN, "to work_begin", now, 0, NULL, 0);
 	latency_tracker_put_event(s);
 
-out:
 	return cnt;
 }
 
