@@ -87,6 +87,8 @@ struct tracker_config {
 	int switch_out_blocked;
 	/* output an event when a target process write to the work_done file */
 	int out_work_done;
+	/* append in the payload of the event the breakdown (costly). */
+	int text_breakdown;
 	/*
 	 * output an event and stop the tracking as soon as a chain of
 	 * event results in a user-space entry.
@@ -100,11 +102,12 @@ static
 struct tracker_config config  = {
 	.timer_tracing = 0,
 	.irq_tracing = 1,
-	.switch_out_blocked = 0,
-	.out_work_done = 0,
-	.enter_userspace = 1,
 	.irq_filter = -1,
 	.softirq_filter = -1,
+	.switch_out_blocked = 0,
+	.out_work_done = 0,
+	.text_breakdown = 1,
+	.enter_userspace = 1,
 	.procname_filter_size = 0,
 };
 
@@ -282,6 +285,9 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 	char tmp[64];
 	size_t len;
 
+	if (!config.text_breakdown)
+		return;
+
 	if (ts)
 		now = ts;
 	else
@@ -402,7 +408,6 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	enum latency_tracker_event_in_ret ret;
 	struct do_irq_key_t key;
-	struct latency_tracker_event *s;
 	u64 now;
 
 	if (!config.irq_tracing)
@@ -418,13 +423,17 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 		return 0;
 	}
 
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
-	if (!s) {
-		BUG_ON(1);
-		return 0;
+	if (config.text_breakdown) {
+		struct latency_tracker_event *s;
+
+		s = latency_tracker_get_event(tracker, &key, sizeof(key));
+		if (!s) {
+			BUG_ON(1);
+			return 0;
+		}
+		append_delta_ts(s, KEY_DO_IRQ, "do_IRQ", now, 0, NULL, 0);
+		latency_tracker_put_event(s);
 	}
-	append_delta_ts(s, KEY_DO_IRQ, "do_IRQ", now, 0, NULL, 0);
-	latency_tracker_put_event(s);
 
 #ifdef DEBUG
 	printk("%llu do_IRQ (cpu %u)\n", trace_clock_monotonic_wrapper(),
@@ -515,7 +524,6 @@ void probe_local_timer_entry(void *ignore, int vector)
 {
 	enum latency_tracker_event_in_ret ret;
 	struct local_timer_key_t key;
-	struct latency_tracker_event *s;
 	u64 now;
 
 	if (!config.timer_tracing)
@@ -531,14 +539,17 @@ void probe_local_timer_entry(void *ignore, int vector)
 		return;
 	}
 
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
-	if (!s) {
-		BUG_ON(1);
-		return;
+	if (config.text_breakdown) {
+		struct latency_tracker_event *s;
+		s = latency_tracker_get_event(tracker, &key, sizeof(key));
+		if (!s) {
+			BUG_ON(1);
+			return;
+		}
+		append_delta_ts(s, KEY_TIMER_INTERRUPT, "local_timer_entry", now,
+				vector, NULL, 0);
+		latency_tracker_put_event(s);
 	}
-	append_delta_ts(s, KEY_TIMER_INTERRUPT, "local_timer_entry", now,
-			vector, NULL, 0);
-	latency_tracker_put_event(s);
 
 #ifdef DEBUG
 	printk("%llu local_timer_entry (cpu %u)\n", trace_clock_monotonic_wrapper(),
@@ -591,8 +602,8 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
-	printk("%llu hard_irq_entry (cpu: %u)\n", trace_clock_monotonic_wrapper(),
-			do_irq_key.cpu);
+		printk("%llu hard_irq_entry (cpu: %u)\n", trace_clock_monotonic_wrapper(),
+				do_irq_key.cpu);
 #endif
 }
 
@@ -601,7 +612,6 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 		int ret)
 {
 	struct hardirq_key_t hardirq_key;
-	struct latency_tracker_event *s;
 
 	if (!config.irq_tracing)
 		return;
@@ -614,11 +624,17 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 	hardirq_key.cpu = smp_processor_id();
 	hardirq_key.type = KEY_HARDIRQ;
 
-	s = latency_tracker_get_event(tracker, &hardirq_key, sizeof(hardirq_key));
-	if (!s)
-		goto end;
-	append_delta_ts(s, KEY_HARDIRQ, "to irq_handler_exit", 0, irq, NULL, 0);
-	latency_tracker_put_event(s);
+	if (config.text_breakdown) {
+		struct latency_tracker_event *s;
+
+		s = latency_tracker_get_event(tracker, &hardirq_key,
+				sizeof(hardirq_key));
+		if (!s)
+			goto end;
+		append_delta_ts(s, KEY_HARDIRQ, "to irq_handler_exit", 0,
+				irq, NULL, 0);
+		latency_tracker_put_event(s);
+	}
 
 	latency_tracker_event_out(tracker, &hardirq_key, sizeof(hardirq_key),
 			OUT_IRQHANDLER_NO_CB, 0);
@@ -649,8 +665,8 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			&raise_softirq_key, sizeof(raise_softirq_key), 0);
 	if (!s)
 		return;
-	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0, vec_nr,
-			NULL, 0);
+	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
+			vec_nr, NULL, 0);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -680,8 +696,8 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			&raise_softirq_key, sizeof(raise_softirq_key), 0);
 	if (!s)
 		return;
-	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0, vec_nr,
-			NULL, 0);
+	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
+			vec_nr, NULL, 0);
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
@@ -785,8 +801,6 @@ static
 void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 {
 	struct softirq_key_t softirq_key;
-	struct latency_tracker_event *s;
-	u64 orig_ts;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		return;
@@ -797,12 +811,17 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 	softirq_key.cpu = smp_processor_id();
 	softirq_key.pid = current->pid;
 	softirq_key.type = KEY_SOFTIRQ;
-	s = latency_tracker_get_event(tracker, &softirq_key, sizeof(softirq_key));
-	if (!s)
-		return;
-	append_delta_ts(s, KEY_SOFTIRQ, "to softirq_exit", 0, vec_nr, NULL, 0);
-	orig_ts = latency_tracker_event_get_start_ts(s);
-	latency_tracker_put_event(s);
+	if (config.text_breakdown) {
+		struct latency_tracker_event *s;
+
+		s = latency_tracker_get_event(tracker, &softirq_key,
+				sizeof(softirq_key));
+		if (!s)
+			return;
+		append_delta_ts(s, KEY_SOFTIRQ, "to softirq_exit", 0, vec_nr,
+				NULL, 0);
+		latency_tracker_put_event(s);
+	}
 	latency_tracker_event_out(tracker, &softirq_key, sizeof(softirq_key),
 			OUT_IRQHANDLER_NO_CB, 0);
 }
@@ -1005,14 +1024,17 @@ void sched_switch_in(struct task_struct *next)
 					OUT_ENTER_USERSPACE, now);
 		}
 	} else {
-		/* switch after a preempt */
-		s = latency_tracker_get_event(tracker, &switch_key,
-				sizeof(switch_key));
-		if (!s)
-			goto end;
-		append_delta_ts(s, KEY_SWITCH, "to switch_in", now, next->pid,
-				next->comm, wrapper_task_prio(next));
-		latency_tracker_put_event(s);
+		if (config.text_breakdown) {
+			/* switch after a preempt */
+			s = latency_tracker_get_event(tracker, &switch_key,
+					sizeof(switch_key));
+			if (!s)
+				goto end;
+			append_delta_ts(s, KEY_SWITCH, "to switch_in", now,
+					next->pid, next->comm,
+					wrapper_task_prio(next));
+			latency_tracker_put_event(s);
+		}
 	}
 
 #ifdef DEBUG
@@ -1027,7 +1049,6 @@ end:
 static
 void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 {
-	struct latency_tracker_event *s;
 	struct switch_key_t switch_key;
 	int ret;
 	u64 now = trace_clock_monotonic_wrapper();
@@ -1035,24 +1056,32 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 	/* switch out */
 	switch_key.pid = prev->pid;
 	switch_key.type = KEY_SWITCH;
-	s = latency_tracker_get_event(tracker, &switch_key, sizeof(switch_key));
-	if (!s)
-		goto end;
-	if (prev->state == TASK_RUNNING) {
-		struct event_data *data;
+	if (config.text_breakdown) {
+		struct latency_tracker_event *s;
 
-		append_delta_ts(s, KEY_SWITCH, "to switch_out", now, next->pid,
-				next->comm, wrapper_task_prio(next));
-		data = (struct event_data *) latency_tracker_event_get_priv_data(s);
-		if (!data)
-			return;
-		data->preempt_count++;
-	} else {
-		append_delta_ts(s, KEY_SWITCH, "to switch_out_blocked", now,
-				next->pid, next->comm,
-				wrapper_task_prio(next));
+		s = latency_tracker_get_event(tracker, &switch_key,
+				sizeof(switch_key));
+		if (!s)
+			goto end;
+		if (prev->state == TASK_RUNNING) {
+			struct event_data *data;
+
+			append_delta_ts(s, KEY_SWITCH, "to switch_out", now,
+					next->pid, next->comm,
+					wrapper_task_prio(next));
+			data = (struct event_data *)
+				latency_tracker_event_get_priv_data(s);
+			if (!data)
+				return;
+			data->preempt_count++;
+		} else {
+			append_delta_ts(s, KEY_SWITCH,
+					"to switch_out_blocked", now,
+					next->pid, next->comm,
+					wrapper_task_prio(next));
+		}
+		latency_tracker_put_event(s);
 	}
-	latency_tracker_put_event(s);
 
 	/*
 	 * If the task is still running, but just got preempted, it means that
@@ -1172,12 +1201,15 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		 */
 		switch_key.pid = current->pid;
 		switch_key.type = KEY_SWITCH;
-		s = latency_tracker_get_event(tracker, &switch_key,
-				sizeof(switch_key));
-		if (!s)
-			return -ENOENT;
-		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
-				NULL, 0);
+		if (config.text_breakdown) {
+			s = latency_tracker_get_event(tracker, &switch_key,
+					sizeof(switch_key));
+			if (!s)
+				return -ENOENT;
+			append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
+					NULL, 0);
+			latency_tracker_put_event(s);
+		}
 
 		ret = latency_tracker_event_out(tracker, &switch_key,
 				sizeof(switch_key),
@@ -1186,12 +1218,15 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		work_begin_key.cookie_size = r;
 		work_begin_key.type = KEY_WORK_BEGIN;
 
-		s = latency_tracker_get_event(tracker, &work_begin_key,
-				sizeof(work_begin_key));
-		if (!s)
-			return -ENOENT;
-		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
-				NULL, 0);
+		if (config.text_breakdown) {
+			s = latency_tracker_get_event(tracker, &work_begin_key,
+					sizeof(work_begin_key));
+			if (!s)
+				return -ENOENT;
+			append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
+					NULL, 0);
+			latency_tracker_put_event(s);
+		}
 
 		ret = latency_tracker_event_out(tracker, &work_begin_key,
 				sizeof(work_begin_key),
@@ -1306,6 +1341,11 @@ int setup_debugfs_extras(void)
 
 	file = debugfs_create_u32("enter_userspace",
 			S_IRUSR|S_IWUSR, filters_dir, &config.enter_userspace);
+	if (!file)
+		goto error;
+
+	file = debugfs_create_u32("text_breakdown",
+			S_IRUSR|S_IWUSR, filters_dir, &config.text_breakdown);
 	if (!file)
 		goto error;
 
