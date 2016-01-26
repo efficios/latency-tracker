@@ -117,7 +117,8 @@ enum rt_key_type {
 	KEY_SWITCH = 5,
 	KEY_TIMER_INTERRUPT = 6,
 	KEY_HRTIMER = 7,
-	KEY_WORK_DONE = 8,
+	KEY_WORK_BEGIN = 8,
+	KEY_WORK_DONE = 9,
 };
 
 enum event_out_types {
@@ -169,9 +170,27 @@ struct switch_key_t {
 	enum rt_key_type type;
 } __attribute__((__packed__));
 
-/* Keep up-to-date with the biggest struct, should use an union actually. */
+struct work_begin_key_t {
+	char cookie[TASK_COMM_LEN];
+	int cookie_size;
+	enum rt_key_type type;
+} __attribute__((__packed__));
+
+/* Keep up-to-date with a list of all key structs. */
+union max_key_size {
+	struct do_irq_key_t do_irq_key;
+	struct local_timer_key_t local_timer_key;
+	struct hrtimer_key_t hrtimer_key;
+	struct hardirq_key_t hardirq_key_t;
+	struct raise_softirq_key_t raise_softirq_key;
+	struct softirq_key_t softirq_key;
+	struct waking_key_t waking_key;
+	struct switch_key_t switch_key;
+	struct work_begin_key_t work_begin_key;
+};
+
 #undef MAX_KEY_SIZE
-#define MAX_KEY_SIZE sizeof(struct raise_softirq_key_t)
+#define MAX_KEY_SIZE sizeof(union max_key_size)
 
 #if !defined(MAX_FILTER_STR_VAL)
 #define MAX_FILTER_STR_VAL 256
@@ -279,25 +298,33 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 
 	switch (type) {
 	case KEY_DO_IRQ:
-		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(), now - data->prev_ts);
+		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
+				now - data->prev_ts);
 		break;
 	case KEY_HARDIRQ:
 	case KEY_RAISE_SOFTIRQ:
 	case KEY_SOFTIRQ:
 	case KEY_WAKEUP:
-		snprintf(tmp, 64, "%s(%d) [%03d] = %llu, ", txt, field1, smp_processor_id(),
-				now - data->prev_ts);
+		snprintf(tmp, 64, "%s(%d) [%03d] = %llu, ", txt, field1,
+				smp_processor_id(), now - data->prev_ts);
 		break;
 	case KEY_SWITCH:
 		snprintf(tmp, 64, "%s(%s-%d, %d) [%03d] = %llu, ", txt, field2,
-				field1, field3, smp_processor_id(), now - data->prev_ts);
+				field1, field3, smp_processor_id(),
+				now - data->prev_ts);
 		break;
 	case KEY_TIMER_INTERRUPT:
 	case KEY_HRTIMER:
-		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(), now - data->prev_ts);
+		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
+				now - data->prev_ts);
 		break;
 	case KEY_WORK_DONE:
-		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(), now - data->prev_ts);
+		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
+				now - data->prev_ts);
+		break;
+	case KEY_WORK_BEGIN:
+		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
+				now - data->prev_ts);
 		break;
 	}
 	len = strlen(tmp);
@@ -1113,11 +1140,9 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		size_t cnt, loff_t *ppos)
 {
 	int ret, r;
-	char buf[TASK_COMM_LEN];
-	struct switch_key_t switch_key;
 	struct latency_tracker_event *s;
+	struct work_begin_key_t work_begin_key;
 	//struct tracker_config *cfg = filp->private_data;
-	struct event_data *data;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	if (!config.out_work_done)
@@ -1128,28 +1153,53 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 	 * someday on which we could apply filters.
 	 */
 	r = min_t(unsigned int, cnt, TASK_COMM_LEN);
-	ret = copy_from_user(buf, ubuf, r);
+	memset(&work_begin_key.cookie, 0, TASK_COMM_LEN);
+	ret = copy_from_user(&work_begin_key.cookie, ubuf, r);
 	if (ret)
 		return ret;
+	printk("sizeof(r): %d\n", r);
 
-	switch_key.pid = current->pid;
-	switch_key.type = KEY_SWITCH;
-	s = latency_tracker_get_event(tracker, &switch_key,
-			sizeof(switch_key));
-	if (!s)
-		goto out;
+	/*
+	 * If we got \n or \0 lookup we don't expect to find a cookie
+	 * created by work_begin, so lookup the current process instead.
+	 */
+	if (r == 1 && (work_begin_key.cookie[0] == '\n' ||
+				work_begin_key.cookie[0] == '\0')) {
+		struct switch_key_t switch_key;
 
-	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
-	if (!data) {
-		BUG_ON(1);
-		goto out;
+		printk("empty lookup\n");
+		/*
+		 * The current process should be tracked otherwise we can't
+		 * link this event to an origin.
+		 */
+		switch_key.pid = current->pid;
+		switch_key.type = KEY_SWITCH;
+		s = latency_tracker_get_event(tracker, &switch_key,
+				sizeof(switch_key));
+		if (!s)
+			goto out;
+		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0, NULL, 0);
+
+		ret = latency_tracker_event_out(tracker, &switch_key,
+				sizeof(switch_key),
+				OUT_WORK_DONE, now);
+	} else {
+		printk("match key\n");
+		work_begin_key.cookie_size = r;
+		work_begin_key.type = KEY_WORK_BEGIN;
+
+		s = latency_tracker_get_event(tracker, &work_begin_key,
+				sizeof(work_begin_key));
+		if (!s)
+			goto out;
+		printk("matched\n");
+		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0, NULL, 0);
+
+		ret = latency_tracker_event_out(tracker, &work_begin_key,
+				sizeof(work_begin_key),
+				OUT_WORK_DONE, now);
 	}
-	append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0, NULL, 0);
-	latency_tracker_put_event(s);
 
-	ret = latency_tracker_event_out(tracker, &switch_key, sizeof(switch_key),
-			OUT_WORK_DONE, 0);
-	printk("ret: %d\n", ret);
 
 out:
 	return cnt;
@@ -1159,6 +1209,63 @@ static const
 struct file_operations work_done_fops = {
 	.open           = latency_open_generic,
 	.write          = write_work_done,
+};
+
+/*
+ * This should be called from a task that has been woken up in the
+ * path of interrupt processing.
+ * FIXME: what happens if the task was already awake when the interrupt
+ * arrived ?
+ */
+static
+ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	int ret, r;
+	struct switch_key_t switch_key;
+	struct work_begin_key_t work_begin_key;
+	struct latency_tracker_event *s;
+	u64 now = trace_clock_monotonic_wrapper();
+
+	r = min_t(unsigned int, cnt, TASK_COMM_LEN);
+	memset(&work_begin_key.cookie, 0, TASK_COMM_LEN);
+	ret = copy_from_user(&work_begin_key.cookie, ubuf, r);
+	if (ret)
+		return ret;
+
+	if (r == 1 && (work_begin_key.cookie[0] == '\n' ||
+				work_begin_key.cookie[0] == '\0'))
+		return -EINVAL;
+
+	/*
+	 * The current process should be tracked otherwise we can't link
+	 * this event to an origin.
+	 */
+	switch_key.pid = current->pid;
+	switch_key.type = KEY_SWITCH;
+
+	work_begin_key.cookie_size = r;
+	work_begin_key.type = KEY_WORK_BEGIN;
+
+	/*
+	 * From now on, only a work_done event can complete this branch.
+	 */
+	s = event_transition(&switch_key, sizeof(switch_key),
+			&work_begin_key, sizeof(work_begin_key), 1);
+	if (!s)
+		goto out;
+	printk("inserted key (%d) %s\n", work_begin_key.cookie_size, work_begin_key.cookie);
+	append_delta_ts(s, KEY_WORK_BEGIN, "to work_begin", now, 0, NULL, 0);
+	latency_tracker_put_event(s);
+
+out:
+	return cnt;
+}
+
+static const
+struct file_operations work_begin_fops = {
+	.open           = latency_open_generic,
+	.write          = write_work_begin,
 };
 
 static
@@ -1220,6 +1327,11 @@ int setup_debugfs_extras(void)
 
 	file = debugfs_create_file("work_done", S_IWUSR,
 			actions_dir, &config, &work_done_fops);
+	if (!file)
+		goto error;
+
+	file = debugfs_create_file("work_begin", S_IWUSR,
+			actions_dir, &config, &work_begin_fops);
 	if (!file)
 		goto error;
 
