@@ -1070,52 +1070,62 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 	/* switch out */
 	switch_key.pid = prev->pid;
 	switch_key.type = KEY_SWITCH;
-	if (config.text_breakdown) {
-		struct latency_tracker_event *s;
+	/* Handle duplicates */
+	for (;;) {
+		if (config.text_breakdown) {
+			struct latency_tracker_event *s;
 
-		s = latency_tracker_get_event(tracker, &switch_key,
-				sizeof(switch_key));
-		if (!s)
-			goto end;
-		if (prev->state == TASK_RUNNING) {
-			struct event_data *data;
+			s = latency_tracker_get_event(tracker, &switch_key,
+					sizeof(switch_key));
+			if (!s)
+				goto end;
+			if (prev->state == TASK_RUNNING) {
+				struct event_data *data;
 
-			append_delta_ts(s, KEY_SWITCH, "to switch_out", now,
-					next->pid, next->comm,
-					wrapper_task_prio(next));
-			data = (struct event_data *)
-				latency_tracker_event_get_priv_data(s);
-			if (!data)
-				return;
-			data->preempt_count++;
-		} else {
-			append_delta_ts(s, KEY_SWITCH,
-					"to switch_out_blocked", now,
-					next->pid, next->comm,
-					wrapper_task_prio(next));
+				append_delta_ts(s, KEY_SWITCH, "to switch_out",
+						now, next->pid, next->comm,
+						wrapper_task_prio(next));
+				data = (struct event_data *)
+					latency_tracker_event_get_priv_data(s);
+				if (!data)
+					goto end;
+				data->preempt_count++;
+			} else {
+				append_delta_ts(s, KEY_SWITCH,
+						"to switch_out_blocked", now,
+						next->pid, next->comm,
+						wrapper_task_prio(next));
+			}
+			latency_tracker_put_event(s);
 		}
-		latency_tracker_put_event(s);
-	}
 
-	/*
-	 * If the task is still running, but just got preempted, it means that
-	 * it is still actively working on an event, so we continue tracking
-	 * its state until it blocks.
-	 */
-	if (prev->state == TASK_RUNNING)
-		goto end;
+		/*
+		 * If the task is still running, but just got preempted, it
+		 * means that it is still actively working on an event, so we
+		 * continue tracking its state until it blocks.
+		 */
+		if (prev->state == TASK_RUNNING)
+			goto end;
 
-	if (config.switch_out_blocked) {
-		ret = latency_tracker_event_out(tracker, &switch_key, sizeof(switch_key),
-				OUT_SWITCH_BLOCKED, now);
+		if (config.switch_out_blocked) {
+			ret = latency_tracker_event_out(tracker, &switch_key,
+					sizeof(switch_key), OUT_SWITCH_BLOCKED,
+					now);
+			if (ret != 0)
+				break;
 #ifdef DEBUG
-	if (ret == 0)
-		printk("%llu switch_out %d (%s)\n",
-				trace_clock_read64(),
-				prev->pid, prev->comm);
+			if (ret == 0) {
+				printk("%llu switch_out %d (%s)\n",
+						trace_clock_read64(),
+						prev->pid, prev->comm);
+			}
 #endif
+		} else {
+			break;
+		}
 	}
 end:
+	printk("out\n");
 	return;
 }
 
