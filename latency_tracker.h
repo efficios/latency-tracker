@@ -250,6 +250,13 @@ struct latency_tracker_event *latency_tracker_get_event(
 		unsigned int key_len);
 
 /*
+ * Same as latency_tracker_get_event but avoids a new lookup if the
+ * user already has a pointer for the event.
+ */
+struct latency_tracker_event *_latency_tracker_get_event(
+		struct latency_tracker_event *event);
+
+/*
  * Release the reference on an event (to allow freeing the memory associated
  * with it).
  */
