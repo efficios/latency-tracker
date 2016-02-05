@@ -35,6 +35,7 @@
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/task_prio.h"
 #include "../wrapper/lt_probe.h"
+#include "rt_bench.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -1581,6 +1582,8 @@ int __init rt_init(void)
 	if (!timer_tracing)
 		config.timer_tracing = 0;
 
+	setup_benchmark_pre();
+
 	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
 			probe_local_timer_entry, NULL);
 	WARN_ON(ret);
@@ -1624,6 +1627,8 @@ int __init rt_init(void)
 	ret = register_kretprobe(&probe_do_irq);
 	WARN_ON(ret);
 
+	setup_benchmark_post();
+
 	goto end;
 
 error:
@@ -1661,6 +1666,8 @@ void __exit rt_exit(void)
 	lttng_wrapper_tracepoint_probe_unregister("softirq_exit",
 			probe_softirq_exit, NULL);
 	unregister_kretprobe(&probe_do_irq);
+	report_benchmark();
+	teardown_benchmark();
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
 	latency_tracker_destroy(tracker);
