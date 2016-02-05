@@ -717,15 +717,13 @@ struct latency_tracker_event *latency_tracker_get_event(
 }
 EXPORT_SYMBOL_GPL(latency_tracker_get_event);
 
-struct latency_tracker_event *_latency_tracker_get_event(
-		struct latency_tracker_event *event)
+int _latency_tracker_get_event(struct latency_tracker_event *event)
 {
-	int ret;
-
-	ret = kref_get_unless_zero(&event->refcount);
-	if (!ret)
-		event = NULL;
-	return event;
+	/*
+	 * 0: failed
+	 * 1: success
+	 */
+	return kref_get_unless_zero(&event->refcount);
 }
 EXPORT_SYMBOL_GPL(_latency_tracker_get_event);
 

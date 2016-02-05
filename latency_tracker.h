@@ -244,6 +244,9 @@ int _latency_tracker_event_out(struct latency_tracker *tracker,
  * event_out on the key has not been performed. The structure returned is
  * guaranteed to be valid even after the event_out and until the put_event is
  * not done.
+ *
+ * WARNING: duplicate keys are not supported, it currently only takes the
+ * reference on the first event found (order not guaranteed).
  */
 struct latency_tracker_event *latency_tracker_get_event(
 		struct latency_tracker *tracker, void *key,
@@ -252,9 +255,11 @@ struct latency_tracker_event *latency_tracker_get_event(
 /*
  * Same as latency_tracker_get_event but avoids a new lookup if the
  * user already has a pointer for the event.
+ * Returns 1 on success, 0 if failed.
+ * If if fails, it means the event passed in parameter was used without
+ * proper refcounting, that's a bug.
  */
-struct latency_tracker_event *_latency_tracker_get_event(
-		struct latency_tracker_event *event);
+int _latency_tracker_get_event(struct latency_tracker_event *event);
 
 /*
  * Release the reference on an event (to allow freeing the memory associated
