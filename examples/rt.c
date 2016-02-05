@@ -204,9 +204,33 @@ union max_key_size {
 
 struct event_data {
 	unsigned int pos;
-	unsigned int in_use;
 	unsigned int preempt_count;
+	union {
+		/*
+		 * When the event is a child event (not the origin).
+		 * Is this event the tip of a relevant branch ?
+		 * 0 : unknown
+		 * 1 : yes
+		 */
+		unsigned int good_branch;
+		/*
+		 * When the event is the origin event, flag to inform
+		 * the child branches if the relevant branch has been
+		 * identified.
+		 * 0 : no
+		 * 1 : yes
+		 */
+		unsigned int good_branch_found;
+	} u;
+	/*
+	 * Final flag in the root to inform all branches to complete
+	 * regardless of their good_branch flag. This protects the case where
+	 * a branch completes even if it was not flagged as good (work_done
+	 * without work_begin).
+	 */
+	unsigned int tree_closed;
 	u64 prev_ts;
+	struct latency_tracker_event *root;
 	char userspace_proc[TASK_COMM_LEN];
 	char breakdown[MAX_PAYLOAD];
 } __attribute__((__packed__));
@@ -468,6 +492,68 @@ struct kretprobe probe_do_irq = {
 };
 
 /*
+ * Check if the event is in a branch that can continue or needs to be
+ * collected. If the current branch is invalid, this function releases the
+ * refcount on the root and returns 1.
+ * Returns 0 if the branch is still valid
+ */
+static
+int check_current_branch(struct event_data *data_in)
+{
+	struct event_data *root_data;
+
+	/*
+	 * The root is not a branch, it does not need to be flagged.
+	 */
+	if (!data_in->root)
+		return 0;
+
+	root_data = (struct event_data *)
+		latency_tracker_event_get_priv_data(data_in->root);
+	/*
+	 * If the good branch has been identified and it's not this
+	 * one, release the refcount on the root and clear this
+	 * branch.
+	 */
+	if ((root_data->u.good_branch_found && !data_in->u.good_branch) ||
+			(root_data->tree_closed)) {
+		latency_tracker_put_event(data_in->root);
+		data_in->root = NULL;
+		printk("end branch\n");
+		return 1;
+	}
+	return 0;
+}
+
+/*
+ * Flag the current branch as valid and set the flag in the root branch
+ * to inform that the good branch has been found.
+ */
+static
+void set_good_branch(struct event_data *data_in)
+{
+	struct event_data *root_data;
+
+	/*
+	 * The root is not a branch, it does not need to be flagged.
+	 */
+	if (!data_in->root)
+		return;
+
+	root_data = (struct event_data *)
+		latency_tracker_event_get_priv_data(data_in->root);
+	/*
+	 * Might race if a new branch is created in event_transition(), but
+	 * it resolves itself automatically when any valid branch actually
+	 * completes (tree_closed).
+	 */
+	root_data->u.good_branch_found = 1;
+	data_in->u.good_branch = 1;
+
+	return;
+}
+
+/*
  * Lookup the key_in, if it does not exist return NULL.
  * Otherwise:
  * - create the key_out with the original timestamp
@@ -478,10 +564,14 @@ struct kretprobe probe_do_irq = {
  * The same key could be in the tracker multiple times (unique = 0 in
  * event_in), in this case, the caller should make sure to loop over this
  * function when a transition is required until it returns NULL.
+ *
+ * The branch parameter informs if the new event creates a new branch in
+ * the tree, if it does we have to take a reference on the root event.
  */
 static
 struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
-		void *key_out, int key_out_len, int del, int unique)
+		void *key_out, int key_out_len, int del, int unique,
+		int branch)
 {
 	struct latency_tracker_event *event_in = NULL, *event_out = NULL;
 	struct event_data *data_in, *data_out;
@@ -495,6 +585,16 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	if (!data_in) {
 		BUG_ON(1);
 		goto end;
+	}
+
+	/*
+	 * If we are in a branch, check if it is still valid before performing
+	 * a state transition.
+	 */
+	ret = check_current_branch(data_in);
+	if (ret != 0) {
+		del = 1;
+		goto end_del;
 	}
 	orig_ts = latency_tracker_event_get_start_ts(event_in);
 
@@ -513,6 +613,29 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		goto end;
 	}
 	memcpy(data_out, data_in, sizeof(struct event_data));
+	if (branch) {
+		struct event_data *data_root;
+
+		ret = _latency_tracker_get_event(event_in);
+		if (!ret) {
+			printk("ERR _latency_tracker_get_event\n");
+			goto end_del;
+		}
+		/* First branch, the others get the pointer from the memcpy */
+		if (!data_in->root) {
+			data_out->root = event_in;
+		}
+		/*
+		 * When branching, we have to reset the good_branch flags
+		 * regardless of the current state since we don't know if the
+		 * new branch is valid and it should not inherit the state of
+		 * its parent (memcpy).
+		 */
+		data_root = (struct event_data *)
+			latency_tracker_event_get_priv_data(data_out->root);
+		data_root->u.good_branch_found = 0;
+		data_out->u.good_branch = 0;
+	}
 
 end_del:
 	if (del)
@@ -599,7 +722,7 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	hardirq_key.type = KEY_HARDIRQ;
 
 	s = event_transition(&do_irq_key, sizeof(do_irq_key), &hardirq_key,
-			sizeof(hardirq_key), 0, 1);
+			sizeof(hardirq_key), 0, 1, 0);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_HARDIRQ, "to irq_handler_entry", 0, irq,
@@ -667,7 +790,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	raise_softirq_key.type = KEY_RAISE_SOFTIRQ;
 
 	s = event_transition(&switch_key, sizeof(switch_key),
-			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0);
+			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0, 1);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
@@ -698,7 +821,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	raise_softirq_key.type = KEY_RAISE_SOFTIRQ;
 
 	s = event_transition(&hardirq_key, sizeof(hardirq_key),
-			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0);
+			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0, 1);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
@@ -736,7 +859,7 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 
 	do {
 		s = event_transition(&raise_softirq_key, sizeof(raise_softirq_key),
-				&softirq_key, sizeof(softirq_key), 1, 1);
+				&softirq_key, sizeof(softirq_key), 1, 1, 0);
 		if (!s)
 			return;
 		append_delta_ts(s, KEY_SOFTIRQ, "to softirq_entry", 0, vec_nr, NULL, 0);
@@ -770,7 +893,7 @@ void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
 	hrtimer_key.type = KEY_HRTIMER;
 
 	s = event_transition(&local_timer_key, sizeof(local_timer_key),
-			&hrtimer_key, sizeof(hrtimer_key), 0, 1);
+			&hrtimer_key, sizeof(hrtimer_key), 0, 1, 0);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_HRTIMER, "to hrtimer_expire_entry", 0, -1,
@@ -842,7 +965,7 @@ void irq_waking(struct waking_key_t *waking_key)
 	do_irq_key.type = KEY_DO_IRQ;
 
 	s = event_transition(&do_irq_key, sizeof(do_irq_key),
-			waking_key, sizeof(waking_key), 0, 0);
+			waking_key, sizeof(waking_key), 0, 0, 1);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
@@ -865,7 +988,7 @@ void softirq_waking(struct waking_key_t *waking_key)
 	softirq_key.type = KEY_SOFTIRQ;
 
 	s = event_transition(&softirq_key, sizeof(softirq_key),
-			waking_key, sizeof(waking_key), 0, 0);
+			waking_key, sizeof(waking_key), 0, 0, 1);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
@@ -890,7 +1013,7 @@ int hrtimer_waking(struct waking_key_t *waking_key)
 	hrtimer_key.cpu = smp_processor_id();
 	hrtimer_key.type = KEY_HRTIMER;
 	s = event_transition(&hrtimer_key, sizeof(hrtimer_key),
-			waking_key, sizeof(waking_key), 0, 0);
+			waking_key, sizeof(waking_key), 0, 0, 1);
 	if (!s)
 		return 0;
 	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
@@ -915,7 +1038,7 @@ void thread_waking(struct waking_key_t *waking_key)
 	switch_key.type = KEY_SWITCH;
 
 	s = event_transition(&switch_key, sizeof(switch_key), waking_key,
-			sizeof(waking_key), 0, 0);
+			sizeof(waking_key), 0, 0, 1);
 	if (s) {
 		/* switch_in after a waking */
 		append_delta_ts(s, KEY_WAKEUP, "to sched_waking", now,
@@ -1004,7 +1127,7 @@ void sched_switch_in(struct task_struct *next)
 	struct latency_tracker_event *s;
 	struct switch_key_t switch_key;
 	struct event_data *data;
-	int nr_found = 0;
+	int nr_found = 0, ret;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	switch_key.pid = next->pid;
@@ -1019,7 +1142,7 @@ void sched_switch_in(struct task_struct *next)
 	/* switch after one or multiple waking */
 	do {
 		s = event_transition(&waking_key, sizeof(waking_key),
-				&switch_key, sizeof(switch_key), 1, 0);
+				&switch_key, sizeof(switch_key), 1, 0, 0);
 		if (!s)
 			break;
 		nr_found++;
@@ -1038,17 +1161,24 @@ void sched_switch_in(struct task_struct *next)
 
 	/* switch after a preempt */
 	if (!nr_found) {
-		if (config.text_breakdown) {
-			/* FIXME: does not work with duplicates */
-			s = latency_tracker_get_event(tracker, &switch_key,
-					sizeof(switch_key));
-			if (!s)
-				goto end;
-			append_delta_ts(s, KEY_SWITCH, "to switch_in", now,
-					next->pid, next->comm,
-					wrapper_task_prio(next));
+		/* FIXME: does not work with duplicates */
+		s = latency_tracker_get_event(tracker, &switch_key,
+				sizeof(switch_key));
+		if (!s)
+			goto end;
+		data = (struct event_data *)
+			latency_tracker_event_get_priv_data(s);
+		ret = check_current_branch(data);
+		if (ret != 0) {
 			latency_tracker_put_event(s);
+			latency_tracker_event_out(tracker, &switch_key,
+					sizeof(switch_key), OUT_NO_CB, 0);
+			goto end;
 		}
+		append_delta_ts(s, KEY_SWITCH, "to switch_in", now,
+				next->pid, next->comm,
+				wrapper_task_prio(next));
+		latency_tracker_put_event(s);
 	}
 
 #ifdef DEBUG
@@ -1125,7 +1255,6 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 		}
 	}
 end:
-	printk("out\n");
 	return;
 }
 
@@ -1197,6 +1326,7 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 	int ret, r;
 	struct latency_tracker_event *s;
 	struct work_begin_key_t work_begin_key;
+	struct event_data *data;
 	//struct tracker_config *cfg = filp->private_data;
 	u64 now = trace_clock_monotonic_wrapper();
 
@@ -1227,37 +1357,41 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		 */
 		switch_key.pid = current->pid;
 		switch_key.type = KEY_SWITCH;
-		if (config.text_breakdown) {
-			s = latency_tracker_get_event(tracker, &switch_key,
-					sizeof(switch_key));
-			if (!s)
-				return -ENOENT;
-			append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
-					NULL, 0);
-			latency_tracker_put_event(s);
-		}
-
-		ret = latency_tracker_event_out(tracker, &switch_key,
+		s = latency_tracker_get_event(tracker, &switch_key,
+				sizeof(switch_key));
+		if (!s)
+			return -ENOENT;
+		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
+				NULL, 0);
+		latency_tracker_event_out(tracker, &switch_key,
 				sizeof(switch_key),
 				OUT_WORK_DONE, now);
 	} else {
 		work_begin_key.cookie_size = r;
 		work_begin_key.type = KEY_WORK_BEGIN;
 
-		if (config.text_breakdown) {
-			s = latency_tracker_get_event(tracker, &work_begin_key,
-					sizeof(work_begin_key));
-			if (!s)
-				return -ENOENT;
-			append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
-					NULL, 0);
-			latency_tracker_put_event(s);
-		}
-
-		ret = latency_tracker_event_out(tracker, &work_begin_key,
+		s = latency_tracker_get_event(tracker, &work_begin_key,
+				sizeof(work_begin_key));
+		if (!s)
+			return -ENOENT;
+		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
+				NULL, 0);
+		latency_tracker_event_out(tracker, &work_begin_key,
 				sizeof(work_begin_key),
 				OUT_WORK_DONE, now);
 	}
+	data = (struct event_data *)
+		latency_tracker_event_get_priv_data(s);
+	if (data->root) {
+		struct event_data *data_root;
+
+		data_root = (struct event_data *)
+			latency_tracker_event_get_priv_data(data->root);
+		data_root->tree_closed = 1;
+		latency_tracker_put_event(data->root);
+		data->root = NULL;
+	}
+	latency_tracker_put_event(s);
 
 	return cnt;
 }
@@ -1282,6 +1416,7 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	struct switch_key_t switch_key;
 	struct work_begin_key_t work_begin_key;
 	struct latency_tracker_event *s;
+	struct event_data *data;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	r = min_t(unsigned int, cnt, sizeof(work_begin_key.cookie));
@@ -1292,8 +1427,7 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 
 	/*
 	 * Cookies must be strings, just a "echo > work_begin" is not
-	 * accepted, empty strings are valid for work_done if no cookie was
-	 * created.
+	 * accepted, empty strings are valid for work_done.
 	 */
 	if (r == 1 && (work_begin_key.cookie[0] == '\n' ||
 				work_begin_key.cookie[0] == '\0'))
@@ -1313,7 +1447,7 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	 * From now on, only a work_done event can complete this branch.
 	 */
 	s = event_transition(&switch_key, sizeof(switch_key),
-			&work_begin_key, sizeof(work_begin_key), 1, 1);
+			&work_begin_key, sizeof(work_begin_key), 1, 1, 0);
 	/*
 	 * FIXME: we could accept not knowing the origin and at least compute
 	 * the user-space processing-time in case we missed the associated
@@ -1321,6 +1455,10 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	 */
 	if (!s)
 		return -ENOENT;
+	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+	printk("good\n");
+	set_good_branch(data);
+
 	append_delta_ts(s, KEY_WORK_BEGIN, "to work_begin", now, 0, NULL, 0);
 	latency_tracker_put_event(s);
 
