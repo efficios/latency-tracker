@@ -23,12 +23,12 @@
 #include "../wrapper/tracepoint.h"
 #include "rt_bench.h"
 
-//#define BENCHMARK 1
+#define BENCHMARK 1
 
 #ifdef BENCHMARK
 
 static u64 *begin_ts;
-
+static unsigned long *cpu_flags;
 
 BENCH_PROBE_DEFINE(local_timer_entry, int vector);
 BENCH_PROBE_DEFINE(local_timer_exit, int vector);
@@ -60,6 +60,10 @@ void init_benchmark(void)
 	if (!begin_ts)
 		goto error;
 
+	cpu_flags = kzalloc(nr_cpu * sizeof(u64), GFP_KERNEL);
+	if (!cpu_flags)
+		goto error;
+
 error:
 	return;
 }
@@ -68,6 +72,8 @@ void teardown_benchmark(void)
 {
 	if (begin_ts)
 		kfree(begin_ts);
+	if (cpu_flags)
+		kfree(cpu_flags);
 
 	BENCH_UNREGISTER_PROBES(local_timer_entry);
 	BENCH_UNREGISTER_PROBES(local_timer_exit);

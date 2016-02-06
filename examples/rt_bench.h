@@ -23,16 +23,17 @@
 	static u64 nr_##_name, total_##_name, min_##_name = ULLONG_MAX, max_##_name; \
 	void trace_##_name(__VA_ARGS__); \
 	static void pre_##_name(void *ignore, __VA_ARGS__) { \
+		local_irq_save(cpu_flags[smp_processor_id()]); \
 		begin_ts[smp_processor_id()] = trace_clock_monotonic_wrapper(); \
 	} \
 	static void post_##_name(void *ignore, __VA_ARGS__) { \
 		u64 ts = trace_clock_monotonic_wrapper(); \
 		u64 delta = ts - begin_ts[smp_processor_id()]; \
 		if (begin_ts[smp_processor_id()] == 0) \
-			return; \
+			goto end; \
 		if (ts < begin_ts[smp_processor_id()]) { \
 			WARN_ON_ONCE(1); \
-			return; \
+			goto end; \
 		} \
 		if (min_##_name > delta) \
 			min_##_name = delta; \
@@ -41,6 +42,8 @@
 		nr_##_name++; \
 		total_##_name += delta; \
 		begin_ts[smp_processor_id()] = 0; \
+	end: \
+		local_irq_restore(cpu_flags[smp_processor_id()]); \
 	} \
 
 #define BENCH_REGISTER_PRE_PROBE(_name) \
