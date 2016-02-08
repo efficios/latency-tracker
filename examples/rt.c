@@ -580,8 +580,11 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	int ret;
 
 	event_in = latency_tracker_get_event(tracker, key_in, key_in_len);
-	if (!event_in)
+	if (!event_in) {
+		trace_latency_tracker_measurement("transition", 2, 0); \
 		return NULL;
+	}
+	trace_latency_tracker_measurement("transition", 2, 1); \
 	data_in = (struct event_data *) latency_tracker_event_get_priv_data(event_in);
 	if (!data_in) {
 		BUG_ON(1);
@@ -1666,7 +1669,6 @@ void __exit rt_exit(void)
 	lttng_wrapper_tracepoint_probe_unregister("softirq_exit",
 			probe_softirq_exit, NULL);
 	unregister_kretprobe(&probe_do_irq);
-	report_benchmark();
 	teardown_benchmark();
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);

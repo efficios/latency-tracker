@@ -21,14 +21,12 @@
 
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/tracepoint.h"
+#include <trace/events/latency_tracker.h>
 #include "rt_bench.h"
 
 #define BENCHMARK 1
 
 #ifdef BENCHMARK
-
-static u64 *begin_ts;
-static unsigned long *cpu_flags;
 
 BENCH_PROBE_DEFINE(local_timer_entry, int vector);
 BENCH_PROBE_DEFINE(local_timer_exit, int vector);
@@ -47,34 +45,8 @@ BENCH_PROBE_DEFINE(sched_switch, bool preempt, struct task_struct *prev, struct 
 BENCH_PROBE_DEFINE(sched_switch, struct task_struct *prev, struct task_struct *next);
 #endif
 
-static
-void init_benchmark(void)
-{
-	int cpu;
-	int nr_cpu = 0;
-
-	for_each_possible_cpu(cpu)
-		nr_cpu++;
-
-	begin_ts = kzalloc(nr_cpu * sizeof(u64), GFP_KERNEL);
-	if (!begin_ts)
-		goto error;
-
-	cpu_flags = kzalloc(nr_cpu * sizeof(u64), GFP_KERNEL);
-	if (!cpu_flags)
-		goto error;
-
-error:
-	return;
-}
-
 void teardown_benchmark(void)
 {
-	if (begin_ts)
-		kfree(begin_ts);
-	if (cpu_flags)
-		kfree(cpu_flags);
-
 	BENCH_UNREGISTER_PROBES(local_timer_entry);
 	BENCH_UNREGISTER_PROBES(local_timer_exit);
 	BENCH_UNREGISTER_PROBES(hrtimer_expire_entry);
@@ -91,8 +63,6 @@ void teardown_benchmark(void)
 void setup_benchmark_pre(void)
 {
 	int ret;
-
-	init_benchmark();
 
 	BENCH_REGISTER_PRE_PROBE(local_timer_entry);
 	BENCH_REGISTER_PRE_PROBE(local_timer_exit);
@@ -123,26 +93,8 @@ void setup_benchmark_post(void)
 	BENCH_REGISTER_POST_PROBE(sched_switch);
 	BENCH_REGISTER_POST_PROBE(sched_waking);
 }
-
-void report_benchmark(void)
-{
-	u64 avg;
-
-	BENCH_REPORT(local_timer_entry);
-	BENCH_REPORT(local_timer_exit);
-	BENCH_REPORT(hrtimer_expire_entry);
-	BENCH_REPORT(hrtimer_expire_exit);
-	BENCH_REPORT(irq_handler_entry);
-	BENCH_REPORT(irq_handler_exit);
-	BENCH_REPORT(softirq_raise);
-	BENCH_REPORT(softirq_entry);
-	BENCH_REPORT(softirq_exit);
-	BENCH_REPORT(sched_switch);
-	BENCH_REPORT(sched_waking);
-}
 #else
 void setup_benchmark_pre(void) {}
 void setup_benchmark_post(void) {}
-void report_benchmark(void) {}
 void teardown_benchmark(void) {}
 #endif /* BENCHMARK */
