@@ -1,26 +1,25 @@
-From c6485106b4cd6bcc13970211666dbe4b059e98c5 Mon Sep 17 00:00:00 2001
-From: Francois Doray <francois.pierre-doray@polymtl.ca>
-Date: Tue, 17 Mar 2015 19:36:15 -0400
-Subject: [PATCH] connect to latency_tracker tracepoints
+From be5eaa73ca8e4d814910875d51141aaa8f4b17e2 Mon Sep 17 00:00:00 2001
+From: Julien Desfossez <jdesfossez@efficios.com>
+Date: Mon, 8 Feb 2016 11:20:19 -0500
+Subject: [MODULES PATCH] Connect to latency_tracker tracepoints
 
-Signed-off-by: Francois Doray <francois.pierre-doray@polymtl.ca>
 Signed-off-by: Julien Desfossez <jdesfossez@efficios.com>
 ---
- .../events/lttng-module/latency_tracker.h          |  96 ++++++++++
- instrumentation/events/mainline/latency_tracker.h  | 201 +++++++++++++++++++++
- probes/Makefile                                    |   2 +
- probes/lttng-probe-latency_tracker.c               |  22 +++
- 4 files changed, 321 insertions(+)
+ .../events/lttng-module/latency_tracker.h          | 125 ++++++++++
+ instrumentation/events/mainline/latency_tracker.h  | 254 +++++++++++++++++++++
+ probes/Kbuild                                      |   1 +
+ probes/lttng-probe-latency-tracker.c               |  22 ++
+ 4 files changed, 402 insertions(+)
  create mode 100644 instrumentation/events/lttng-module/latency_tracker.h
  create mode 100644 instrumentation/events/mainline/latency_tracker.h
- create mode 100644 probes/lttng-probe-latency_tracker.c
+ create mode 100644 probes/lttng-probe-latency-tracker.c
 
 diff --git a/instrumentation/events/lttng-module/latency_tracker.h b/instrumentation/events/lttng-module/latency_tracker.h
 new file mode 100644
-index 0000000..b072742
+index 0000000..e17e88c
 --- /dev/null
 +++ b/instrumentation/events/lttng-module/latency_tracker.h
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,125 @@
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
 +
@@ -113,16 +112,45 @@ index 0000000..b072742
 +	)
 +   )
 +
++LTTNG_TRACEPOINT_EVENT(latency_tracker_rt,
++	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++		unsigned int preempt_c, char *breakdown),
++	TP_ARGS(comm, pid, delay, preempt_c, breakdown),
++	TP_FIELDS(
++		ctf_array_text(char, comm, comm, TASK_COMM_LEN)
++		ctf_integer(pid_t, tid, pid)
++		ctf_integer(u64, delay, delay)
++		ctf_integer(unsigned int, preempt_count, preempt_c)
++		ctf_string(breakdown, breakdown)
++	)
++   )
++
++/*
++ * Used to measure the overhead introduced by the latency_tracker probes
++ * position = 1 when this TP is emitted from the beginning of a probe,
++ * and 0 when exiting the probe. It can be set to anything else for other
++ * measurements, the field "custom" can be used arbitrarily as well.
++ */
++LTTNG_TRACEPOINT_EVENT(latency_tracker_measurement,
++	TP_PROTO(char name[32], unsigned int position, u64 custom),
++	TP_ARGS(name, position, custom),
++	TP_FIELDS(
++		ctf_array_text(char, name, name, 32)
++		ctf_integer(unsigned int, position, position)
++		ctf_integer(u64, custom, custom)
++	)
++   )
++
 +#endif /* LTTNG_TRACE_LATENCY_TRACKER_H */
 +
 +/* this part must be outside protection */
 +#include "../../../probes/define_trace.h"
 diff --git a/instrumentation/events/mainline/latency_tracker.h b/instrumentation/events/mainline/latency_tracker.h
 new file mode 100644
-index 0000000..68bb11d
+index 0000000..80ee4fe
 --- /dev/null
 +++ b/instrumentation/events/mainline/latency_tracker.h
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,254 @@
 +/* subsystem name is "latency_tracker" */
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
@@ -319,29 +347,81 @@ index 0000000..68bb11d
 +		__entry->comm, __entry->pid, __entry->stack)
 +   );
 +
++#if !defined(MAX_FILTER_STR_VAL)
++#define MAX_FILTER_STR_VAL 256
++#endif
++
++TRACE_EVENT(
++	latency_tracker_rt,
++	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++		unsigned int preempt_c, char *breakdown),
++	TP_ARGS(comm, pid, delay, preempt_c, breakdown),
++	TP_STRUCT__entry(
++		__array(char, comm, TASK_COMM_LEN)
++		__field(int, pid)
++		__field(u64, delay)
++		__field(unsigned int, preempt_c)
++		__dynamic_array(char, buf, 4* MAX_FILTER_STR_VAL)
++	),
++	TP_fast_assign(
++		memcpy(__entry->comm, comm, TASK_COMM_LEN);
++		entry->pid = pid;
++		entry->delay = delay;
++		entry->preempt_c = preempt_c;
++		memcpy(__get_dynamic_array(buf), breakdown, 4* MAX_FILTER_STR_VAL);
++	),
++	TP_printk("comm=%s, pid=%d, delay=%llu, preempt_count=%u, "
++			"breakdown={%s}",
++		__entry->comm, __entry->pid, __entry->delay,
++		__entry->preempt_c, __get_str(buf)
++		)
++   );
++
++/*
++ * Used to measure the overhead introduced by the latency_tracker probes 
++ * position = 1 when this TP is emitted from the beginning of a probe,
++ * and 0 when exiting the probe. It can be set to anything else for other
++ * measurements, the field "custom" can be used arbitrarily as well.
++ */
++TRACE_EVENT(
++	latency_tracker_measurement,
++	TP_PROTO(char name[32], unsigned int position, u64 custom),
++	TP_ARGS(name, position, custom),
++	TP_STRUCT__entry(
++		__array(char, name, 32)
++		__field(unsigned int, position)
++		__field(u64, custom)
++	),
++	TP_fast_assign(
++		memcpy(__entry->name, name, 32);
++		entry->custom = custom;
++		entry->position = position;
++	),
++	TP_printk("name=%s, position=%u, custom=%llu", __entry->name,
++		__entry->position, __entry->custom)
++   );
 +
 +#endif /* _TRACE_LATENCY_TRACKER_H */
 +
 +/* this part must be outside protection */
 +#include <trace/define_trace.h>
-diff --git a/probes/Makefile b/probes/Makefile
-index 7b00a81..b5c5607 100644
---- a/probes/Makefile
-+++ b/probes/Makefile
-@@ -22,6 +22,8 @@ obj-m += lttng-probe-power.o
+diff --git a/probes/Kbuild b/probes/Kbuild
+index 13e7bd8..90cb885 100644
+--- a/probes/Kbuild
++++ b/probes/Kbuild
+@@ -12,6 +12,7 @@ obj-$(CONFIG_LTTNG) += lttng-probe-kmem.o
+ obj-$(CONFIG_LTTNG) += lttng-probe-module.o
+ obj-$(CONFIG_LTTNG) += lttng-probe-power.o
+ obj-$(CONFIG_LTTNG) += lttng-probe-statedump.o
++obj-$(CONFIG_LTTNG) += lttng-probe-latency-tracker.o
  
- obj-m += lttng-probe-statedump.o
- 
-+obj-m += lttng-probe-latency_tracker.o
-+
  ifneq ($(CONFIG_KVM),)
- obj-m += lttng-probe-kvm.o
- ifneq ($(CONFIG_X86),)
-diff --git a/probes/lttng-probe-latency_tracker.c b/probes/lttng-probe-latency_tracker.c
+   obj-$(CONFIG_LTTNG) += lttng-probe-kvm.o
+diff --git a/probes/lttng-probe-latency-tracker.c b/probes/lttng-probe-latency-tracker.c
 new file mode 100644
-index 0000000..582ea93
+index 0000000..10db175
 --- /dev/null
-+++ b/probes/lttng-probe-latency_tracker.c
++++ b/probes/lttng-probe-latency-tracker.c
 @@ -0,0 +1,22 @@
 +#include <linux/module.h>
 +#include "../lttng-tracer.h"
@@ -360,7 +440,7 @@ index 0000000..582ea93
 +
 +MODULE_LICENSE("GPL and additional rights");
 +MODULE_AUTHOR("Julien Desfossez <jdesfossez@efficios.com>");
-+MODULE_DESCRIPTION("LTTng latency_tracker probes");
++MODULE_DESCRIPTION("LTTng latency-tracker probes");
 +MODULE_VERSION(__stringify(LTTNG_MODULES_MAJOR_VERSION) "."
 +    __stringify(LTTNG_MODULES_MINOR_VERSION) "."
 +    __stringify(LTTNG_MODULES_PATCHLEVEL_VERSION)
