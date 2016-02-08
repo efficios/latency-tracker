@@ -224,6 +224,30 @@ TRACE_EVENT(
 		)
    );
 
+/*
+ * Used to measure the overhead introduced by the latency_tracker probes
+ * position = 1 when this TP is emitted from the beginning of a probe,
+ * and 0 when exiting the probe. It can be set to anything else for other
+ * measurements, the field "custom" can be used arbitrarily as well.
+ */
+TRACE_EVENT(
+	latency_tracker_measurement,
+	TP_PROTO(char name[32], unsigned int position, u64 custom),
+	TP_ARGS(name, position, custom),
+	TP_STRUCT__entry(
+		__array(char, name, 32)
+		__field(unsigned int, position)
+		__field(u64, custom)
+	),
+	TP_fast_assign(
+		memcpy(__entry->name, name, 32);
+		entry->custom = custom;
+		entry->position = position;
+	),
+	TP_printk("name=%s, position=%u, custom=%llu", __entry->name,
+		__entry->position, __entry->custom)
+   );
+
 #endif /* _TRACE_LATENCY_TRACKER_H */
 
 /* this part must be outside protection */
