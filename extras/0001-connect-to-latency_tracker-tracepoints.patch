@@ -1,4 +1,4 @@
-From be5eaa73ca8e4d814910875d51141aaa8f4b17e2 Mon Sep 17 00:00:00 2001
+From 6c259ca38ce39bed07fea2652d70bb7ee0bd2c51 Mon Sep 17 00:00:00 2001
 From: Julien Desfossez <jdesfossez@efficios.com>
 Date: Mon, 8 Feb 2016 11:20:19 -0500
 Subject: [MODULES PATCH] Connect to latency_tracker tracepoints
@@ -147,7 +147,7 @@ index 0000000..e17e88c
 +#include "../../../probes/define_trace.h"
 diff --git a/instrumentation/events/mainline/latency_tracker.h b/instrumentation/events/mainline/latency_tracker.h
 new file mode 100644
-index 0000000..80ee4fe
+index 0000000..4e43521
 --- /dev/null
 +++ b/instrumentation/events/mainline/latency_tracker.h
 @@ -0,0 +1,254 @@
@@ -378,7 +378,7 @@ index 0000000..80ee4fe
 +   );
 +
 +/*
-+ * Used to measure the overhead introduced by the latency_tracker probes 
++ * Used to measure the overhead introduced by the latency_tracker probes
 + * position = 1 when this TP is emitted from the beginning of a probe,
 + * and 0 when exiting the probe. It can be set to anything else for other
 + * measurements, the field "custom" can be used arbitrarily as well.
