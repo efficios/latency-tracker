@@ -24,7 +24,7 @@
 #include <trace/events/latency_tracker.h>
 #include "rt_bench.h"
 
-#define BENCHMARK 1
+//#define BENCHMARK 1
 
 #ifdef BENCHMARK
 

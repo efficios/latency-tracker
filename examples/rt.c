@@ -581,10 +581,10 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 
 	event_in = latency_tracker_get_event(tracker, key_in, key_in_len);
 	if (!event_in) {
-		trace_latency_tracker_measurement("transition", 2, 0); \
+		trace_latency_tracker_measurement("transition", 2, 0);
 		return NULL;
 	}
-	trace_latency_tracker_measurement("transition", 2, 1); \
+	trace_latency_tracker_measurement("transition", 2, 1);
 	data_in = (struct event_data *) latency_tracker_event_get_priv_data(event_in);
 	if (!data_in) {
 		BUG_ON(1);
@@ -658,8 +658,9 @@ void probe_local_timer_entry(void *ignore, int vector)
 	struct local_timer_key_t key;
 	u64 now;
 
+	trace_latency_tracker_measurement("local_timer_entry", 1, 0); \
 	if (!config.timer_tracing)
-		return;
+		goto end;
 
 	now = trace_clock_monotonic_wrapper();
 	key.cpu = smp_processor_id();
@@ -668,7 +669,7 @@ void probe_local_timer_entry(void *ignore, int vector)
 			NULL);
 	if (ret != LATENCY_TRACKER_OK) {
 		failed_event_in++;
-		return;
+		goto end;
 	}
 
 	if (config.text_breakdown) {
@@ -676,7 +677,7 @@ void probe_local_timer_entry(void *ignore, int vector)
 		s = latency_tracker_get_event(tracker, &key, sizeof(key));
 		if (!s) {
 			BUG_ON(1);
-			return;
+			goto end;
 		}
 		append_delta_ts(s, KEY_TIMER_INTERRUPT, "local_timer_entry", now,
 				vector, NULL, 0);
@@ -688,6 +689,8 @@ void probe_local_timer_entry(void *ignore, int vector)
 			key.cpu);
 #endif
 
+end:
+	trace_latency_tracker_measurement("local_timer_entry", 0, 0); \
 	return;
 }
 
@@ -696,12 +699,16 @@ void probe_local_timer_exit(void *ignore, int vector)
 {
 	struct local_timer_key_t local_timer_key;
 
+	trace_latency_tracker_measurement("local_timer_exit", 1, 0);
 	if (!config.timer_tracing)
-		return;
+		goto end;
 	local_timer_key.cpu = smp_processor_id();
 	local_timer_key.type = KEY_TIMER_INTERRUPT;
 	latency_tracker_event_out(tracker, &local_timer_key,
 			sizeof(local_timer_key), OUT_IRQHANDLER_NO_CB, 0);
+end:
+	trace_latency_tracker_measurement("local_timer_exit", 0, 0);
+	return;
 }
 
 static
@@ -711,12 +718,13 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	struct hardirq_key_t hardirq_key;
 	struct latency_tracker_event *s;
 
+	trace_latency_tracker_measurement("irq_handler_entry", 1, 0);
 	if (!config.irq_tracing)
-		return;
+		goto end;
 
 	if (config.irq_filter > 0 && config.irq_filter != irq) {
 		exit_do_irq(NULL, NULL);
-		return;
+		goto end;
 	}
 
 	do_irq_key.cpu = smp_processor_id();
@@ -728,7 +736,7 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 	s = event_transition(&do_irq_key, sizeof(do_irq_key), &hardirq_key,
 			sizeof(hardirq_key), 0, 1, 0);
 	if (!s)
-		return;
+		goto end;
 	append_delta_ts(s, KEY_HARDIRQ, "to irq_handler_entry", 0, irq,
 			NULL, 0);
 	latency_tracker_put_event(s);
@@ -737,6 +745,9 @@ void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
 		printk("%llu hard_irq_entry (cpu: %u)\n", trace_clock_monotonic_wrapper(),
 				do_irq_key.cpu);
 #endif
+end:
+	trace_latency_tracker_measurement("irq_handler_entry", 0, 0);
+	return;
 }
 
 static
@@ -744,13 +755,13 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 		int ret)
 {
 	struct hardirq_key_t hardirq_key;
-
+	trace_latency_tracker_measurement("irq_handler_exit", 1, 0);
 	if (!config.irq_tracing)
-		return;
+		goto end;
 
 	if (config.irq_filter > 0 && config.irq_filter != irq) {
 		exit_do_irq(NULL, NULL);
-		return;
+		goto end;
 	}
 
 	hardirq_key.cpu = smp_processor_id();
@@ -772,6 +783,7 @@ void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
 			OUT_IRQHANDLER_NO_CB, 0);
 
 end:
+	trace_latency_tracker_measurement("irq_handler_exit", 0, 0);
 	return;
 }
 
@@ -783,8 +795,9 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	struct switch_key_t switch_key;
 	struct latency_tracker_event *s;
 
+	trace_latency_tracker_measurement("softirq_raise", 1, 0);
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
-		return;
+		goto end;
 
 	switch_key.pid = current->pid;
 	switch_key.type = KEY_SWITCH;
@@ -796,7 +809,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	s = event_transition(&switch_key, sizeof(switch_key),
 			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0, 1);
 	if (!s)
-		return;
+		goto end;
 	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
 			vec_nr, NULL, 0);
 	latency_tracker_put_event(s);
@@ -805,6 +818,9 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
 			vec_nr);
 #endif
+end:
+	trace_latency_tracker_measurement("softirq_raise", 0, 0);
+	return;
 }
 #else /* CONFIG_PREEMPT_RT_FULL */
 static
@@ -814,8 +830,9 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	struct raise_softirq_key_t raise_softirq_key;
 	struct latency_tracker_event *s;
 
+	trace_latency_tracker_measurement("softirq_raise", 1, 0);
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
-		return;
+		goto end;
 
 	hardirq_key.cpu = smp_processor_id();
 	hardirq_key.type = KEY_HARDIRQ;
@@ -827,7 +844,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	s = event_transition(&hardirq_key, sizeof(hardirq_key),
 			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0, 1);
 	if (!s)
-		return;
+		goto end;
 	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
 			vec_nr, NULL, 0);
 	latency_tracker_put_event(s);
@@ -836,6 +853,8 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 	printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
 			vec_nr);
 #endif
+end:
+	trace_latency_tracker_measurement("softirq_raise", 0, 0);
 }
 #endif /* CONFIG_PREEMPT_RT_FULL */
 
@@ -846,8 +865,9 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *s;
 
+	trace_latency_tracker_measurement("softirq_entry", 1, 0);
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
-		return;
+		goto end;
 
 	raise_softirq_key.cpu = smp_processor_id();
 	raise_softirq_key.vector = vec_nr;
@@ -865,7 +885,7 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 		s = event_transition(&raise_softirq_key, sizeof(raise_softirq_key),
 				&softirq_key, sizeof(softirq_key), 1, 1, 0);
 		if (!s)
-			return;
+			goto end;
 		append_delta_ts(s, KEY_SOFTIRQ, "to softirq_entry", 0, vec_nr, NULL, 0);
 		latency_tracker_put_event(s);
 	} while (s);
@@ -874,6 +894,9 @@ void probe_softirq_entry(void *ignore, unsigned int vec_nr)
 	printk("%llu softirq_entry %u\n", trace_clock_monotonic_wrapper(),
 			vec_nr);
 #endif
+end:
+	trace_latency_tracker_measurement("softirq_entry", 0, 0);
+	return;
 }
 
 static
@@ -884,8 +907,9 @@ void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
 	struct hrtimer_key_t hrtimer_key;
 	struct latency_tracker_event *s;
 
+	trace_latency_tracker_measurement("hrtimer_expire_entry", 1, 0);
 	if (!config.timer_tracing)
-		return;
+		goto end;
 	local_timer_key.cpu = smp_processor_id();
 	local_timer_key.type = KEY_TIMER_INTERRUPT;
 
@@ -899,7 +923,7 @@ void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
 	s = event_transition(&local_timer_key, sizeof(local_timer_key),
 			&hrtimer_key, sizeof(hrtimer_key), 0, 1, 0);
 	if (!s)
-		return;
+		goto end;
 	append_delta_ts(s, KEY_HRTIMER, "to hrtimer_expire_entry", 0, -1,
 			NULL, 0);
 	latency_tracker_put_event(s);
@@ -907,6 +931,9 @@ void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
 #ifdef DEBUG
 	printk("%llu hrtimer_entry\n", trace_clock_monotonic_wrapper());
 #endif
+end:
+	trace_latency_tracker_measurement("hrtimer_expire_entry", 0, 0);
+	return;
 }
 
 static
@@ -914,8 +941,9 @@ void probe_hrtimer_expire_exit(void *ignore, struct timer_list *timer)
 {
 	struct hrtimer_key_t hrtimer_key;
 
+	trace_latency_tracker_measurement("hrtimer_expire_exit", 1, 0);
 	if (!config.timer_tracing)
-		return;
+		goto end;
 	hrtimer_key.cpu = smp_processor_id();
 	hrtimer_key.type = KEY_HRTIMER;
 
@@ -928,6 +956,10 @@ void probe_hrtimer_expire_exit(void *ignore, struct timer_list *timer)
 
 	latency_tracker_event_out(tracker, &hrtimer_key, sizeof(hrtimer_key),
 			OUT_IRQHANDLER_NO_CB, 0);
+
+end:
+	trace_latency_tracker_measurement("hrtimer_expire_exit", 0, 0);
+	return;
 }
 
 static
@@ -935,8 +967,9 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 {
 	struct softirq_key_t softirq_key;
 
+	trace_latency_tracker_measurement("softirq_exit", 1, 0);
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
-		return;
+		goto end;
 
 	/*
 	 * Just cleanup the softirq_entry event
@@ -950,13 +983,16 @@ void probe_softirq_exit(void *ignore, unsigned int vec_nr)
 		s = latency_tracker_get_event(tracker, &softirq_key,
 				sizeof(softirq_key));
 		if (!s)
-			return;
+			goto end;
 		append_delta_ts(s, KEY_SOFTIRQ, "to softirq_exit", 0, vec_nr,
 				NULL, 0);
 		latency_tracker_put_event(s);
 	}
 	latency_tracker_event_out(tracker, &softirq_key, sizeof(softirq_key),
 			OUT_IRQHANDLER_NO_CB, 0);
+end:
+	trace_latency_tracker_measurement("softirq_exit", 0, 0);
+	return;
 }
 
 static
@@ -1073,6 +1109,8 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 	struct waking_key_t waking_key;
 	struct latency_tracker_event *s;
 
+	trace_latency_tracker_measurement("sched_waking", 1, 0);
+
 	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!p)
 		goto end;
@@ -1121,6 +1159,7 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 	}
 
 end:
+	trace_latency_tracker_measurement("sched_waking", 0, 0);
 	return;
 }
 
@@ -1270,6 +1309,7 @@ LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
 		struct task_struct *next)
 #endif
 {
+	trace_latency_tracker_measurement("sched_switch", 1, 0);
 	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!prev || !next)
 		goto end;
@@ -1278,6 +1318,7 @@ LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
 	sched_switch_out(prev, next);
 
 end:
+	trace_latency_tracker_measurement("sched_switch", 0, 0);
 	return;
 }
 
