@@ -1124,17 +1124,6 @@ void probe_sched_waking(void *ignore, struct task_struct *p, int success)
 	waking_key.pid = p->pid;
 	waking_key.type = KEY_WAKEUP;
 
-	/*
-	 * If the process was already woken up, we cannot link
-	 * its waking to the current event, so we exit here.
-	 */
-	s = latency_tracker_get_event(tracker, &waking_key,
-			sizeof(waking_key));
-	if (s) {
-		latency_tracker_put_event(s);
-		goto end;
-	}
-
 	/* In order of nesting */
 	if (in_nmi()) {
 		/* TODO */
