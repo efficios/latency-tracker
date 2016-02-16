@@ -54,7 +54,9 @@ struct latency_tracker {
 	 * Size allocated for event->priv_data.
 	 */
 	int priv_data_size;
-	/* How much event could not be tracked due to an empty free list. */
+	/* How many events were inserted in the HT. */
+	uint64_t tracked_count;
+	/* How many event could not be tracked due to an empty free list. */
 	uint64_t skipped_count;
 #ifdef OLDFREELIST
 	struct list_head events_free_list;

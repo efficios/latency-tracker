@@ -578,6 +578,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		tracker->skipped_count++;
 		goto end_unlock;
 	}
+	tracker->tracked_count++;
 	hkey = tracker->hash_fct(key, key_len, 0);
 
 	memcpy(s->tkey.key, key, key_len);
@@ -773,6 +774,12 @@ uint64_t latency_tracker_skipped_count(struct latency_tracker *tracker)
 	return tracker->skipped_count;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_skipped_count);
+
+uint64_t latency_tracker_tracked_count(struct latency_tracker *tracker)
+{
+	return tracker->tracked_count;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_tracked_count);
 
 void example_cb(struct latency_tracker_event_ctx *ctx)
 {

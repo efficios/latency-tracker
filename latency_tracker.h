@@ -282,4 +282,6 @@ void *latency_tracker_event_get_priv_data(struct latency_tracker_event *event);
  */
 uint64_t latency_tracker_skipped_count(struct latency_tracker *tracker);
 
+uint64_t latency_tracker_tracked_count(struct latency_tracker *tracker);
+
 #endif /*  LATENCY_TRACKER_H */

@@ -1644,7 +1644,7 @@ module_init(rt_init);
 static
 void __exit rt_exit(void)
 {
-	uint64_t skipped;
+	uint64_t skipped, tracked;
 
 	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
 			probe_local_timer_entry, NULL);
@@ -1671,7 +1671,9 @@ void __exit rt_exit(void)
 	unregister_kretprobe(&probe_do_irq);
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
+	tracked = latency_tracker_tracked_count(tracker);
 	latency_tracker_destroy(tracker);
+	printk("Tracked events : %llu\n", tracked);
 	printk("Missed events : %llu\n", skipped);
 	printk("Failed event in : %d\n", failed_event_in);
 	printk("Total rt alerts : %d\n", cnt);
