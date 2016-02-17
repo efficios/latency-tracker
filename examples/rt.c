@@ -36,6 +36,7 @@
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/task_prio.h"
 #include "../wrapper/lt_probe.h"
+#include "../wrapper/vmalloc.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -105,16 +106,16 @@ struct tracker_config {
 struct tracker_measurement_entry {
 	u64 ts;
 	u64 latency;
-	u64 pmu;
+	u64 pmu1;
 };
 
 struct tracker_measurement_cpu_perf {
 	struct perf_event *event;
-	/* no need to alloc that per-cpu */
-	struct perf_event_attr *attr;
 	struct tracker_measurement_entry *entries;
 	unsigned int pos;
 };
+
+struct perf_event_attr attr1;
 
 static struct tracker_measurement_cpu_perf __percpu *tracker_cpu_perf;
 
@@ -326,23 +327,24 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int sk
 	struct tracker_measurement_cpu_perf *_bench_c; \
 	int _bench_cpu = smp_processor_id(); \
 	u64 _bench_ts1 = 0, _bench_ts2 = 0; \
-	u64 _bench_pmu1 = 0, _bench_pmu2 = 0; \
+	u64 _bench_pmu1_1 = 0, _bench_pmu1_2 = 0; \
 	_bench_c = per_cpu_ptr(tracker_cpu_perf, _bench_cpu); \
 	local_irq_save(_bench_flags); \
 	_bench_nmi = irq_stats(smp_processor_id())->__nmi_count
 
 #define BENCH_GET_TS1 _bench_ts1 = trace_clock_monotonic_wrapper(); \
 		_bench_c->event->pmu->read(_bench_c->event); \
-		_bench_pmu1 = local64_read(&_bench_c->event->count)
+		_bench_pmu1_1 = local64_read(&_bench_c->event->count)
+
 #define BENCH_GET_TS2 _bench_ts2 = trace_clock_monotonic_wrapper(); \
 		_bench_c->event->pmu->read(_bench_c->event); \
-		_bench_pmu2 = local64_read(&_bench_c->event->count)
+		_bench_pmu1_2 = local64_read(&_bench_c->event->count)
 
 #define BENCH_APPEND if (_bench_nmi == irq_stats(smp_processor_id())->__nmi_count) { \
 		if (_bench_c->pos < PER_CPU_ALLOC) { \
 			_bench_c->entries[_bench_c->pos].ts = _bench_ts1; \
 			_bench_c->entries[_bench_c->pos].latency = _bench_ts2 - _bench_ts1; \
-			_bench_c->entries[_bench_c->pos].pmu = _bench_pmu2 - _bench_pmu1; \
+			_bench_c->entries[_bench_c->pos].pmu1 = _bench_pmu1_2 - _bench_pmu1_1; \
 			_bench_c->pos++; \
 		} \
 	} \
@@ -1620,56 +1622,47 @@ void overflow_callback(struct perf_event *event,
 }
 
 static
-void cpu_allocations(void *info)
+int alloc_measurements(void)
 {
+	int cpu, ret;
 	struct tracker_measurement_cpu_perf *c;
-	int cpu = smp_processor_id();
 
-	c = per_cpu_ptr(tracker_cpu_perf, cpu);
-	c->pos = 0;
-	c->entries = kzalloc(PER_CPU_ALLOC * sizeof(struct tracker_measurement_entry),
-			GFP_KERNEL);
+	for_each_online_cpu(cpu) {
+		c = per_cpu_ptr(tracker_cpu_perf, cpu);
+		c->pos = 0;
+		c->entries = vzalloc(PER_CPU_ALLOC * sizeof(struct tracker_measurement_entry));
+		if (!c->entries) {
+			ret = -ENOMEM;
+			goto end;
+		}
+		/* include/uapi/linux/perf_event.h */
+		attr1.type = PERF_TYPE_HW_CACHE;
+		attr1.config = PERF_COUNT_HW_CACHE_L1D | \
+				  PERF_COUNT_HW_CACHE_OP_READ << 8 | \
+				  PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
 
-	c->attr = kzalloc(sizeof(struct perf_event_attr), GFP_KERNEL);
-	if (!c->attr) {
-		printk("failed to alloc perf attr\n");
-		goto end;
+		/*
+		   attr1.type = PERF_TYPE_HARDWARE;
+		   attr1.config = PERF_COUNT_HW_BRANCH_MISSES;
+		   */
+
+		attr1.size = sizeof(struct perf_event_attr);
+		attr1.pinned = 1;
+		attr1.disabled = 0;
+
+		c->event = perf_event_create_kernel_counter(&attr1,
+				cpu, NULL, overflow_callback, NULL);
+		if (!c->event) {
+			printk("failed to create perf counter\n");
+			ret = -1;
+			goto end;
+		}
 	}
+	ret = 0;
 
-	/* include/uapi/linux/perf_event.h */
-	c->attr->type = PERF_TYPE_HW_CACHE;
-	c->attr->config = PERF_COUNT_HW_CACHE_L1D | \
-			  PERF_COUNT_HW_CACHE_OP_READ << 8 | \
-			  PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
-
-	/*
-	c->attr->type = PERF_TYPE_HARDWARE;
-	c->attr->config = PERF_COUNT_HW_BRANCH_MISSES;
-	*/
-
-	c->attr->size = sizeof(struct perf_event_attr);
-	c->attr->pinned = 1;
-	c->attr->disabled = 0;
-
-	c->event = perf_event_create_kernel_counter(c->attr, cpu, NULL, overflow_callback, NULL);
-	if (!c->event) {
-		printk("failed to create perf counter\n");
-		goto end;
-	}
 end:
-	return;
-}
-
-static
-void cpu_free(void *info)
-{
-	struct tracker_measurement_cpu_perf *c;
-	int cpu = smp_processor_id();
-
-	c = per_cpu_ptr(tracker_cpu_perf, cpu);
-	perf_event_release_kernel(c->event);
-	kfree(c->entries);
-	kfree(c->attr);
+	wrapper_vmalloc_sync_all();
+	return ret;
 }
 
 static
@@ -1701,7 +1694,9 @@ int __init rt_init(void)
 		config.timer_tracing = 0;
 
 	tracker_cpu_perf = alloc_percpu(struct tracker_measurement_cpu_perf);
-	on_each_cpu(cpu_allocations, NULL, 1);
+	ret = alloc_measurements();
+	if (ret != 0)
+		goto end;
 
 	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
 			probe_local_timer_entry, NULL);
@@ -1773,15 +1768,21 @@ void output_measurements(void)
 		goto end;
 	}
 
-	for_each_possible_cpu(cpu) {
+	for_each_online_cpu(cpu) {
 		int i;
 		struct tracker_measurement_cpu_perf *_bench_c;
 		_bench_c = per_cpu_ptr(tracker_cpu_perf, cpu);
 		for (i = 0; i < _bench_c->pos; i++) {
+			/*
 			snprintf(buf, 64, "%llu [%03d] %llu %llu\n",
 					 _bench_c->entries[i].ts,
 					 cpu, _bench_c->entries[i].latency,
-					 _bench_c->entries[i].pmu);
+					 _bench_c->entries[i].pmu1);
+					 */
+			snprintf(buf, 64, "%llu,%03d,%llu,%llu\n",
+					 _bench_c->entries[i].ts,
+					 cpu, _bench_c->entries[i].latency,
+					 _bench_c->entries[i].pmu1);
 			vfs_write(file, buf, strlen(buf), &pos);
 		}
 	}
@@ -1790,6 +1791,19 @@ void output_measurements(void)
 end:
 	set_fs(old_fs); //Reset to save FS
 	return;
+}
+
+static
+void free_measurements(void)
+{
+	int cpu;
+	struct tracker_measurement_cpu_perf *c;
+
+	for_each_online_cpu(cpu) {
+		c = per_cpu_ptr(tracker_cpu_perf, cpu);
+		perf_event_release_kernel(c->event);
+		vfree(c->entries);
+	}
 }
 
 static
@@ -1829,7 +1843,7 @@ void __exit rt_exit(void)
 	printk("Failed event in : %d\n", failed_event_in);
 	printk("Total rt alerts : %d\n", cnt);
 	output_measurements();
-	on_each_cpu(cpu_free, NULL, 1);
+	free_measurements();
 	free_percpu(tracker_cpu_perf);
 }
 module_exit(rt_exit);
