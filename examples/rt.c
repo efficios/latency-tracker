@@ -1627,6 +1627,21 @@ int alloc_measurements(void)
 	int cpu, ret;
 	struct tracker_measurement_cpu_perf *c;
 
+	/* include/uapi/linux/perf_event.h */
+	attr1.type = PERF_TYPE_HW_CACHE;
+	attr1.config = PERF_COUNT_HW_CACHE_L1D | \
+		       PERF_COUNT_HW_CACHE_OP_READ << 8 | \
+		       PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
+
+	/*
+	   attr1.type = PERF_TYPE_HARDWARE;
+	   attr1.config = PERF_COUNT_HW_BRANCH_MISSES;
+	   */
+
+	attr1.size = sizeof(struct perf_event_attr);
+	attr1.pinned = 1;
+	attr1.disabled = 0;
+
 	for_each_online_cpu(cpu) {
 		c = per_cpu_ptr(tracker_cpu_perf, cpu);
 		c->pos = 0;
@@ -1635,20 +1650,6 @@ int alloc_measurements(void)
 			ret = -ENOMEM;
 			goto end;
 		}
-		/* include/uapi/linux/perf_event.h */
-		attr1.type = PERF_TYPE_HW_CACHE;
-		attr1.config = PERF_COUNT_HW_CACHE_L1D | \
-				  PERF_COUNT_HW_CACHE_OP_READ << 8 | \
-				  PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
-
-		/*
-		   attr1.type = PERF_TYPE_HARDWARE;
-		   attr1.config = PERF_COUNT_HW_BRANCH_MISSES;
-		   */
-
-		attr1.size = sizeof(struct perf_event_attr);
-		attr1.pinned = 1;
-		attr1.disabled = 0;
 
 		c->event = perf_event_create_kernel_counter(&attr1,
 				cpu, NULL, overflow_callback, NULL);
