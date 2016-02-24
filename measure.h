@@ -21,6 +21,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <linux/perf_event.h>
+
+#define irq_stats(x)            (&per_cpu(irq_stat, x))
+
 #define PER_CPU_ALLOC 10000
 struct tracker_measurement_entry {
 	u64 ts;
@@ -33,7 +37,7 @@ struct tracker_measurement_entry {
 	u64 pmu6;
 	u64 pmu7;
 	u64 pmu8;
-	unsigned int result;
+	unsigned int custom;
 };
 
 struct tracker_measurement_cpu_perf {
@@ -52,6 +56,7 @@ struct tracker_measurement_cpu_perf {
 struct perf_event_attr attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8;
 
 static struct tracker_measurement_cpu_perf __percpu *tracker_cpu_perf;
+
 
 #define BENCH_PREAMBULE unsigned long _bench_flags; \
 	unsigned int _bench_nmi; \
@@ -106,8 +111,8 @@ static struct tracker_measurement_cpu_perf __percpu *tracker_cpu_perf;
 		_bench_pmu8_2 = local64_read(&_bench_c->event8->count); \
 		_bench_ts2 = trace_clock_monotonic_wrapper()
 
-#define BENCH_APPEND if (_bench_nmi == irq_stats(smp_processor_id())->__nmi_count) { \
-		if (_bench_c->pos < PER_CPU_ALLOC && _bench_ts1 != 0) { \
+#define BENCH_APPEND(c) if (_bench_nmi == irq_stats(smp_processor_id())->__nmi_count) { \
+		if (_bench_c->pos < PER_CPU_ALLOC && _bench_ts1 != 0 && _bench_ts2 != 0) { \
 			_bench_c->entries[_bench_c->pos].ts = _bench_ts1; \
 			_bench_c->entries[_bench_c->pos].latency = _bench_ts2 - _bench_ts1; \
 			_bench_c->entries[_bench_c->pos].pmu1 = _bench_pmu1_2 - _bench_pmu1_1; \
@@ -118,7 +123,7 @@ static struct tracker_measurement_cpu_perf __percpu *tracker_cpu_perf;
 			_bench_c->entries[_bench_c->pos].pmu6 = _bench_pmu6_2 - _bench_pmu6_1; \
 			_bench_c->entries[_bench_c->pos].pmu7 = _bench_pmu7_2 - _bench_pmu7_1; \
 			_bench_c->entries[_bench_c->pos].pmu8 = _bench_pmu8_2 - _bench_pmu8_1; \
-			_bench_c->entries[_bench_c->pos].result = !!event_in; \
+			_bench_c->entries[_bench_c->pos].custom = c; \
 			_bench_c->pos++; \
 		} \
 	} \
@@ -136,6 +141,8 @@ int alloc_measurements(void)
 {
 	int cpu, ret;
 	struct tracker_measurement_cpu_perf *c;
+
+	tracker_cpu_perf = alloc_percpu(struct tracker_measurement_cpu_perf);
 
 	/* include/uapi/linux/perf_event.h */
 	/* attr1 = L1-dcache-load-misses */
@@ -323,7 +330,7 @@ void output_measurements(void)
 		goto end;
 	}
 
-	snprintf(buf, 256, "timestamp,cpu,latency,L1_miss,LLC_miss,dTLB_miss,cache_misses,branches,branch_miss,cpu_cycles,instructions,transition\n");
+	snprintf(buf, 256, "timestamp,cpu,latency,L1_miss,LLC_miss,dTLB_miss,cache_misses,branches,branch_miss,cpu_cycles,instructions,custom\n");
 	vfs_write(file, buf, strlen(buf), &pos);
 	for_each_online_cpu(cpu) {
 		int i;
@@ -347,7 +354,7 @@ void output_measurements(void)
 					 _bench_c->entries[i].pmu6,
 					 _bench_c->entries[i].pmu7,
 					 _bench_c->entries[i].pmu8,
-					 _bench_c->entries[i].result);
+					 _bench_c->entries[i].custom);
 			vfs_write(file, buf, strlen(buf), &pos);
 		}
 	}
@@ -376,6 +383,7 @@ void free_measurements(void)
 		perf_event_release_kernel(c->event8);
 		vfree(c->entries);
 	}
+	free_percpu(tracker_cpu_perf);
 }
 
 

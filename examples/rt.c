@@ -28,7 +28,6 @@
 #include <linux/kprobes.h>
 #include <linux/kernel.h>
 #include <linux/debugfs.h>
-#include <linux/perf_event.h>
 #include <asm/stacktrace.h>
 #include "../latency_tracker.h"
 #include "../tracker_debugfs.h"
@@ -37,11 +36,14 @@
 #include "../wrapper/task_prio.h"
 #include "../wrapper/lt_probe.h"
 #include "../wrapper/vmalloc.h"
+//#include "../measure.h"
+
+//#define BENCH
+#ifdef BENCH
 #include "../measure.h"
+#endif
 
 #include <trace/events/latency_tracker.h>
-
-#define irq_stats(x)            (&per_cpu(irq_stat, x))
 
 //#define DEBUG 1
 #undef DEBUG
@@ -582,7 +584,13 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	struct event_data *data_in, *data_out;
 	u64 orig_ts;
 	int ret;
+#ifdef BENCH
 	BENCH_PREAMBULE;
+#endif
+
+#ifdef BENCH
+	BENCH_GET_TS1;
+#endif
 
 	event_in = latency_tracker_get_event(tracker, key_in, key_in_len);
 	if (!event_in) {
@@ -606,10 +614,8 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	}
 	orig_ts = latency_tracker_event_get_start_ts(event_in);
 
-	BENCH_GET_TS1;
 	ret = _latency_tracker_event_in(tracker, key_out,
 			key_out_len, unique, orig_ts, NULL);
-	BENCH_GET_TS2;
 	if (ret != LATENCY_TRACKER_OK) {
 		goto end_del;
 		failed_event_in++;
@@ -655,7 +661,12 @@ end_del:
 end:
 	latency_tracker_put_event(event_in);
 out:
-	BENCH_APPEND;
+#ifdef BENCH
+	BENCH_GET_TS2;
+#endif
+#ifdef BENCH
+	BENCH_APPEND(!!event_in);
+#endif
 	return event_out;
 }
 
@@ -1598,10 +1609,9 @@ int __init rt_init(void)
 	if (!timer_tracing)
 		config.timer_tracing = 0;
 
-	tracker_cpu_perf = alloc_percpu(struct tracker_measurement_cpu_perf);
-	ret = alloc_measurements();
-	if (ret != 0)
-		goto end;
+#ifdef BENCH
+	alloc_measurements();
+#endif
 
 	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
 			probe_local_timer_entry, NULL);
@@ -1691,9 +1701,10 @@ void __exit rt_exit(void)
 	printk("Missed events : %llu\n", skipped);
 	printk("Failed event in : %d\n", failed_event_in);
 	printk("Total rt alerts : %d\n", cnt);
+#ifdef BENCH
 	output_measurements();
 	free_measurements();
-	free_percpu(tracker_cpu_perf);
+#endif
 }
 module_exit(rt_exit);
 

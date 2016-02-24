@@ -36,6 +36,11 @@
 #include "wrapper/freelist.h"
 #include "tracker_private.h"
 #include "tracker_debugfs.h"
+
+#ifdef BENCH
+#include "measure.h"
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/latency_tracker.h>
 
@@ -434,6 +439,9 @@ struct latency_tracker *latency_tracker_create(const char *name)
 	ret = try_module_get(THIS_MODULE);
 	if (!ret)
 		goto error_debugfs;
+#ifdef BENCH
+	alloc_measurements();
+#endif
 	goto end;
 
 error_debugfs:
@@ -499,6 +507,10 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 
 	wrapper_freelist_destroy(tracker);
 
+#ifdef BENCH
+	output_measurements();
+	free_measurements();
+#endif
 	kfree(tracker);
 	module_put(THIS_MODULE);
 }
@@ -550,7 +562,11 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 #if !defined(LLFREELIST)
 	unsigned long flags;
 #endif
+#ifdef BENCH
+	BENCH_PREAMBULE;
 
+	BENCH_GET_TS1;
+#endif
 	if (!tracker) {
 		ret = LATENCY_TRACKER_ERR;
 		goto end;
@@ -631,6 +647,10 @@ end_unlock:
 #endif
 
 end:
+#ifdef BENCH
+	BENCH_GET_TS2;
+	BENCH_APPEND;
+#endif
 	return ret;
 }
 EXPORT_SYMBOL_GPL(_latency_tracker_event_in);
