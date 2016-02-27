@@ -622,11 +622,11 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	}
 	event_out = latency_tracker_get_event(tracker, key_out, key_out_len);
 	if (!event_out)
-		return NULL;
+		goto end_del;
 	data_out = (struct event_data *) latency_tracker_event_get_priv_data(event_out);
 	if (!data_out) {
 		BUG_ON(1);
-		goto end;
+		goto end_del;
 	}
 	memcpy(data_out, data_in, sizeof(struct event_data));
 	if (branch) {
@@ -635,6 +635,8 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		ret = _latency_tracker_get_event(event_in);
 		if (!ret) {
 			printk("ERR _latency_tracker_get_event\n");
+			latency_tracker_put_event(event_out);
+			event_out = NULL;
 			goto end_del;
 		}
 		/* First branch, the others get the pointer from the memcpy */
@@ -861,6 +863,7 @@ void probe_softirq_raise(void *ignore, unsigned int vec_nr)
 			vec_nr);
 #endif
 end:
+	return;
 }
 #endif /* CONFIG_PREEMPT_RT_FULL */
 
@@ -1245,8 +1248,10 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 						wrapper_task_prio(next));
 				data = (struct event_data *)
 					latency_tracker_event_get_priv_data(s);
-				if (!data)
+				if (!data) {
+					latency_tracker_put_event(s);
 					goto end;
+				}
 				data->preempt_count++;
 			} else {
 				append_delta_ts(s, KEY_SWITCH,
@@ -1391,6 +1396,7 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 			return -ENOENT;
 		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
 				NULL, 0);
+		latency_tracker_put_event(s);
 		latency_tracker_event_out(tracker, &switch_key,
 				sizeof(switch_key),
 				OUT_WORK_DONE, now);
@@ -1404,6 +1410,7 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 			return -ENOENT;
 		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
 				NULL, 0);
+		latency_tracker_put_event(s);
 		latency_tracker_event_out(tracker, &work_begin_key,
 				sizeof(work_begin_key),
 				OUT_WORK_DONE, now);
