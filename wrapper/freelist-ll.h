@@ -306,8 +306,9 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	memset(e->tkey.key, 0, tracker->key_size);
 	if (e->priv_data)
 		memset(e->priv_data, 0, tracker->priv_data_size);
-	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll); llist_add(&e->llist,
-			&ll->llist); ll->current_count++;
+	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll);
+	llist_add(&e->llist, &ll->llist);
+	ll->current_count++;
 	/* put back events in the global list if we have too much */
 	if (ll->current_count > (tracker->per_cpu_alloc + FREELIST_PERCPU_BATCH)) {
 		ll->current_count -= free_list_move_n(

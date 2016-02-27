@@ -175,7 +175,6 @@ int alloc_measurements(void)
 		       PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
 
 	/* attr4 = node-load-misses */
-	/*
 	attr4.size = sizeof(struct perf_event_attr);
 	attr4.pinned = 1;
 	attr4.disabled = 0;
@@ -183,12 +182,13 @@ int alloc_measurements(void)
 	attr4.config = PERF_COUNT_HW_CACHE_NODE | \
 		       PERF_COUNT_HW_CACHE_OP_READ << 8 | \
 		       PERF_COUNT_HW_CACHE_RESULT_MISS << 16;
-		       */
+	/*
 	attr4.size = sizeof(struct perf_event_attr);
 	attr4.pinned = 1;
 	attr4.disabled = 0;
 	attr4.type = PERF_TYPE_HARDWARE;
 	attr4.config = PERF_COUNT_HW_CACHE_MISSES;
+	*/
 
 	attr5.size = sizeof(struct perf_event_attr);
 	attr5.pinned = 1;
@@ -332,7 +332,7 @@ void output_measurements(void)
 		goto end;
 	}
 
-	snprintf(buf, 256, "timestamp,cpu,latency,L1_miss,LLC_miss,dTLB_miss,cache_misses,branches,branch_miss,cpu_cycles,instructions,custom\n");
+	snprintf(buf, 256, "timestamp,cpu,latency,L1_miss,LLC_miss,dTLB_miss,node_misses,branches,branch_miss,cpu_cycles,instructions,custom\n");
 	vfs_write(file, buf, strlen(buf), &pos);
 	for_each_online_cpu(cpu) {
 		int i;
