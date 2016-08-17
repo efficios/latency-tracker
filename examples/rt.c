@@ -651,8 +651,7 @@ end:
 	return event_out;
 }
 
-static
-void probe_local_timer_entry(void *ignore, int vector)
+LT_PROBE_DEFINE(local_timer_entry, int vector)
 {
 	enum latency_tracker_event_in_ret ret;
 	struct local_timer_key_t key;
@@ -694,8 +693,7 @@ end:
 	return;
 }
 
-static
-void probe_local_timer_exit(void *ignore, int vector)
+LT_PROBE_DEFINE(local_timer_exit, int vector)
 {
 	struct local_timer_key_t local_timer_key;
 
@@ -711,8 +709,7 @@ end:
 	return;
 }
 
-static
-void probe_irq_handler_entry(void *ignore, int irq, struct irqaction *action)
+LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 {
 	struct do_irq_key_t do_irq_key;
 	struct hardirq_key_t hardirq_key;
@@ -750,8 +747,7 @@ end:
 	return;
 }
 
-static
-void probe_irq_handler_exit(void *ignore, int irq, struct irqaction *action,
+LT_PROBE_DEFINE(irq_handler_exit, int irq, struct irqaction *action,
 		int ret)
 {
 	struct hardirq_key_t hardirq_key;
@@ -788,8 +784,7 @@ end:
 }
 
 #ifdef CONFIG_PREEMPT_RT_FULL
-static
-void probe_softirq_raise(void *ignore, unsigned int vec_nr)
+LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 {
 	struct raise_softirq_key_t raise_softirq_key;
 	struct switch_key_t switch_key;
@@ -823,8 +818,7 @@ end:
 	return;
 }
 #else /* CONFIG_PREEMPT_RT_FULL */
-static
-void probe_softirq_raise(void *ignore, unsigned int vec_nr)
+LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 {
 	struct hardirq_key_t hardirq_key;
 	struct raise_softirq_key_t raise_softirq_key;
@@ -858,8 +852,7 @@ end:
 }
 #endif /* CONFIG_PREEMPT_RT_FULL */
 
-static
-void probe_softirq_entry(void *ignore, unsigned int vec_nr)
+LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 {
 	struct raise_softirq_key_t raise_softirq_key;
 	struct softirq_key_t softirq_key;
@@ -899,8 +892,7 @@ end:
 	return;
 }
 
-static
-void probe_hrtimer_expire_entry(void *ignore, struct hrtimer *hrtimer,
+LT_PROBE_DEFINE(hrtimer_expire_entry, struct hrtimer *hrtimer,
 		ktime_t *now)
 {
 	struct local_timer_key_t local_timer_key;
@@ -936,8 +928,7 @@ end:
 	return;
 }
 
-static
-void probe_hrtimer_expire_exit(void *ignore, struct timer_list *timer)
+LT_PROBE_DEFINE(hrtimer_expire_exit, struct timer_list *timer)
 {
 	struct hrtimer_key_t hrtimer_key;
 
@@ -962,8 +953,7 @@ end:
 	return;
 }
 
-static
-void probe_softirq_exit(void *ignore, unsigned int vec_nr)
+LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 {
 	struct softirq_key_t softirq_key;
 
@@ -1095,8 +1085,11 @@ void thread_waking(struct waking_key_t *waking_key)
 	}
 }
 
-static
-void probe_sched_waking(void *ignore, struct task_struct *p, int success)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+LT_PROBE_DEFINE(sched_waking, struct task_struct *p)
+#else
+LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
+#endif
 {
 	/*
 	 * On a non-RT kernel, if we are here while handling a softirq, lookup
