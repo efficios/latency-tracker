@@ -316,6 +316,7 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 	struct event_data *data;
 	char tmp[64];
 	size_t len;
+	uint64_t last_ts;
 
 	if (ts)
 		now = ts;
@@ -326,6 +327,7 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 		BUG_ON(1);
 		return;
 	}
+	last_ts = data->prev_ts;
 	data->prev_ts = now;
 
 	if (!config.text_breakdown)
@@ -337,32 +339,32 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 	switch (type) {
 	case KEY_DO_IRQ:
 		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
-				now - data->prev_ts);
+				now - last_ts);
 		break;
 	case KEY_HARDIRQ:
 	case KEY_RAISE_SOFTIRQ:
 	case KEY_SOFTIRQ:
 	case KEY_WAKEUP:
 		snprintf(tmp, 64, "%s(%d) [%03d] = %llu, ", txt, field1,
-				smp_processor_id(), now - data->prev_ts);
+				smp_processor_id(), now - last_ts);
 		break;
 	case KEY_SWITCH:
 		snprintf(tmp, 64, "%s(%s-%d, %d) [%03d] = %llu, ", txt, field2,
 				field1, field3, smp_processor_id(),
-				now - data->prev_ts);
+				now - last_ts);
 		break;
 	case KEY_TIMER_INTERRUPT:
 	case KEY_HRTIMER:
 		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
-				now - data->prev_ts);
+				now - last_ts);
 		break;
 	case KEY_WORK_DONE:
 		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
-				now - data->prev_ts);
+				now - last_ts);
 		break;
 	case KEY_WORK_BEGIN:
 		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
-				now - data->prev_ts);
+				now - last_ts);
 		break;
 	}
 	len = strlen(tmp);
