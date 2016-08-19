@@ -526,7 +526,6 @@ int check_current_branch(struct event_data *data_in)
 			(root_data->tree_closed)) {
 		latency_tracker_put_event(data_in->root);
 		data_in->root = NULL;
-		printk("end branch\n");
 		return 1;
 	}
 	return 0;
@@ -1484,7 +1483,6 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	if (!s)
 		return -ENOENT;
 	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
-	printk("good\n");
 	set_good_branch(data);
 
 	append_delta_ts(s, KEY_WORK_BEGIN, "to work_begin", now, 0, NULL, 0);
