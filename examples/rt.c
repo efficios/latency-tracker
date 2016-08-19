@@ -317,9 +317,6 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 	char tmp[64];
 	size_t len;
 
-	if (!config.text_breakdown)
-		return;
-
 	if (ts)
 		now = ts;
 	else
@@ -329,10 +326,13 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 		BUG_ON(1);
 		return;
 	}
-	if (data->pos == MAX_PAYLOAD) {
-		data->prev_ts = now;
+	data->prev_ts = now;
+
+	if (!config.text_breakdown)
 		return;
-	}
+
+	if (data->pos == MAX_PAYLOAD)
+		return;
 
 	switch (type) {
 	case KEY_DO_IRQ:
@@ -373,7 +373,6 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 	}
 	memcpy(data->breakdown + data->pos, tmp, len);
 	data->pos += len;
-	data->prev_ts = now;
 }
 
 static
