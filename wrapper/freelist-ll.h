@@ -28,8 +28,11 @@
 #include <linux/smp.h>
 #include "percpu-defs.h"
 
-#define FREELIST_PERCPU_MIN	1
-#define FREELIST_PERCPU_BATCH	16
+#define FREELIST_PERCPU_CACHE	128
+
+static inline
+void wrapper_freelist_destroy(struct latency_tracker *tracker);
+
 
 static
 int init_per_cpu_llist(struct latency_tracker *tracker)
@@ -53,83 +56,98 @@ error:
 	return -ENOMEM;
 }
 
-static inline
-unsigned int free_list_move_n(struct llist_head *dest_head,
-		struct llist_head *src_head,
-		unsigned int nr)
-{
-	unsigned int count = 0;
-
-	while (count < nr) {
-		struct llist_node *node;
-
-		node = llist_del_first(src_head);
-		if (!node)
-			break;
-		llist_add(node, dest_head);
-		count++;
-	}
-	return count;
-}
-
 static
-void init_balance_per_cpu(struct latency_tracker *tracker)
+struct latency_tracker_event *alloc_event_node(struct latency_tracker *tracker,
+		int node)
 {
-	struct per_cpu_ll *ll;
-	int cpu;
+	struct latency_tracker_event *e;
 
-	for_each_possible_cpu(cpu) {
-		ll = per_cpu_ptr(tracker->per_cpu_ll, cpu);
-		ll->current_count += free_list_move_n(&ll->llist,
-				&tracker->ll_events_free_list,
-				tracker->per_cpu_alloc);
+	e = kzalloc_node(sizeof(struct latency_tracker_event),
+			GFP_KERNEL, node);
+	if (!e)
+		goto error;
+	e->tkey.key = kzalloc_node(tracker->key_size, GFP_KERNEL, node);
+	if (!e->tkey.key) {
+		goto error_free_event;
 	}
+	if (tracker->priv_data_size) {
+		e->priv_data = kzalloc_node(tracker->priv_data_size,
+				GFP_KERNEL, node);
+		if (!e->priv_data) {
+			goto error_free_key;
+		}
+	}
+	/* TODO: resize
+	if (tracker->max_resize && (i == max_events/2)) {
+		tracker->resize_event = e;
+	}
+	*/
+
+	return e;
+
+error_free_key:
+	kfree(e->tkey.key);
+error_free_event:
+	kfree(e);
+error:
+	return NULL;
 }
 
-/*
- * Returns the number of event still active at destruction time.
- */
 static inline
 int wrapper_freelist_init(struct latency_tracker *tracker, int max_events)
 {
-	int i;
+	int i, node, cpu;
 	struct latency_tracker_event *e;
 
 	if (init_per_cpu_llist(tracker) < 0)
 		goto error;
 
-	init_llist_head(&tracker->ll_events_free_list);
-	for (i = 0; i < max_events; i++) {
-		e = kzalloc(sizeof(struct latency_tracker_event), GFP_KERNEL);
-		if (!e)
-			goto error;
-		e->tkey.key = kzalloc(tracker->key_size, GFP_KERNEL);
-		if (!e->tkey.key) {
-			kfree(e);
-			goto error;
-		}
-		if (tracker->priv_data_size) {
-			e->priv_data = kzalloc(tracker->priv_data_size,
-					GFP_KERNEL);
-			if (!e->priv_data) {
-				kfree(e->tkey.key);
-				kfree(e);
-				goto error;
-			}
-		}
-		if (tracker->max_resize && (i == max_events/2)) {
-			tracker->resize_event = e;
-		}
-		llist_add(&e->llist, &tracker->ll_events_free_list);
+	for_each_possible_cpu(cpu) {
+		node = cpu_to_node(cpu);
+		if (node > tracker->numa_node_max)
+			tracker->numa_node_max = node;
 	}
+	tracker->per_node_pool = kzalloc(
+			(tracker->numa_node_max + 1) * sizeof(struct numa_pool),
+			GFP_KERNEL);
+	if (!tracker->per_node_pool)
+		goto error;
+
+	for_each_possible_cpu(cpu) {
+		struct per_cpu_ll *ll;
+
+		node = cpu_to_node(cpu);
+		ll = per_cpu_ptr(tracker->per_cpu_ll, cpu);
+		ll->pool = &tracker->per_node_pool[node];
+	}
+
+	for (node = 0; node <= tracker->numa_node_max; node++) {
+		init_llist_head(&tracker->per_node_pool[node].llist);
+		for (i = 0; i < max_events/(tracker->numa_node_max + 1); i++) {
+			e = alloc_event_node(tracker, node);
+			if (!e)
+				goto error_free;
+			e->pool = &tracker->per_node_pool[node];
+			llist_add(&e->llist,
+					&tracker->per_node_pool[node].llist);
+		}
+		printk("latency_tracker: allocated %d events on node %d\n",
+				max_events/(tracker->numa_node_max + 1),
+				node);
+	}
+
+	/*
+	 * TODO: resize
 	tracker->free_list_nelems = max_events;
 	tracker->per_cpu_alloc = (max_events -
 			(tracker->nr_cpus * FREELIST_PERCPU_BATCH)) / tracker->nr_cpus;
-	init_balance_per_cpu(tracker);
+			*/
 	wrapper_vmalloc_sync_all();
 
 	return 0;
 
+error_free:
+	wrapper_freelist_destroy(tracker);
 error:
 	return -1;
 }
@@ -137,6 +155,7 @@ error:
 static
 void wrapper_resize_work(struct latency_tracker *tracker)
 {
+#if 0
 	int i, max_events;
 	struct latency_tracker_event *e;
 
@@ -184,6 +203,7 @@ error:
 end:
 	printk("latency_tracker: resize success\n");
 	return;
+#endif
 }
 
 static
@@ -236,11 +256,18 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 {
 	struct llist_node *list;
 	int cnt = 0;
+	int node;
 
-	list = llist_del_all(&tracker->ll_events_free_list);
-	if (list) {
-		cnt = free_event_list(list);
+	/* Free per-node pool */
+	for (node = 0; node <= tracker->numa_node_max; node++) {
+		list = llist_del_all(&tracker->per_node_pool[node].llist);
+		if (list) {
+			cnt += free_event_list(list);
+		}
 	}
+	kfree(tracker->per_node_pool);
+
+	/* Free per-cpu cache */
 	cnt += free_per_cpu_llist(tracker);
 	printk("latency_tracker: LL freed %d events (%lu bytes)\n", cnt,
 			cnt * (sizeof(struct latency_tracker_event) +
@@ -249,7 +276,7 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 
 /*
  * Try to get an entry from the local CPU pool, if empty, use
- * the global pool.
+ * this CPU's NUMA pool.
  */
 struct llist_node *per_cpu_get(struct latency_tracker *tracker)
 {
@@ -258,17 +285,12 @@ struct llist_node *per_cpu_get(struct latency_tracker *tracker)
 
 	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll);
 	node = llist_del_first(&ll->llist);
-
 	if (node) {
 		ll->current_count--;
-		if (ll->current_count < FREELIST_PERCPU_MIN) {
-			ll->current_count += free_list_move_n(&ll->llist,
-				&tracker->ll_events_free_list,
-				FREELIST_PERCPU_BATCH);
-		}
+		WARN_ON_ONCE(ll->current_count < 0);
 		return node;
 	}
-	return llist_del_first(&tracker->ll_events_free_list);
+	return llist_del_first(&ll->pool->llist);
 }
 
 static inline
@@ -306,14 +328,28 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	memset(e->tkey.key, 0, tracker->key_size);
 	if (e->priv_data)
 		memset(e->priv_data, 0, tracker->priv_data_size);
-	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll); llist_add(&e->llist,
-			&ll->llist); ll->current_count++;
-	/* put back events in the global list if we have too much */
-	if (ll->current_count > (tracker->per_cpu_alloc + FREELIST_PERCPU_BATCH)) {
-		ll->current_count -= free_list_move_n(
-				&tracker->ll_events_free_list, &ll->llist,
-				FREELIST_PERCPU_BATCH);
+	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll);
+	/*
+	 * If this event came from a remote NUMA node, put back this
+	 * event to its original pool.
+	 */
+	if (e->pool != ll->pool) {
+//		printk("DEBUG cross-pool put_event\n");
+		llist_add(&e->llist, &ll->pool->llist);
+	} else if (ll->current_count < FREELIST_PERCPU_CACHE) {
+		/*
+		 * Fill our local cache if needed.
+		 */
+		llist_add(&e->llist, &ll->llist);
+		ll->current_count++;
+	} else {
+		/*
+		 * Add to our NUMA pool.
+		 */
+		llist_add(&e->llist, &ll->pool->llist);
 	}
+
+	return;
 }
 
 static

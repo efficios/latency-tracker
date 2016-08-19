@@ -13,8 +13,13 @@
 //#include "urcu/wfcqueue.h"
 
 #ifndef OLDFREELIST
+struct numa_pool {
+	struct llist_head llist;
+};
+
 struct per_cpu_ll {
 	int current_count;
+	struct numa_pool *pool;
 	struct llist_head llist;
 };
 #endif
@@ -54,15 +59,18 @@ struct latency_tracker {
 	 * Size allocated for event->priv_data.
 	 */
 	int priv_data_size;
-	/* How much event could not be tracked due to an empty free list. */
+	/* How many events were inserted in the HT. */
+	uint64_t tracked_count;
+	/* How many event could not be tracked due to an empty free list. */
 	uint64_t skipped_count;
 #ifdef OLDFREELIST
 	struct list_head events_free_list;
 #else
 	int per_cpu_alloc;
 	int nr_cpus;
+	int numa_node_max;
 	struct per_cpu_ll __percpu *per_cpu_ll;
-	struct llist_head ll_events_free_list;
+	struct numa_pool *per_node_pool;
 #endif
 	/*
 	 * Period of the timer (nsec) that performs various housekeeping tasks:
@@ -210,8 +218,13 @@ struct latency_tracker_event {
 	 * The data is memset to 0 when putting back the event.
 	 */
 	void *priv_data;
+
+	/* memset(0) stops here where resetting the event*/
+
+	/* Pool owning this event */
+	struct numa_pool *pool;
 	/*
-	 * Copy of the key.
+	 * Copy of the key, memset to 0 independantly of the event.
 	 */
 	struct latency_tracker_key tkey;
 };

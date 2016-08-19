@@ -35,7 +35,13 @@
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/task_prio.h"
 #include "../wrapper/lt_probe.h"
-#include "rt_bench.h"
+#include "../wrapper/vmalloc.h"
+//#include "../measure.h"
+
+//#define BENCH
+#ifdef BENCH
+#include "../measure.h"
+#endif
 
 #include <trace/events/latency_tracker.h>
 
@@ -107,7 +113,7 @@ struct tracker_config config  = {
 	.softirq_filter = -1,
 	.switch_out_blocked = 1,
 	.out_work_done = 0,
-	.text_breakdown = 1,
+	.text_breakdown = 0,
 	.enter_userspace = 1,
 	.procname_filter_size = 0,
 };
@@ -578,13 +584,19 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	struct event_data *data_in, *data_out;
 	u64 orig_ts;
 	int ret;
+#ifdef BENCH
+	BENCH_PREAMBULE;
+#endif
+
+#ifdef BENCH
+	BENCH_GET_TS1;
+#endif
 
 	event_in = latency_tracker_get_event(tracker, key_in, key_in_len);
 	if (!event_in) {
-		trace_latency_tracker_measurement("transition", 2, 0);
-		return NULL;
+		event_out = NULL;
+		goto out;
 	}
-	trace_latency_tracker_measurement("transition", 2, 1);
 	data_in = (struct event_data *) latency_tracker_event_get_priv_data(event_in);
 	if (!data_in) {
 		BUG_ON(1);
@@ -610,11 +622,11 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	}
 	event_out = latency_tracker_get_event(tracker, key_out, key_out_len);
 	if (!event_out)
-		return NULL;
+		goto end_del;
 	data_out = (struct event_data *) latency_tracker_event_get_priv_data(event_out);
 	if (!data_out) {
 		BUG_ON(1);
-		goto end;
+		goto end_del;
 	}
 	memcpy(data_out, data_in, sizeof(struct event_data));
 	if (branch) {
@@ -623,6 +635,8 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		ret = _latency_tracker_get_event(event_in);
 		if (!ret) {
 			printk("ERR _latency_tracker_get_event\n");
+			latency_tracker_put_event(event_out);
+			event_out = NULL;
 			goto end_del;
 		}
 		/* First branch, the others get the pointer from the memcpy */
@@ -648,6 +662,13 @@ end_del:
 
 end:
 	latency_tracker_put_event(event_in);
+out:
+#ifdef BENCH
+	BENCH_GET_TS2;
+#endif
+#ifdef BENCH
+	BENCH_APPEND(!!event_in);
+#endif
 	return event_out;
 }
 
@@ -657,7 +678,6 @@ LT_PROBE_DEFINE(local_timer_entry, int vector)
 	struct local_timer_key_t key;
 	u64 now;
 
-	trace_latency_tracker_measurement("local_timer_entry", 1, 0); \
 	if (!config.timer_tracing)
 		goto end;
 
@@ -689,7 +709,6 @@ LT_PROBE_DEFINE(local_timer_entry, int vector)
 #endif
 
 end:
-	trace_latency_tracker_measurement("local_timer_entry", 0, 0); \
 	return;
 }
 
@@ -697,7 +716,6 @@ LT_PROBE_DEFINE(local_timer_exit, int vector)
 {
 	struct local_timer_key_t local_timer_key;
 
-	trace_latency_tracker_measurement("local_timer_exit", 1, 0);
 	if (!config.timer_tracing)
 		goto end;
 	local_timer_key.cpu = smp_processor_id();
@@ -705,7 +723,6 @@ LT_PROBE_DEFINE(local_timer_exit, int vector)
 	latency_tracker_event_out(tracker, &local_timer_key,
 			sizeof(local_timer_key), OUT_IRQHANDLER_NO_CB, 0);
 end:
-	trace_latency_tracker_measurement("local_timer_exit", 0, 0);
 	return;
 }
 
@@ -714,8 +731,6 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 	struct do_irq_key_t do_irq_key;
 	struct hardirq_key_t hardirq_key;
 	struct latency_tracker_event *s;
-
-	trace_latency_tracker_measurement("irq_handler_entry", 1, 0);
 	if (!config.irq_tracing)
 		goto end;
 
@@ -743,7 +758,6 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 				do_irq_key.cpu);
 #endif
 end:
-	trace_latency_tracker_measurement("irq_handler_entry", 0, 0);
 	return;
 }
 
@@ -751,7 +765,6 @@ LT_PROBE_DEFINE(irq_handler_exit, int irq, struct irqaction *action,
 		int ret)
 {
 	struct hardirq_key_t hardirq_key;
-	trace_latency_tracker_measurement("irq_handler_exit", 1, 0);
 	if (!config.irq_tracing)
 		goto end;
 
@@ -779,7 +792,6 @@ LT_PROBE_DEFINE(irq_handler_exit, int irq, struct irqaction *action,
 			OUT_IRQHANDLER_NO_CB, 0);
 
 end:
-	trace_latency_tracker_measurement("irq_handler_exit", 0, 0);
 	return;
 }
 
@@ -790,7 +802,6 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	struct switch_key_t switch_key;
 	struct latency_tracker_event *s;
 
-	trace_latency_tracker_measurement("softirq_raise", 1, 0);
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
 
@@ -814,7 +825,6 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 			vec_nr);
 #endif
 end:
-	trace_latency_tracker_measurement("softirq_raise", 0, 0);
 	return;
 }
 #else /* CONFIG_PREEMPT_RT_FULL */
@@ -824,7 +834,6 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	struct raise_softirq_key_t raise_softirq_key;
 	struct latency_tracker_event *s;
 
-	trace_latency_tracker_measurement("softirq_raise", 1, 0);
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
 
@@ -848,7 +857,7 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 			vec_nr);
 #endif
 end:
-	trace_latency_tracker_measurement("softirq_raise", 0, 0);
+	return;
 }
 #endif /* CONFIG_PREEMPT_RT_FULL */
 
@@ -858,7 +867,6 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *s;
 
-	trace_latency_tracker_measurement("softirq_entry", 1, 0);
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
 
@@ -888,7 +896,6 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 			vec_nr);
 #endif
 end:
-	trace_latency_tracker_measurement("softirq_entry", 0, 0);
 	return;
 }
 
@@ -899,7 +906,6 @@ LT_PROBE_DEFINE(hrtimer_expire_entry, struct hrtimer *hrtimer,
 	struct hrtimer_key_t hrtimer_key;
 	struct latency_tracker_event *s;
 
-	trace_latency_tracker_measurement("hrtimer_expire_entry", 1, 0);
 	if (!config.timer_tracing)
 		goto end;
 	local_timer_key.cpu = smp_processor_id();
@@ -924,7 +930,6 @@ LT_PROBE_DEFINE(hrtimer_expire_entry, struct hrtimer *hrtimer,
 	printk("%llu hrtimer_entry\n", trace_clock_monotonic_wrapper());
 #endif
 end:
-	trace_latency_tracker_measurement("hrtimer_expire_entry", 0, 0);
 	return;
 }
 
@@ -932,7 +937,6 @@ LT_PROBE_DEFINE(hrtimer_expire_exit, struct timer_list *timer)
 {
 	struct hrtimer_key_t hrtimer_key;
 
-	trace_latency_tracker_measurement("hrtimer_expire_exit", 1, 0);
 	if (!config.timer_tracing)
 		goto end;
 	hrtimer_key.cpu = smp_processor_id();
@@ -949,7 +953,6 @@ LT_PROBE_DEFINE(hrtimer_expire_exit, struct timer_list *timer)
 			OUT_IRQHANDLER_NO_CB, 0);
 
 end:
-	trace_latency_tracker_measurement("hrtimer_expire_exit", 0, 0);
 	return;
 }
 
@@ -957,7 +960,6 @@ LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 {
 	struct softirq_key_t softirq_key;
 
-	trace_latency_tracker_measurement("softirq_exit", 1, 0);
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
 
@@ -981,7 +983,6 @@ LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 	latency_tracker_event_out(tracker, &softirq_key, sizeof(softirq_key),
 			OUT_IRQHANDLER_NO_CB, 0);
 end:
-	trace_latency_tracker_measurement("softirq_exit", 0, 0);
 	return;
 }
 
@@ -1100,9 +1101,8 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 	 * of the CPU.
 	 */
 	struct waking_key_t waking_key;
-	struct latency_tracker_event *s;
+	//struct latency_tracker_event *s;
 
-	trace_latency_tracker_measurement("sched_waking", 1, 0);
 
 	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!p)
@@ -1116,17 +1116,6 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 
 	waking_key.pid = p->pid;
 	waking_key.type = KEY_WAKEUP;
-
-	/*
-	 * If the process was already woken up, we cannot link
-	 * its waking to the current event, so we exit here.
-	 */
-	s = latency_tracker_get_event(tracker, &waking_key,
-			sizeof(waking_key));
-	if (s) {
-		latency_tracker_put_event(s);
-		goto end;
-	}
 
 	/* In order of nesting */
 	if (in_nmi()) {
@@ -1152,7 +1141,6 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 	}
 
 end:
-	trace_latency_tracker_measurement("sched_waking", 0, 0);
 	return;
 }
 
@@ -1253,8 +1241,10 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 						wrapper_task_prio(next));
 				data = (struct event_data *)
 					latency_tracker_event_get_priv_data(s);
-				if (!data)
+				if (!data) {
+					latency_tracker_put_event(s);
 					goto end;
+				}
 				data->preempt_count++;
 			} else {
 				append_delta_ts(s, KEY_SWITCH,
@@ -1302,7 +1292,6 @@ LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
 		struct task_struct *next)
 #endif
 {
-	trace_latency_tracker_measurement("sched_switch", 1, 0);
 	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!prev || !next)
 		goto end;
@@ -1311,7 +1300,6 @@ LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
 	sched_switch_out(prev, next);
 
 end:
-	trace_latency_tracker_measurement("sched_switch", 0, 0);
 	return;
 }
 
@@ -1401,6 +1389,7 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 			return -ENOENT;
 		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
 				NULL, 0);
+		latency_tracker_put_event(s);
 		latency_tracker_event_out(tracker, &switch_key,
 				sizeof(switch_key),
 				OUT_WORK_DONE, now);
@@ -1414,6 +1403,7 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 			return -ENOENT;
 		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
 				NULL, 0);
+		latency_tracker_put_event(s);
 		latency_tracker_event_out(tracker, &work_begin_key,
 				sizeof(work_begin_key),
 				OUT_WORK_DONE, now);
@@ -1599,7 +1589,7 @@ int __init rt_init(void)
 	tracker = latency_tracker_create("rt");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 10000);
+	latency_tracker_set_startup_events(tracker, 100000);
 	latency_tracker_set_max_resize(tracker, 10000);
 	/* FIXME: makes us crash after rmmod */
 	//latency_tracker_set_timer_period(tracker, 100000000);
@@ -1619,7 +1609,9 @@ int __init rt_init(void)
 	if (!timer_tracing)
 		config.timer_tracing = 0;
 
-	setup_benchmark_pre();
+#ifdef BENCH
+	alloc_measurements();
+#endif
 
 	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
 			probe_local_timer_entry, NULL);
@@ -1664,8 +1656,6 @@ int __init rt_init(void)
 	ret = register_kretprobe(&probe_do_irq);
 	WARN_ON(ret);
 
-	setup_benchmark_post();
-
 	goto end;
 
 error:
@@ -1678,7 +1668,7 @@ module_init(rt_init);
 static
 void __exit rt_exit(void)
 {
-	uint64_t skipped;
+	uint64_t skipped, tracked;
 
 	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
 			probe_local_timer_entry, NULL);
@@ -1703,13 +1693,18 @@ void __exit rt_exit(void)
 	lttng_wrapper_tracepoint_probe_unregister("softirq_exit",
 			probe_softirq_exit, NULL);
 	unregister_kretprobe(&probe_do_irq);
-	teardown_benchmark();
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
+	tracked = latency_tracker_tracked_count(tracker);
 	latency_tracker_destroy(tracker);
+	printk("Tracked events : %llu\n", tracked);
 	printk("Missed events : %llu\n", skipped);
 	printk("Failed event in : %d\n", failed_event_in);
 	printk("Total rt alerts : %d\n", cnt);
+#ifdef BENCH
+	output_measurements();
+	free_measurements();
+#endif
 }
 module_exit(rt_exit);
 
