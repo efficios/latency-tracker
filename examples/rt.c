@@ -181,8 +181,9 @@ struct switch_key_t {
 	enum rt_key_type type;
 } __attribute__((__packed__));
 
+#define MAX_COOKIE_SIZE 32
 struct work_begin_key_t {
-	char cookie[TASK_COMM_LEN];
+	char cookie[MAX_COOKIE_SIZE];
 	int cookie_size;
 	enum rt_key_type type;
 } __attribute__((__packed__));
@@ -317,6 +318,7 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 	char tmp[64];
 	size_t len;
 	uint64_t last_ts;
+	char buf[32];
 
 	if (ts)
 		now = ts;
@@ -363,7 +365,9 @@ void append_delta_ts(struct latency_tracker_event *s, enum rt_key_type type,
 				now - last_ts);
 		break;
 	case KEY_WORK_BEGIN:
-		snprintf(tmp, 64, "%s [%03d] = %llu, ", txt, smp_processor_id(),
+		snprintf(buf, min_t(unsigned int, field1, 32), "%s", field2);
+		snprintf(tmp, 64, "%s(%s) [%03d] = %llu, ", txt,
+				buf, smp_processor_id(),
 				now - last_ts);
 		break;
 	}
@@ -1486,7 +1490,8 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
 	set_good_branch(data);
 
-	append_delta_ts(s, KEY_WORK_BEGIN, "to work_begin", now, 0, NULL, 0);
+	append_delta_ts(s, KEY_WORK_BEGIN, "to work_begin", now,
+			r, work_begin_key.cookie, 0);
 	latency_tracker_put_event(s);
 
 	return cnt;
