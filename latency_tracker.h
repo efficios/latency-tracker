@@ -32,6 +32,7 @@
 #define DEFAULT_THRESHOLD 1000000000
 
 struct latency_tracker_event_ctx;
+struct latency_tracker_event;
 
 struct latency_tracker_key {
 	size_t key_len;
@@ -215,6 +216,12 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 		struct latency_tracker *tracker,
 		void *key, size_t key_len,
 		unsigned int unique, void *priv);
+
+enum latency_tracker_event_in_ret _latency_tracker_event_in_get(
+		struct latency_tracker *tracker,
+		void *key, size_t key_len,
+		unsigned int unique, u64 ts_override,
+		void *priv, struct latency_tracker_event **new_event);
 
 enum latency_tracker_event_in_ret _latency_tracker_event_in(
 		struct latency_tracker *tracker,

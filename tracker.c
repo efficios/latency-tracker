@@ -550,11 +550,11 @@ void latency_tracker_timeout_cb(struct latency_tracker *tracker,
 		tracker->cb(&ctx);
 }
 
-enum latency_tracker_event_in_ret _latency_tracker_event_in(
+enum latency_tracker_event_in_ret _latency_tracker_event_in_get(
 		struct latency_tracker *tracker,
 		void *key, size_t key_len,
 		unsigned int unique, u64 ts_override,
-		void *priv)
+		void *priv, struct latency_tracker_event **new_event)
 {
 	struct latency_tracker_event *s, *old_s;
 	int ret;
@@ -618,6 +618,10 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 				&tracker->timeout_tail, &s->u.timeout_node);
 	}
 
+	if (new_event) {
+		kref_get(&s->refcount);
+		*new_event = s;
+	}
 	/*
 	 * If we specify the unique property, get rid of other duplicate keys
 	 * without calling the callback.
@@ -652,6 +656,18 @@ end:
 	BENCH_APPEND;
 #endif
 	return ret;
+}
+EXPORT_SYMBOL_GPL(_latency_tracker_event_in_get);
+
+enum latency_tracker_event_in_ret _latency_tracker_event_in(
+		struct latency_tracker *tracker,
+		void *key, size_t key_len,
+		unsigned int unique, u64 ts_override,
+		void *priv)
+{
+		return _latency_tracker_event_in_get(tracker,
+				key, key_len, unique, ts_override,
+				priv, NULL);
 }
 EXPORT_SYMBOL_GPL(_latency_tracker_event_in);
 

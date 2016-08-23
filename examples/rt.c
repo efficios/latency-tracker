@@ -139,53 +139,59 @@ enum event_out_types {
 	OUT_NO_CB = 4,
 };
 
-struct do_irq_key_t {
-	unsigned int cpu;
+struct generic_key_t {
 	enum rt_key_type type;
+} __attribute__((__packed__));
+
+struct do_irq_key_t {
+	struct generic_key_t p;
+	unsigned int cpu;
 } __attribute__((__packed__));
 
 struct local_timer_key_t {
+	struct generic_key_t p;
 	unsigned int cpu;
-	enum rt_key_type type;
 } __attribute__((__packed__));
 
 struct hrtimer_key_t {
+	struct generic_key_t p;
 	unsigned int cpu;
-	enum rt_key_type type;
 } __attribute__((__packed__));
 
 struct hardirq_key_t {
+	struct generic_key_t p;
 	unsigned int cpu;
-	enum rt_key_type type;
 } __attribute__((__packed__));
 
 struct raise_softirq_key_t {
+	struct generic_key_t p;
 	unsigned int cpu;
 	unsigned int vector;
-	enum rt_key_type type;
 } __attribute__((__packed__));
 
 struct softirq_key_t {
+	struct generic_key_t p;
 	unsigned int cpu;
 	int pid;
-	enum rt_key_type type;
 } __attribute__((__packed__));
 
 struct waking_key_t {
+	struct generic_key_t p;
+	int cpu;
 	int pid;
-	enum rt_key_type type;
 } __attribute__((__packed__));
 
 struct switch_key_t {
+	struct generic_key_t p;
+	int cpu;
 	int pid;
-	enum rt_key_type type;
 } __attribute__((__packed__));
 
 #define MAX_COOKIE_SIZE 32
 struct work_begin_key_t {
+	struct generic_key_t p;
 	char cookie[MAX_COOKIE_SIZE];
 	int cookie_size;
-	enum rt_key_type type;
 } __attribute__((__packed__));
 
 /* Keep up-to-date with a list of all key structs. */
@@ -445,6 +451,7 @@ static
 int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	enum latency_tracker_event_in_ret ret;
+	struct latency_tracker_event *s;
 	struct do_irq_key_t key;
 	u64 now;
 
@@ -452,26 +459,20 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 		return 0;
 
 	now = trace_clock_monotonic_wrapper();
+	key.p.type = KEY_DO_IRQ;
 	key.cpu = smp_processor_id();
-	key.type = KEY_DO_IRQ;
-	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, now,
-			NULL);
+	ret = _latency_tracker_event_in_get(tracker, &key, sizeof(key), 1, now,
+			NULL, &s);
 	if (ret != LATENCY_TRACKER_OK) {
 		failed_event_in++;
 		return 0;
 	}
+	WARN_ON_ONCE(!s);
 
 	if (config.text_breakdown) {
-		struct latency_tracker_event *s;
-
-		s = latency_tracker_get_event(tracker, &key, sizeof(key));
-		if (!s) {
-			BUG_ON(1);
-			return 0;
-		}
 		append_delta_ts(s, KEY_DO_IRQ, "do_IRQ", now, 0, NULL, 0);
-		latency_tracker_put_event(s);
 	}
+	latency_tracker_put_event(s);
 
 #ifdef DEBUG
 	printk("%llu do_IRQ (cpu %u)\n", trace_clock_monotonic_wrapper(),
@@ -488,8 +489,8 @@ int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 
 	if (!config.irq_tracing)
 		return 0;
+	key.p.type = KEY_DO_IRQ;
 	key.cpu = smp_processor_id();
-	key.type = KEY_DO_IRQ;
 	latency_tracker_event_out(tracker, &key,
 			sizeof(key), OUT_IRQHANDLER_NO_CB, 0);
 
@@ -618,15 +619,13 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	}
 	orig_ts = latency_tracker_event_get_start_ts(event_in);
 
-	ret = _latency_tracker_event_in(tracker, key_out,
-			key_out_len, unique, orig_ts, NULL);
+	ret = _latency_tracker_event_in_get(tracker, key_out,
+			key_out_len, unique, orig_ts, NULL, &event_out);
 	if (ret != LATENCY_TRACKER_OK) {
-		goto end_del;
 		failed_event_in++;
-	}
-	event_out = latency_tracker_get_event(tracker, key_out, key_out_len);
-	if (!event_out)
 		goto end_del;
+	}
+	WARN_ON_ONCE(!event_out);
 	data_out = (struct event_data *) latency_tracker_event_get_priv_data(event_out);
 	if (!data_out) {
 		BUG_ON(1);
@@ -679,6 +678,7 @@ out:
 LT_PROBE_DEFINE(local_timer_entry, int vector)
 {
 	enum latency_tracker_event_in_ret ret;
+	struct latency_tracker_event *s;
 	struct local_timer_key_t key;
 	u64 now;
 
@@ -686,26 +686,20 @@ LT_PROBE_DEFINE(local_timer_entry, int vector)
 		goto end;
 
 	now = trace_clock_monotonic_wrapper();
+	key.p.type = KEY_TIMER_INTERRUPT;
 	key.cpu = smp_processor_id();
-	key.type = KEY_TIMER_INTERRUPT;
-	ret = _latency_tracker_event_in(tracker, &key, sizeof(key), 1, now,
-			NULL);
+	ret = _latency_tracker_event_in_get(tracker, &key, sizeof(key), 1, now,
+			NULL, &s);
 	if (ret != LATENCY_TRACKER_OK) {
 		failed_event_in++;
 		goto end;
 	}
-
+	WARN_ON_ONCE(!s);
 	if (config.text_breakdown) {
-		struct latency_tracker_event *s;
-		s = latency_tracker_get_event(tracker, &key, sizeof(key));
-		if (!s) {
-			BUG_ON(1);
-			goto end;
-		}
 		append_delta_ts(s, KEY_TIMER_INTERRUPT, "local_timer_entry", now,
 				vector, NULL, 0);
-		latency_tracker_put_event(s);
 	}
+	latency_tracker_put_event(s);
 
 #ifdef DEBUG
 	printk("%llu local_timer_entry (cpu %u)\n", trace_clock_monotonic_wrapper(),
@@ -722,8 +716,8 @@ LT_PROBE_DEFINE(local_timer_exit, int vector)
 
 	if (!config.timer_tracing)
 		goto end;
+	local_timer_key.p.type = KEY_TIMER_INTERRUPT;
 	local_timer_key.cpu = smp_processor_id();
-	local_timer_key.type = KEY_TIMER_INTERRUPT;
 	latency_tracker_event_out(tracker, &local_timer_key,
 			sizeof(local_timer_key), OUT_IRQHANDLER_NO_CB, 0);
 end:
@@ -743,11 +737,11 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 		goto end;
 	}
 
+	do_irq_key.p.type = KEY_DO_IRQ;
 	do_irq_key.cpu = smp_processor_id();
-	do_irq_key.type = KEY_DO_IRQ;
 
+	hardirq_key.p.type = KEY_HARDIRQ;
 	hardirq_key.cpu = smp_processor_id();
-	hardirq_key.type = KEY_HARDIRQ;
 
 	s = event_transition(&do_irq_key, sizeof(do_irq_key), &hardirq_key,
 			sizeof(hardirq_key), 0, 1, 0);
@@ -777,8 +771,8 @@ LT_PROBE_DEFINE(irq_handler_exit, int irq, struct irqaction *action,
 		goto end;
 	}
 
+	hardirq_key.p.type = KEY_HARDIRQ;
 	hardirq_key.cpu = smp_processor_id();
-	hardirq_key.type = KEY_HARDIRQ;
 
 	if (config.text_breakdown) {
 		struct latency_tracker_event *s;
@@ -809,12 +803,16 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
 
+	switch_key.p.type = KEY_SWITCH;
 	switch_key.pid = current->pid;
-	switch_key.type = KEY_SWITCH;
+	if (!current->pid)
+		switch_key.cpu = smp_processor_id();
+	else
+		switch_key.cpu = -1;
 
+	raise_softirq_key.p.type = KEY_RAISE_SOFTIRQ;
 	raise_softirq_key.cpu = smp_processor_id();
 	raise_softirq_key.vector = vec_nr;
-	raise_softirq_key.type = KEY_RAISE_SOFTIRQ;
 
 	s = event_transition(&switch_key, sizeof(switch_key),
 			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0, 1);
@@ -841,12 +839,12 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
 
+	hardirq_key.p.type = KEY_HARDIRQ;
 	hardirq_key.cpu = smp_processor_id();
-	hardirq_key.type = KEY_HARDIRQ;
 
+	raise_softirq_key.p.type = KEY_RAISE_SOFTIRQ;
 	raise_softirq_key.cpu = smp_processor_id();
 	raise_softirq_key.vector = vec_nr;
-	raise_softirq_key.type = KEY_RAISE_SOFTIRQ;
 
 	s = event_transition(&hardirq_key, sizeof(hardirq_key),
 			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0, 1);
@@ -874,17 +872,17 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
 
+	raise_softirq_key.p.type = KEY_RAISE_SOFTIRQ;
 	raise_softirq_key.cpu = smp_processor_id();
 	raise_softirq_key.vector = vec_nr;
-	raise_softirq_key.type = KEY_RAISE_SOFTIRQ;
 
 	/*
 	 * Insert the softirq_entry event.
 	 * TODO: Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
 	 */
+	softirq_key.p.type = KEY_SOFTIRQ;
 	softirq_key.cpu = smp_processor_id();
 	softirq_key.pid = current->pid;
-	softirq_key.type = KEY_SOFTIRQ;
 
 	do {
 		s = event_transition(&raise_softirq_key, sizeof(raise_softirq_key),
@@ -912,15 +910,15 @@ LT_PROBE_DEFINE(hrtimer_expire_entry, struct hrtimer *hrtimer,
 
 	if (!config.timer_tracing)
 		goto end;
+	local_timer_key.p.type = KEY_TIMER_INTERRUPT;
 	local_timer_key.cpu = smp_processor_id();
-	local_timer_key.type = KEY_TIMER_INTERRUPT;
 
 	/*
 	 * Insert the hrtimer_expire_entry event.
 	 * TODO: Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
 	 */
+	hrtimer_key.p.type = KEY_HRTIMER;
 	hrtimer_key.cpu = smp_processor_id();
-	hrtimer_key.type = KEY_HRTIMER;
 
 	s = event_transition(&local_timer_key, sizeof(local_timer_key),
 			&hrtimer_key, sizeof(hrtimer_key), 0, 1, 0);
@@ -943,15 +941,15 @@ LT_PROBE_DEFINE(hrtimer_expire_exit, struct timer_list *timer)
 
 	if (!config.timer_tracing)
 		goto end;
+	hrtimer_key.p.type = KEY_HRTIMER;
 	hrtimer_key.cpu = smp_processor_id();
-	hrtimer_key.type = KEY_HRTIMER;
 
 	/*
 	 * Insert the hrtimer_expire_entry event.
 	 * TODO: Use the CPU as key on non-RT kernel and PID on PREEMPT_RT.
 	 */
+	hrtimer_key.p.type = KEY_HRTIMER;
 	hrtimer_key.cpu = smp_processor_id();
-	hrtimer_key.type = KEY_HRTIMER;
 
 	latency_tracker_event_out(tracker, &hrtimer_key, sizeof(hrtimer_key),
 			OUT_IRQHANDLER_NO_CB, 0);
@@ -970,9 +968,9 @@ LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 	/*
 	 * Just cleanup the softirq_entry event
 	 */
+	softirq_key.p.type = KEY_SOFTIRQ;
 	softirq_key.cpu = smp_processor_id();
 	softirq_key.pid = current->pid;
-	softirq_key.type = KEY_SOFTIRQ;
 	if (config.text_breakdown) {
 		struct latency_tracker_event *s;
 
@@ -996,11 +994,11 @@ void irq_waking(struct waking_key_t *waking_key)
 	struct latency_tracker_event *s;
 	struct do_irq_key_t do_irq_key;
 
+	do_irq_key.p.type = KEY_DO_IRQ;
 	do_irq_key.cpu = smp_processor_id();
-	do_irq_key.type = KEY_DO_IRQ;
 
 	s = event_transition(&do_irq_key, sizeof(do_irq_key),
-			waking_key, sizeof(waking_key), 0, 0, 1);
+			waking_key, sizeof(*waking_key), 0, 0, 1);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
@@ -1018,12 +1016,12 @@ void softirq_waking(struct waking_key_t *waking_key)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *s;
 
+	softirq_key.p.type = KEY_SOFTIRQ;
 	softirq_key.cpu = smp_processor_id();
 	softirq_key.pid = current->pid;
-	softirq_key.type = KEY_SOFTIRQ;
 
 	s = event_transition(&softirq_key, sizeof(softirq_key),
-			waking_key, sizeof(waking_key), 0, 0, 1);
+			waking_key, sizeof(*waking_key), 0, 0, 1);
 	if (!s)
 		return;
 	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
@@ -1045,10 +1043,10 @@ int hrtimer_waking(struct waking_key_t *waking_key)
 	struct latency_tracker_event *s;
 
 	/* TODO: PREEMPT_RT */
+	hrtimer_key.p.type = KEY_HRTIMER;
 	hrtimer_key.cpu = smp_processor_id();
-	hrtimer_key.type = KEY_HRTIMER;
 	s = event_transition(&hrtimer_key, sizeof(hrtimer_key),
-			waking_key, sizeof(waking_key), 0, 0, 1);
+			waking_key, sizeof(*waking_key), 0, 0, 1);
 	if (!s)
 		return 0;
 	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
@@ -1069,11 +1067,15 @@ void thread_waking(struct waking_key_t *waking_key)
 	struct latency_tracker_event *s;
 	u64 now = trace_clock_monotonic_wrapper();
 
+	switch_key.p.type = KEY_SWITCH;
 	switch_key.pid = current->pid;
-	switch_key.type = KEY_SWITCH;
+	if (!current->pid)
+		switch_key.cpu = smp_processor_id();
+	else
+		switch_key.cpu = -1;
 
 	s = event_transition(&switch_key, sizeof(switch_key), waking_key,
-			sizeof(waking_key), 0, 0, 1);
+			sizeof(*waking_key), 0, 0, 1);
 	if (s) {
 		/* switch_in after a waking */
 		append_delta_ts(s, KEY_WAKEUP, "to sched_waking", now,
@@ -1118,8 +1120,12 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 	 * target process.
 	 */
 
+	waking_key.p.type = KEY_WAKEUP;
 	waking_key.pid = p->pid;
-	waking_key.type = KEY_WAKEUP;
+	if (!p->pid)
+		waking_key.cpu = smp_processor_id();
+	else
+		waking_key.cpu = -1;
 
 	/* In order of nesting */
 	if (in_nmi()) {
@@ -1158,14 +1164,22 @@ void sched_switch_in(struct task_struct *next)
 	int nr_found = 0, ret;
 	u64 now = trace_clock_monotonic_wrapper();
 
+	switch_key.p.type = KEY_SWITCH;
 	switch_key.pid = next->pid;
-	switch_key.type = KEY_SWITCH;
+	if (!next->pid)
+		switch_key.cpu = smp_processor_id();
+	else
+		switch_key.cpu = -1;
 
 	/* We can switch from a wakeup/waking or after being preempted */
 
 	/* sched in */
+	waking_key.p.type = KEY_WAKEUP;
 	waking_key.pid = next->pid;
-	waking_key.type = KEY_WAKEUP;
+	if (!next->pid)
+		waking_key.cpu = smp_processor_id();
+	else
+		waking_key.cpu = -1;
 
 	/* switch after one or multiple waking */
 	do {
@@ -1226,8 +1240,12 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 	u64 now = trace_clock_monotonic_wrapper();
 
 	/* switch out */
+	switch_key.p.type = KEY_SWITCH;
 	switch_key.pid = prev->pid;
-	switch_key.type = KEY_SWITCH;
+	if (!prev->pid)
+		switch_key.cpu = smp_processor_id();
+	else
+		switch_key.cpu = -1;
 	/* Handle duplicates */
 	for (;;) {
 		if (config.text_breakdown) {
@@ -1385,8 +1403,12 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		 * The current process should be tracked otherwise we can't
 		 * link this event to an origin.
 		 */
+		switch_key.p.type = KEY_SWITCH;
 		switch_key.pid = current->pid;
-		switch_key.type = KEY_SWITCH;
+		if (!current->pid)
+			switch_key.cpu = smp_processor_id();
+		else
+			switch_key.cpu = -1;
 		s = latency_tracker_get_event(tracker, &switch_key,
 				sizeof(switch_key));
 		if (!s)
@@ -1398,8 +1420,8 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 				sizeof(switch_key),
 				OUT_WORK_DONE, now);
 	} else {
+		work_begin_key.p.type = KEY_WORK_BEGIN;
 		work_begin_key.cookie_size = r;
-		work_begin_key.type = KEY_WORK_BEGIN;
 
 		s = latency_tracker_get_event(tracker, &work_begin_key,
 				sizeof(work_begin_key));
@@ -1469,11 +1491,15 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	 * The current process should be tracked otherwise we can't link
 	 * this event to an origin.
 	 */
+	switch_key.p.type = KEY_SWITCH;
 	switch_key.pid = current->pid;
-	switch_key.type = KEY_SWITCH;
+	if (!current->pid)
+		switch_key.cpu = smp_processor_id();
+	else
+		switch_key.cpu = -1;
 
+	work_begin_key.p.type = KEY_WORK_BEGIN;
 	work_begin_key.cookie_size = r;
-	work_begin_key.type = KEY_WORK_BEGIN;
 
 	/*
 	 * From now on, only a work_done event can complete this branch.
