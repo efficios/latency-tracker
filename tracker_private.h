@@ -7,6 +7,7 @@
 
 #include <linux/workqueue.h>
 #include <linux/irq_work.h>
+#include <asm/local.h>
 
 //#include "wrapper/ht.h"
 //#include "rculfhash-internal.h"
@@ -18,7 +19,7 @@ struct numa_pool {
 };
 
 struct per_cpu_ll {
-	int current_count;
+	local_t current_count;
 	struct numa_pool *pool;
 	struct llist_head llist;
 };

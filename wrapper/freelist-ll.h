@@ -242,8 +242,8 @@ int free_per_cpu_llist(struct latency_tracker *tracker)
 		if (!list)
 			continue;
 		cnt = free_event_list(list);
-		printk("freed %d on cpu %d (%d)\n", cnt, cpu,
-				ll->current_count);
+		printk("freed %d on cpu %d (%ld)\n", cnt, cpu,
+				local_read(&ll->current_count));
 		total_cnt += cnt;
 	}
 
@@ -284,10 +284,14 @@ struct llist_node *per_cpu_get(struct latency_tracker *tracker)
 	struct per_cpu_ll *ll;
 
 	ll = lttng_this_cpu_ptr(tracker->per_cpu_ll);
+	/*
+	 * Decrement the current count after we successfully remove an
+	 * element from the list.
+	 */
 	node = llist_del_first(&ll->llist);
 	if (node) {
-		ll->current_count--;
-		WARN_ON_ONCE(ll->current_count < 0);
+		local_dec(&ll->current_count);
+		WARN_ON_ONCE(local_read(&ll->current_count) < 0);
 		return node;
 	}
 	return llist_del_first(&ll->pool->llist);
@@ -336,12 +340,17 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	if (e->pool != ll->pool) {
 //		printk("DEBUG cross-pool put_event\n");
 		llist_add(&e->llist, &ll->pool->llist);
-	} else if (ll->current_count < FREELIST_PERCPU_CACHE) {
+	} else if (local_read(&ll->current_count) < FREELIST_PERCPU_CACHE) {
 		/*
 		 * Fill our local cache if needed.
+		 * We need to increment current_count before we add the
+		 * element to the list, because when we successfully
+		 * remove an element from the list, we expect that the
+		 * counter is never negative. An interrupt can observe
+		 * the intermediate state.
 		 */
+		local_inc(&ll->current_count);
 		llist_add(&e->llist, &ll->llist);
-		ll->current_count++;
 	} else {
 		/*
 		 * Add to our NUMA pool.
