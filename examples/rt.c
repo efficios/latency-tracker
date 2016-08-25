@@ -529,11 +529,9 @@ int check_current_branch(struct event_data *data_in)
 	 * branch.
 	 */
 	if ((root_data->u.good_branch_found && !data_in->u.good_branch) ||
-			(root_data->tree_closed)) {
-		latency_tracker_put_event(data_in->root);
-		data_in->root = NULL;
+			(root_data->tree_closed))
 		return 1;
-	}
+
 	return 0;
 }
 
@@ -641,7 +639,10 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		}
 		ret = _latency_tracker_get_event(data_out->root);
 		if (!ret) {
+			WARN_ON_ONCE(1);
+#ifdef DEBUG
 			trace_printk("ERR _latency_tracker_get_event\n");
+#endif
 			latency_tracker_put_event(event_out);
 			event_out = NULL;
 			goto end_del;
@@ -1611,6 +1612,16 @@ error:
 	return -1;
 }
 
+void destroy_event_cb(struct latency_tracker_event *event)
+{
+	struct event_data *data;
+
+	data = (struct event_data *) latency_tracker_event_get_priv_data(event);
+	if (data->root)
+		latency_tracker_put_event(data->root);
+	return;
+}
+
 static
 int __init rt_init(void)
 {
@@ -1628,6 +1639,7 @@ int __init rt_init(void)
 	latency_tracker_set_callback(tracker, rt_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 	latency_tracker_set_priv_data_size(tracker, sizeof(struct event_data));
+	latency_tracker_set_destroy_event_cb(tracker, destroy_event_cb);
 	ret = setup_debugfs_extras();
 	if (ret != 0)
 		goto error;

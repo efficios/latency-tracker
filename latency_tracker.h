@@ -131,6 +131,14 @@ int latency_tracker_set_priv_data_size(struct latency_tracker *tracker,
 int latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
 		uint64_t gc_thres);
 
+/*
+ * The destroy_event_cb callback if not NULL is called for each event being
+ * destroyed by the tracker in case it has some cleanup to do at the
+ * end.
+ */
+int latency_tracker_set_destroy_event_cb(struct latency_tracker *tracker,
+		void (*destroy_event_cb) (struct latency_tracker_event *event));
+
 void *latency_tracker_get_priv(struct latency_tracker *tracker);
 
 /*

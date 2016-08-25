@@ -151,6 +151,8 @@ void __latency_tracker_event_destroy(struct kref *kref)
 
 	s = container_of(kref, struct latency_tracker_event, refcount);
 	tracker = s->tracker;
+	if (tracker->destroy_event_cb)
+		tracker->destroy_event_cb(s);
 	discard_event(tracker, s);
 }
 
@@ -404,6 +406,17 @@ int latency_tracker_set_priv_data_size(struct latency_tracker *tracker,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_priv_data_size);
+
+int latency_tracker_set_destroy_event_cb(struct latency_tracker *tracker,
+		void (*destroy_event_cb) (struct latency_tracker_event *event))
+{
+	if (tracker->enabled)
+		return -1;
+
+	tracker->destroy_event_cb = destroy_event_cb;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_set_destroy_event_cb);
 
 struct latency_tracker *latency_tracker_create(const char *name)
 {

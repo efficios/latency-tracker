@@ -147,6 +147,11 @@ struct latency_tracker {
 	 * the resize mechanism (pointer comparison).
 	 */
 	struct latency_tracker_event *resize_event;
+	/*
+	 * If not NULL, called on event_out and for each event still in
+	 * the HT on latency_tracker_destroy.
+	 */
+	void (*destroy_event_cb) (struct latency_tracker_event *event);
         /*
          * Protects the access to the HT, the free_list and the timer.
          */
