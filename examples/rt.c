@@ -311,7 +311,7 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int sk
 		if (MAX_STACK_TXT - j < 0)
 			return;
 	}
-	//printk("%s\n%llu\n\n", p->comm, delay/1000);
+	//trace_printk("%s\n%llu\n\n", p->comm, delay/1000);
 }
 #endif
 
@@ -441,7 +441,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 			data->breakdown);
 	latency_tracker_debugfs_wakeup_pipe(tracker);
 	/*
-	printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
+	trace_printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
 			current->comm, current->pid,
 			end_ts - start_ts, data->data);
 			*/
@@ -475,7 +475,7 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
-	printk("%llu do_IRQ (cpu %u)\n", trace_clock_monotonic_wrapper(),
+	trace_printk("%llu do_IRQ (cpu %u)\n", trace_clock_monotonic_wrapper(),
 			key.cpu);
 #endif
 
@@ -641,7 +641,7 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		}
 		ret = _latency_tracker_get_event(data_out->root);
 		if (!ret) {
-			printk("ERR _latency_tracker_get_event\n");
+			trace_printk("ERR _latency_tracker_get_event\n");
 			latency_tracker_put_event(event_out);
 			event_out = NULL;
 			goto end_del;
@@ -702,7 +702,7 @@ LT_PROBE_DEFINE(local_timer_entry, int vector)
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
-	printk("%llu local_timer_entry (cpu %u)\n", trace_clock_monotonic_wrapper(),
+	trace_printk("%llu local_timer_entry (cpu %u)\n", trace_clock_monotonic_wrapper(),
 			key.cpu);
 #endif
 
@@ -752,7 +752,7 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
-		printk("%llu hard_irq_entry (cpu: %u)\n", trace_clock_monotonic_wrapper(),
+		trace_printk("%llu hard_irq_entry (cpu: %u)\n", trace_clock_monotonic_wrapper(),
 				do_irq_key.cpu);
 #endif
 end:
@@ -823,7 +823,7 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
-	printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
+	trace_printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
 			vec_nr);
 #endif
 end:
@@ -855,7 +855,7 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
-	printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
+	trace_printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
 			vec_nr);
 #endif
 end:
@@ -894,7 +894,7 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 	} while (s);
 
 #ifdef DEBUG
-	printk("%llu softirq_entry %u\n", trace_clock_monotonic_wrapper(),
+	trace_printk("%llu softirq_entry %u\n", trace_clock_monotonic_wrapper(),
 			vec_nr);
 #endif
 end:
@@ -929,7 +929,7 @@ LT_PROBE_DEFINE(hrtimer_expire_entry, struct hrtimer *hrtimer,
 	latency_tracker_put_event(s);
 
 #ifdef DEBUG
-	printk("%llu hrtimer_entry\n", trace_clock_monotonic_wrapper());
+	trace_printk("%llu hrtimer_entry\n", trace_clock_monotonic_wrapper());
 #endif
 end:
 	return;
@@ -1005,7 +1005,7 @@ void irq_waking(struct waking_key_t *waking_key)
 			NULL, 0);
 	latency_tracker_put_event(s);
 #ifdef DEBUG
-	printk("%llu waking %d\n", trace_clock_monotonic_wrapper(),
+	trace_printk("%llu waking %d\n", trace_clock_monotonic_wrapper(),
 			waking_key->pid);
 #endif
 }
@@ -1028,7 +1028,7 @@ void softirq_waking(struct waking_key_t *waking_key)
 			NULL, 0);
 	latency_tracker_put_event(s);
 #ifdef DEBUG
-	printk("%llu waking %d\n", trace_clock_monotonic_wrapper(),
+	trace_printk("%llu waking %d\n", trace_clock_monotonic_wrapper(),
 			waking_key->pid);
 #endif
 }
@@ -1224,7 +1224,7 @@ void sched_switch_in(struct task_struct *next)
 	}
 
 #ifdef DEBUG
-	printk("%llu switch_in %d (%s)\n",
+	trace_printk("%llu switch_in %d (%s)\n",
 			trace_clock_monotonic_wrapper(),
 			next->pid, next->comm);
 #endif
@@ -1293,7 +1293,7 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 				break;
 #ifdef DEBUG
 			if (ret == 0) {
-				printk("%llu switch_out %d (%s)\n",
+				trace_printk("%llu switch_out %d (%s)\n",
 						trace_clock_read64(),
 						prev->pid, prev->comm);
 			}
