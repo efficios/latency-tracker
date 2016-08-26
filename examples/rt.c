@@ -630,6 +630,11 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		goto end_del;
 	}
 	memcpy(data_out, data_in, sizeof(struct event_data));
+	if (data_in->root) {
+		ret = _latency_tracker_get_event(data_in->root);
+		WARN_ON_ONCE(!ret);
+	}
+
 	if (branch) {
 		struct event_data *data_root;
 
@@ -638,15 +643,6 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 			data_out->root = event_in;
 		}
 		ret = _latency_tracker_get_event(data_out->root);
-		if (!ret) {
-			WARN_ON_ONCE(1);
-#ifdef DEBUG
-			trace_printk("ERR _latency_tracker_get_event\n");
-#endif
-			latency_tracker_put_event(event_out);
-			event_out = NULL;
-			goto end_del;
-		}
 		/*
 		 * When branching, we have to reset the good_branch flags
 		 * regardless of the current state since we don't know if the
