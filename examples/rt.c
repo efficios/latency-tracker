@@ -37,6 +37,7 @@
 #include "../wrapper/lt_probe.h"
 #include "../wrapper/vmalloc.h"
 //#include "../measure.h"
+#include "../lt-kernel-version.h"
 
 //#define BENCH
 #ifdef BENCH
@@ -1090,7 +1091,8 @@ void thread_waking(struct waking_key_t *waking_key)
 	}
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0) || \
+	LT_RT_KERNEL_RANGE(4,1,10,11, 4,2,0,0))
 LT_PROBE_DEFINE(sched_waking, struct task_struct *p)
 #else
 LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
