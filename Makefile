@@ -1,14 +1,14 @@
+ifneq ($(KERNELRELEASE),)
+
 ccflags-y += -I$(src)/include $(EXTCFLAGS) -g -Wall
 
 latency_tracker-objs := tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o \
 	tracker_debugfs.o wrapper/trace-clock.o
 
-ifneq ($(KERNELRELEASE),)
 latency_tracker-objs += $(shell \
 	if [ $(VERSION) -ge 4 -o \
 		\( $(VERSION) -eq 3 -a $(PATCHLEVEL) -ge 15 -a $(SUBLEVEL) -ge 0 \) ] ; then \
 	echo "lttng-tracepoint.o" ; fi;)
-endif
 
 obj-m := latency_tracker.o
 
@@ -37,14 +37,25 @@ obj-m += latency_tracker_critical_timing.o
 latency_tracker_rt-objs := examples/rt.o wrapper/trace-clock.o tracker_debugfs.o
 obj-m += latency_tracker_rt.o
 
+else # KERNELRELEASE
 
-KDIR := /lib/modules/$(shell uname -r)/build
+# This part of the Makefile is used when the 'make' command is run in the
+# base directory of the latency-tracker sources. It sets some environment and
+# calls the kernel build system to build the actual modules.
+
+KERNELDIR := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
-default:
-	        $(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules
+CFLAGS = $(EXTCFLAGS)
+
+default: modules
+
+modules:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
 
 modules_install:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules_install
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules_install
 
 clean:
-	        $(MAKE) -C $(KDIR) M=$(PWD) clean
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+
+endif # KERNELRELEASE
