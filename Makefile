@@ -43,7 +43,7 @@ else # KERNELRELEASE
 # base directory of the latency-tracker sources. It sets some environment and
 # calls the kernel build system to build the actual modules.
 
-KERNELDIR := /lib/modules/$(shell uname -r)/build
+KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 CFLAGS = $(EXTCFLAGS)
 
