@@ -641,8 +641,9 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		/* First branch, the others get the pointer from the memcpy */
 		if (!data_in->root) {
 			data_out->root = event_in;
+			ret = _latency_tracker_get_event(data_out->root);
+			WARN_ON_ONCE(!ret);
 		}
-		ret = _latency_tracker_get_event(data_out->root);
 		/*
 		 * When branching, we have to reset the good_branch flags
 		 * regardless of the current state since we don't know if the
