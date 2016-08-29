@@ -1,0 +1,21 @@
+Latency tracker licensing
+Julien Desfossez
+August 29, 2016
+
+* LGPLv2.1
+
+The files contained within this package are licensed under LGPLv2.1
+(see lgpl-2.1.txt for details), except for files identified by the
+following sections.
+
+* MIT-style license
+
+These files are licensed under an MIT-style license. See mit-license.txt
+for details.
+
+measure.h
+extras/wakeup_latency.py
+urcu/compiler.h
+urcu/system.h
+urcu/uatomic-generic.h
+urcu/uatomic-x86.h
