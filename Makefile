@@ -1,5 +1,9 @@
 ifneq ($(KERNELRELEASE),)
 
+TOP_LT_MODULES_DIR := $(shell dirname $(lastword $(MAKEFILE_LIST)))
+
+include $(TOP_LT_MODULES_DIR)/Makefile.ABI.workarounds
+
 ccflags-y += -I$(src)/include $(EXTCFLAGS) -g -Wall
 
 latency_tracker-objs := tracker.o rculfhash.o rculfhash-mm-chunk.o wfcqueue.o \
