@@ -2,7 +2,7 @@
 #define _LT_KERNEL_VERSION_H
 
 /*
- * lttng-kernel-version.h
+ * lt-kernel-version.h
  *
  * Contains helpers to check more complex kernel version conditions.
  *
