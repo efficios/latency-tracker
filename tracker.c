@@ -751,23 +751,60 @@ int latency_tracker_event_out(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_event_out);
 
-struct latency_tracker_event *latency_tracker_get_event(
+struct latency_tracker_event *latency_tracker_get_event_by_key(
 		struct latency_tracker *tracker, void *key,
-		unsigned int key_len)
+		unsigned int key_len, struct latency_tracker_event_iter *iter)
 {
 	struct latency_tracker_event *s;
 	struct latency_tracker_key tkey;
+	int ret;
 
 	tkey.key_len = key_len;
 	tkey.key = key;
 
-	s = wrapper_ht_get_event(tracker, &tkey);
+	rcu_read_lock_sched_notrace();
+	s = wrapper_ht_find_event(tracker, &tkey, iter);
+	if (!s)
+		goto end;
 
+	ret = kref_get_unless_zero(&s->refcount);
+	if (!ret)
+		s = NULL;
+
+end:
+	rcu_read_unlock_sched_notrace();
 	return s;
 }
-EXPORT_SYMBOL_GPL(latency_tracker_get_event);
+EXPORT_SYMBOL_GPL(latency_tracker_get_event_by_key);
 
-int _latency_tracker_get_event(struct latency_tracker_event *event)
+
+struct latency_tracker_event *latency_tracker_get_next_duplicate(
+		struct latency_tracker *tracker, void *key,
+		unsigned int key_len, struct latency_tracker_event_iter *iter)
+{
+	struct latency_tracker_event *s;
+	struct latency_tracker_key tkey;
+	int ret;
+
+	tkey.key_len = key_len;
+	tkey.key = key;
+
+	rcu_read_lock_sched_notrace();
+	s = wrapper_ht_next_duplicate(tracker, &tkey, iter);
+	if (!s)
+		goto end;
+
+	ret = kref_get_unless_zero(&s->refcount);
+	if (!ret)
+		s = NULL;
+
+end:
+	rcu_read_unlock_sched_notrace();
+	return s;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_get_next_duplicate);
+
+int latency_tracker_ref_event(struct latency_tracker_event *event)
 {
 	/*
 	 * 0: failed
@@ -775,9 +812,9 @@ int _latency_tracker_get_event(struct latency_tracker_event *event)
 	 */
 	return kref_get_unless_zero(&event->refcount);
 }
-EXPORT_SYMBOL_GPL(_latency_tracker_get_event);
+EXPORT_SYMBOL_GPL(latency_tracker_ref_event);
 
-void latency_tracker_put_event(struct latency_tracker_event *event)
+void latency_tracker_unref_event(struct latency_tracker_event *event)
 {
 	if (!event)
 		return;
@@ -789,7 +826,7 @@ void latency_tracker_put_event(struct latency_tracker_event *event)
 #endif
 	rcu_read_unlock_sched_notrace();
 }
-EXPORT_SYMBOL_GPL(latency_tracker_put_event);
+EXPORT_SYMBOL_GPL(latency_tracker_unref_event);
 
 void *latency_tracker_event_get_priv(
 		struct latency_tracker_event *event)

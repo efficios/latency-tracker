@@ -41,14 +41,14 @@ int exit_new_sync_write(struct kretprobe_instance *p, struct pt_regs *regs)
 
 	key.pid = current->pid;
 	key.type = KEY_FS;
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	s = latency_tracker_get_event_by_key(tracker, &key, sizeof(key), NULL);
 	if (!s)
 		goto end;
 	update_hist(s, IO_FS_WRITE,
 			lttng_this_cpu_ptr(&live_hist));
 	update_hist(s, IO_FS_WRITE,
 			lttng_this_cpu_ptr(&current_hist));
-	latency_tracker_put_event(s);
+	latency_tracker_unref_event(s);
 
 end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
@@ -97,14 +97,14 @@ int exit_new_sync_read(struct kretprobe_instance *p, struct pt_regs *regs)
 
 	key.pid = current->pid;
 	key.type = KEY_FS;
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	s = latency_tracker_get_event_by_key(tracker, &key, sizeof(key), NULL);
 	if (!s)
 		goto end;
 	update_hist(s, IO_FS_READ,
 			lttng_this_cpu_ptr(&live_hist));
 	update_hist(s, IO_FS_READ,
 			lttng_this_cpu_ptr(&current_hist));
-	latency_tracker_put_event(s);
+	latency_tracker_unref_event(s);
 
 end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);

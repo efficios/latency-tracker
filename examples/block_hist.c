@@ -188,7 +188,7 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 
 	/* Update the I/O scheduler stats */
 	rq_to_key(&key, rq, KEY_SCHED);
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	s = latency_tracker_get_event_by_key(tracker, &key, sizeof(key), NULL);
 	if (s) {
 		if (rq->cmd_flags % 2 == 0) {
 			update_hist(s, IO_SCHED_READ,
@@ -201,7 +201,7 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 			update_hist(s, IO_SCHED_WRITE,
 					lttng_this_cpu_ptr(&current_hist));
 		}
-		latency_tracker_put_event(s);
+		latency_tracker_unref_event(s);
 		latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
 	}
 
@@ -347,7 +347,7 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 
 	rq_to_key(&key, rq, KEY_BLOCK);
 
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	s = latency_tracker_get_event_by_key(tracker, &key, sizeof(key), NULL);
 	if (!s)
 		goto end;
 	if (rq->cmd_flags % 2 == 0) {
@@ -361,7 +361,7 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		update_hist(s, IO_BLOCK_WRITE,
 				lttng_this_cpu_ptr(&current_hist));
 	}
-	latency_tracker_put_event(s);
+	latency_tracker_unref_event(s);
 
 end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
@@ -476,14 +476,14 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 
 	key.pid = current->pid;
 	key.type = KEY_SYSCALL;
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	s = latency_tracker_get_event_by_key(tracker, &key, sizeof(key), NULL);
 	if (!s)
 		goto end;
 	update_hist(s, io_syscall((unsigned long) latency_tracker_event_get_priv(s)),
 			lttng_this_cpu_ptr(&live_hist));
 	update_hist(s, io_syscall((unsigned long) latency_tracker_event_get_priv(s)),
 			lttng_this_cpu_ptr(&current_hist));
-	latency_tracker_put_event(s);
+	latency_tracker_unref_event(s);
 
 end:
 	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);

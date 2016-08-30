@@ -328,7 +328,8 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	if (!take_kernel_stack)
 		goto end;
 	sched_key.pid = task->pid;
-	s = latency_tracker_get_event(tracker, &sched_key, sizeof(sched_key));
+	s = latency_tracker_get_event_by_key(tracker, &sched_key,
+			sizeof(sched_key), NULL);
 	if (!s)
 		goto end;
 	now = trace_clock_read64();
@@ -340,7 +341,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 				task->comm, task->pid, latency_tracker_event_get_start_ts(s),
 				delta, 0, stacktxt);
 	}
-	latency_tracker_put_event(s);
+	latency_tracker_unref_event(s);
 
 end:
 	return;

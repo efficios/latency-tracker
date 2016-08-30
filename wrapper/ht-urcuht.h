@@ -148,6 +148,50 @@ void wrapper_ht_gc(struct latency_tracker *tracker, u64 now)
 }
 
 static inline
+struct latency_tracker_event *wrapper_ht_find_event(
+		struct latency_tracker *tracker,
+		struct latency_tracker_key *tkey,
+		struct latency_tracker_event_iter *iter)
+{
+	u32 k;
+	struct cds_lfht_node *node;
+	struct cds_lfht_iter _iter;
+
+	k = tracker->hash_fct(tkey->key, tkey->key_len, 0);
+
+	if (!iter) {
+		cds_lfht_lookup(tracker->urcu_ht, k, urcu_match, tkey, &_iter);
+		node = cds_lfht_iter_get_node(&_iter);
+	} else {
+		cds_lfht_lookup(tracker->urcu_ht, k, urcu_match, tkey, &iter->iter);
+		node = cds_lfht_iter_get_node(&iter->iter);
+	}
+
+	if (!node)
+		return NULL;
+
+	return caa_container_of(node, struct latency_tracker_event, urcunode);
+}
+
+static inline
+struct latency_tracker_event *wrapper_ht_next_duplicate(
+		struct latency_tracker *tracker,
+		struct latency_tracker_key *tkey,
+		struct latency_tracker_event_iter *iter)
+{
+	struct cds_lfht_node *node;
+
+	cds_lfht_next_duplicate(tracker->urcu_ht, urcu_match, tkey,
+			&iter->iter);
+
+	node = cds_lfht_iter_get_node(&iter->iter);
+	if (!node)
+		return NULL;
+
+	return caa_container_of(node, struct latency_tracker_event, urcunode);
+}
+
+static inline
 struct latency_tracker_event *wrapper_ht_get_event(
 		struct latency_tracker *tracker,
 		struct latency_tracker_key *tkey)

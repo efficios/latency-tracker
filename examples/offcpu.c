@@ -235,7 +235,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	rcu_read_lock();
 	key.pid = p->pid;
 	key.cpu = smp_processor_id();
-	s = latency_tracker_get_event(tracker, &key, sizeof(key));
+	s = latency_tracker_get_event_by_key(tracker, &key, sizeof(key), NULL);
 	if (!s)
 		goto end;
 	now = trace_clock_read64();
@@ -245,7 +245,7 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 		extract_stack(current, stacktxt_waker, 0, 3);
 		trace_latency_tracker_offcpu_sched_wakeup(current, stacktxt_waker, p, delta, 0);
 	}
-	latency_tracker_put_event(s);
+	latency_tracker_unref_event(s);
 
 end:
 	rcu_read_unlock();

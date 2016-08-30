@@ -39,6 +39,10 @@ struct latency_tracker_key {
 	char *key;
 };
 
+struct latency_tracker_event_iter {
+	struct cds_lfht_iter iter;
+};
+
 /*
  * Return code when adding an event to a tracker.
  */
@@ -256,31 +260,39 @@ int _latency_tracker_event_out(struct latency_tracker *tracker,
 /*
  * Lookup if the key is in the tracker HT and return the associated event if
  * available, returns NULL if not found. An event is "findable" as long as the
- * event_out on the key has not been performed. The structure returned is
- * guaranteed to be valid even after the event_out and until the put_event is
- * not done.
- *
- * WARNING: duplicate keys are not supported, it currently only takes the
- * reference on the first event found (order not guaranteed).
+ * event_out on the key has not been performed. A reference is taken on the
+ * returned structure, it needs to be put eventually to allow the memory to be
+ * collected eventually. The iter parameter is optional, it can be NULL, it
+ * allows to iterate over duplicate keys with
+ * latency_tracker_get_next_duplicate() afterwards.
  */
-struct latency_tracker_event *latency_tracker_get_event(
+struct latency_tracker_event *latency_tracker_get_event_by_key(
 		struct latency_tracker *tracker, void *key,
-		unsigned int key_len);
+		unsigned int key_len, struct latency_tracker_event_iter *iter);
 
 /*
- * Same as latency_tracker_get_event but avoids a new lookup if the
- * user already has a pointer for the event.
- * Returns 1 on success, 0 if failed.
- * If if fails, it means the event passed in parameter was used without
- * proper refcounting, that's a bug.
+ * Get the next duplicate event. Returns NULL if the iteration is complete.
+ * The iterator must be initialized with latency_tracker_get_event_by_key()
+ * before. The rcu_read_lock_sched_notrace must be held during the complete
+ * iteration. A reference is taken on the returned event, it needs to be put
+ * after use.
  */
-int _latency_tracker_get_event(struct latency_tracker_event *event);
+struct latency_tracker_event *latency_tracker_get_next_duplicate(
+		struct latency_tracker *tracker, void *key,
+		unsigned int key_len, struct latency_tracker_event_iter *iter);
 
 /*
- * Release the reference on an event (to allow freeing the memory associated
+ * Takes a reference on an event so it remains valid even after a
+ * latency_tracker_event_out.
+ * Returns 1 on success, 0 if failed.
+ */
+int latency_tracker_ref_event(struct latency_tracker_event *event);
+
+/*
+ * Release the reference on an event (to allow collecting the memory associated
  * with it).
  */
-void latency_tracker_put_event(struct latency_tracker_event *event);
+void latency_tracker_unref_event(struct latency_tracker_event *event);
 
 uint64_t latency_tracker_event_get_start_ts(struct latency_tracker_event *event);
 /*
