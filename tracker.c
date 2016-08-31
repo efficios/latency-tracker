@@ -700,7 +700,8 @@ enum latency_tracker_event_in_ret latency_tracker_event_in(
 EXPORT_SYMBOL_GPL(latency_tracker_event_in);
 
 int _latency_tracker_event_out(struct latency_tracker *tracker,
-		void *key, unsigned int key_len, unsigned int id,
+		struct latency_tracker_event *event, void *key,
+		unsigned int key_len, unsigned int id,
 		u64 ts_override)
 {
 	int ret;
@@ -720,9 +721,18 @@ int _latency_tracker_event_out(struct latency_tracker *tracker,
 		now = ts_override;
 	else
 		now = trace_clock_monotonic_wrapper();
-	tkey.key_len = key_len;
-	tkey.key = key;
-	found = wrapper_ht_check_event(tracker, &tkey, id, now);
+
+	if (event) {
+		wrapper_check_cb(tracker, now, id, event);
+		ret = wrapper_ht_del(tracker, event);
+		if (!ret)
+			kref_put(&event->refcount, __latency_tracker_event_destroy);
+		found = 1;
+	} else {
+		tkey.key_len = key_len;
+		tkey.key = key;
+		found = wrapper_ht_check_event(tracker, &tkey, id, now);
+	}
 
 	if (!found)
 		goto error;
@@ -738,13 +748,13 @@ end:
 EXPORT_SYMBOL_GPL(_latency_tracker_event_out);
 
 int latency_tracker_event_out(struct latency_tracker *tracker,
-		void *key, unsigned int key_len, unsigned int id,
-		u64 ts_override)
+		struct latency_tracker_event *event, void *key,
+		unsigned int key_len, unsigned int id, u64 ts_override)
 {
 	int ret;
 
 	rcu_read_lock_sched_notrace();
-	ret = _latency_tracker_event_out(tracker, key, key_len, id,
+	ret = _latency_tracker_event_out(tracker, event, key, key_len, id,
 			ts_override);
 	rcu_read_unlock_sched_notrace();
 	return ret;
@@ -777,7 +787,6 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_tracker_get_event_by_key);
 
-
 struct latency_tracker_event *latency_tracker_get_next_duplicate(
 		struct latency_tracker *tracker, void *key,
 		unsigned int key_len, struct latency_tracker_event_iter *iter)
@@ -789,7 +798,7 @@ struct latency_tracker_event *latency_tracker_get_next_duplicate(
 	tkey.key_len = key_len;
 	tkey.key = key;
 
-	rcu_read_lock_sched_notrace();
+	WARN_ON_ONCE(!rcu_read_lock_sched_held());
 	s = wrapper_ht_next_duplicate(tracker, &tkey, iter);
 	if (!s)
 		goto end;
@@ -799,7 +808,6 @@ struct latency_tracker_event *latency_tracker_get_next_duplicate(
 		s = NULL;
 
 end:
-	rcu_read_unlock_sched_notrace();
 	return s;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_get_next_duplicate);
@@ -915,12 +923,12 @@ int test_tracker(void)
 		printk("failed\n");
 
 	printk("lookup k1\n");
-	latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0, 0);
+	latency_tracker_event_out(tracker, NULL, k1, strlen(k1) + 1, 0, 0);
 	printk("lookup k2\n");
-	latency_tracker_event_out(tracker, k2, strlen(k2) + 1, 0, 0);
+	latency_tracker_event_out(tracker, NULL, k2, strlen(k2) + 1, 0, 0);
 	printk("lookup k1\n");
 	rcu_read_lock_sched_notrace();
-	_latency_tracker_event_out(tracker, k1, strlen(k1) + 1, 0, 0);
+	_latency_tracker_event_out(tracker, NULL, k1, strlen(k1) + 1, 0, 0);
 	rcu_read_unlock_sched_notrace();
 
 	printk("done\n");

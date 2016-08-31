@@ -209,7 +209,7 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 
 	key.pid = next->pid;
 	key.cpu = smp_processor_id();
-	latency_tracker_event_out(tracker, &key, sizeof(key),
+	latency_tracker_event_out(tracker, NULL, &key, sizeof(key),
 			SCHED_EXIT_NORMAL, 0);
 end:
 	rcu_read_unlock();

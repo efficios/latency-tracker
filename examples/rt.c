@@ -492,7 +492,7 @@ int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 		return 0;
 	key.p.type = KEY_DO_IRQ;
 	key.cpu = smp_processor_id();
-	latency_tracker_event_out(tracker, &key,
+	latency_tracker_event_out(tracker, NULL, &key,
 			sizeof(key), OUT_IRQHANDLER_NO_CB, 0);
 
 	return 0;
@@ -565,26 +565,24 @@ void set_good_branch(struct event_data *data_in)
 }
 
 /*
- * Lookup the key_in, if it does not exist return NULL.
- * Otherwise:
  * - create the key_out with the original timestamp
  * - copy the payload of key_in to key_out
  * - if del == 1: delete the original key
  * - return event_out (needs to be "put" afterwards)
  *
  * The same key could be in the tracker multiple times (unique = 0 in
- * event_in), in this case, the caller should make sure to loop over this
- * function when a transition is required until it returns NULL.
+ * event_in), in this case, the caller must make sure to iterate over all
+ * duplicates.
  *
  * The branch parameter informs if the new event creates a new branch in
- * the tree, if it does we have to take a reference on the root event.
+ * the tree.
  */
 static
-struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
-		void *key_out, int key_out_len, int del, int unique,
-		int branch)
+struct latency_tracker_event *event_transition(
+		struct latency_tracker_event *event_in, void *key_out,
+		int key_out_len, int del, int unique, int branch)
 {
-	struct latency_tracker_event *event_in = NULL, *event_out = NULL;
+	struct latency_tracker_event *event_out = NULL;
 	struct event_data *data_in, *data_out;
 	u64 orig_ts;
 	int ret;
@@ -596,12 +594,12 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 	BENCH_GET_TS1;
 #endif
 
-	event_in = latency_tracker_get_event_by_key(tracker, key_in, key_in_len, NULL);
 	if (!event_in) {
 		event_out = NULL;
-		goto out;
+		goto end;
 	}
-	data_in = (struct event_data *) latency_tracker_event_get_priv_data(event_in);
+	data_in = (struct event_data *)
+		latency_tracker_event_get_priv_data(event_in);
 	if (!data_in) {
 		BUG_ON(1);
 		goto end;
@@ -625,7 +623,8 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		goto end_del;
 	}
 	WARN_ON_ONCE(!event_out);
-	data_out = (struct event_data *) latency_tracker_event_get_priv_data(event_out);
+	data_out = (struct event_data *)
+		latency_tracker_event_get_priv_data(event_out);
 	if (!data_out) {
 		BUG_ON(1);
 		goto end_del;
@@ -642,7 +641,7 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 		/* First branch, the others get the pointer from the memcpy */
 		if (!data_in->root) {
 			data_out->root = event_in;
-			ret = latency_tracker_ref_event(data_out->root);
+			ret = latency_tracker_ref_event(event_in);
 			WARN_ON_ONCE(!ret);
 		}
 		/*
@@ -659,12 +658,10 @@ struct latency_tracker_event *event_transition(void *key_in, int key_in_len,
 
 end_del:
 	if (del)
-		latency_tracker_event_out(tracker, key_in, key_in_len,
+		latency_tracker_event_out(tracker, event_in, NULL, 0,
 				OUT_NO_CB, 0);
 
 end:
-	latency_tracker_unref_event(event_in);
-out:
 #ifdef BENCH
 	BENCH_GET_TS2;
 #endif
@@ -717,7 +714,7 @@ LT_PROBE_DEFINE(local_timer_exit, int vector)
 		goto end;
 	local_timer_key.p.type = KEY_TIMER_INTERRUPT;
 	local_timer_key.cpu = smp_processor_id();
-	latency_tracker_event_out(tracker, &local_timer_key,
+	latency_tracker_event_out(tracker, NULL, &local_timer_key,
 			sizeof(local_timer_key), OUT_IRQHANDLER_NO_CB, 0);
 end:
 	return;
@@ -727,7 +724,8 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 {
 	struct do_irq_key_t do_irq_key;
 	struct hardirq_key_t hardirq_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
+
 	if (!config.irq_tracing)
 		goto end;
 
@@ -742,13 +740,19 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 	hardirq_key.p.type = KEY_HARDIRQ;
 	hardirq_key.cpu = smp_processor_id();
 
-	s = event_transition(&do_irq_key, sizeof(do_irq_key), &hardirq_key,
-			sizeof(hardirq_key), 0, 1, 0);
-	if (!s)
+	event_in = latency_tracker_get_event_by_key(tracker, &do_irq_key,
+			sizeof(do_irq_key), NULL);
+	if (!event_in)
 		goto end;
-	append_delta_ts(s, KEY_HARDIRQ, "to irq_handler_entry", 0, irq,
+
+	event_out = event_transition(event_in, &hardirq_key,
+			sizeof(hardirq_key), 0, 1, 0);
+	latency_tracker_unref_event(event_in);
+	if (!event_out)
+		goto end;
+	append_delta_ts(event_out, KEY_HARDIRQ, "to irq_handler_entry", 0, irq,
 			NULL, 0);
-	latency_tracker_unref_event(s);
+	latency_tracker_unref_event(event_out);
 
 #ifdef DEBUG
 		trace_printk("%llu hard_irq_entry (cpu: %u)\n", trace_clock_monotonic_wrapper(),
@@ -762,6 +766,8 @@ LT_PROBE_DEFINE(irq_handler_exit, int irq, struct irqaction *action,
 		int ret)
 {
 	struct hardirq_key_t hardirq_key;
+	struct latency_tracker_event *event;
+
 	if (!config.irq_tracing)
 		goto end;
 
@@ -773,19 +779,15 @@ LT_PROBE_DEFINE(irq_handler_exit, int irq, struct irqaction *action,
 	hardirq_key.p.type = KEY_HARDIRQ;
 	hardirq_key.cpu = smp_processor_id();
 
-	if (config.text_breakdown) {
-		struct latency_tracker_event *s;
+	event = latency_tracker_get_event_by_key(tracker, &hardirq_key,
+			sizeof(hardirq_key), NULL);
+	if (!event)
+		goto end;
+	append_delta_ts(event, KEY_HARDIRQ, "to irq_handler_exit", 0,
+			irq, NULL, 0);
+	latency_tracker_unref_event(event);
 
-		s = latency_tracker_get_event_by_key(tracker, &hardirq_key,
-				sizeof(hardirq_key), NULL);
-		if (!s)
-			goto end;
-		append_delta_ts(s, KEY_HARDIRQ, "to irq_handler_exit", 0,
-				irq, NULL, 0);
-		latency_tracker_unref_event(s);
-	}
-
-	latency_tracker_event_out(tracker, &hardirq_key, sizeof(hardirq_key),
+	latency_tracker_event_out(tracker, event, NULL, 0,
 			OUT_IRQHANDLER_NO_CB, 0);
 
 end:
@@ -797,7 +799,7 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 {
 	struct raise_softirq_key_t raise_softirq_key;
 	struct switch_key_t switch_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
@@ -813,13 +815,20 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	raise_softirq_key.cpu = smp_processor_id();
 	raise_softirq_key.vector = vec_nr;
 
-	s = event_transition(&switch_key, sizeof(switch_key),
-			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0, 1);
-	if (!s)
+	event_in = latency_tracker_get_event_by_key(tracker, &switch_key,
+			sizeof(switch_key), NULL);
+	if (!event_in)
 		goto end;
-	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
+
+	event_out = event_transition(event_in, &raise_softirq_key,
+			sizeof(raise_softirq_key), 0, 0, 1);
+	latency_tracker_unref_event(event_in);
+	if (!event_out)
+		goto end;
+
+	append_delta_ts(event_out, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
 			vec_nr, NULL, 0);
-	latency_tracker_unref_event(s);
+	latency_tracker_unref_event(event_out);
 
 #ifdef DEBUG
 	trace_printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
@@ -833,7 +842,9 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 {
 	struct hardirq_key_t hardirq_key;
 	struct raise_softirq_key_t raise_softirq_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
+
+	event_in = NULL;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
@@ -845,13 +856,19 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	raise_softirq_key.cpu = smp_processor_id();
 	raise_softirq_key.vector = vec_nr;
 
-	s = event_transition(&hardirq_key, sizeof(hardirq_key),
-			&raise_softirq_key, sizeof(raise_softirq_key), 0, 0, 1);
-	if (!s)
+	event_in = latency_tracker_get_event_by_key(tracker, &hardirq_key,
+			sizeof(hardirq_key), NULL);
+	if (!event_in)
 		goto end;
-	append_delta_ts(s, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
+
+	event_out = event_transition(event_in, &raise_softirq_key,
+			sizeof(raise_softirq_key), 0, 0, 1);
+	latency_tracker_unref_event(event_in);
+	if (!event_out)
+		goto end;
+	append_delta_ts(event_out, KEY_RAISE_SOFTIRQ, "to softirq_raise", 0,
 			vec_nr, NULL, 0);
-	latency_tracker_unref_event(s);
+	latency_tracker_unref_event(event_out);
 
 #ifdef DEBUG
 	trace_printk("%llu softirq_raise %u\n", trace_clock_monotonic_wrapper(),
@@ -866,7 +883,7 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 {
 	struct raise_softirq_key_t raise_softirq_key;
 	struct softirq_key_t softirq_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
@@ -884,13 +901,21 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 	softirq_key.pid = current->pid;
 
 	do {
-		s = event_transition(&raise_softirq_key, sizeof(raise_softirq_key),
-				&softirq_key, sizeof(softirq_key), 1, 1, 0);
-		if (!s)
+		event_in = latency_tracker_get_event_by_key(tracker,
+				&raise_softirq_key, sizeof(raise_softirq_key),
+				NULL);
+		if (!event_in)
+			break;
+
+		event_out = event_transition(event_in, &softirq_key,
+				sizeof(softirq_key), 1, 1, 0);
+		latency_tracker_unref_event(event_in);
+		if (!event_out)
 			goto end;
-		append_delta_ts(s, KEY_SOFTIRQ, "to softirq_entry", 0, vec_nr, NULL, 0);
-		latency_tracker_unref_event(s);
-	} while (s);
+		append_delta_ts(event_out, KEY_SOFTIRQ, "to softirq_entry", 0,
+				vec_nr, NULL, 0);
+		latency_tracker_unref_event(event_out);
+	} while (event_out);
 
 #ifdef DEBUG
 	trace_printk("%llu softirq_entry %u\n", trace_clock_monotonic_wrapper(),
@@ -905,7 +930,7 @@ LT_PROBE_DEFINE(hrtimer_expire_entry, struct hrtimer *hrtimer,
 {
 	struct local_timer_key_t local_timer_key;
 	struct hrtimer_key_t hrtimer_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
 
 	if (!config.timer_tracing)
 		goto end;
@@ -919,13 +944,19 @@ LT_PROBE_DEFINE(hrtimer_expire_entry, struct hrtimer *hrtimer,
 	hrtimer_key.p.type = KEY_HRTIMER;
 	hrtimer_key.cpu = smp_processor_id();
 
-	s = event_transition(&local_timer_key, sizeof(local_timer_key),
-			&hrtimer_key, sizeof(hrtimer_key), 0, 1, 0);
-	if (!s)
+	event_in = latency_tracker_get_event_by_key(tracker, &local_timer_key,
+			sizeof(local_timer_key), NULL);
+	if (!event_in)
 		goto end;
-	append_delta_ts(s, KEY_HRTIMER, "to hrtimer_expire_entry", 0, -1,
-			NULL, 0);
-	latency_tracker_unref_event(s);
+
+	event_out = event_transition(event_in, &hrtimer_key,
+			sizeof(hrtimer_key), 0, 1, 0);
+	latency_tracker_unref_event(event_in);
+	if (!event_out)
+		goto end;
+	append_delta_ts(event_out, KEY_HRTIMER, "to hrtimer_expire_entry", 0,
+			-1, NULL, 0);
+	latency_tracker_unref_event(event_out);
 
 #ifdef DEBUG
 	trace_printk("%llu hrtimer_entry\n", trace_clock_monotonic_wrapper());
@@ -950,8 +981,8 @@ LT_PROBE_DEFINE(hrtimer_expire_exit, struct timer_list *timer)
 	hrtimer_key.p.type = KEY_HRTIMER;
 	hrtimer_key.cpu = smp_processor_id();
 
-	latency_tracker_event_out(tracker, &hrtimer_key, sizeof(hrtimer_key),
-			OUT_IRQHANDLER_NO_CB, 0);
+	latency_tracker_event_out(tracker, NULL, &hrtimer_key,
+			sizeof(hrtimer_key), OUT_IRQHANDLER_NO_CB, 0);
 
 end:
 	return;
@@ -960,6 +991,7 @@ end:
 LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 {
 	struct softirq_key_t softirq_key;
+	struct latency_tracker_event *event;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
@@ -970,18 +1002,16 @@ LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 	softirq_key.p.type = KEY_SOFTIRQ;
 	softirq_key.cpu = smp_processor_id();
 	softirq_key.pid = current->pid;
-	if (config.text_breakdown) {
-		struct latency_tracker_event *s;
 
-		s = latency_tracker_get_event_by_key(tracker, &softirq_key,
-				sizeof(softirq_key), NULL);
-		if (!s)
-			goto end;
-		append_delta_ts(s, KEY_SOFTIRQ, "to softirq_exit", 0, vec_nr,
-				NULL, 0);
-		latency_tracker_unref_event(s);
-	}
-	latency_tracker_event_out(tracker, &softirq_key, sizeof(softirq_key),
+	event = latency_tracker_get_event_by_key(tracker, &softirq_key,
+			sizeof(softirq_key), NULL);
+	if (!event)
+		goto end;
+	append_delta_ts(event, KEY_SOFTIRQ, "to softirq_exit", 0, vec_nr,
+			NULL, 0);
+	latency_tracker_unref_event(event);
+
+	latency_tracker_event_out(tracker, event, NULL, 0,
 			OUT_IRQHANDLER_NO_CB, 0);
 end:
 	return;
@@ -990,46 +1020,67 @@ end:
 static
 void irq_waking(struct waking_key_t *waking_key)
 {
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
 	struct do_irq_key_t do_irq_key;
 
 	do_irq_key.p.type = KEY_DO_IRQ;
 	do_irq_key.cpu = smp_processor_id();
 
-	s = event_transition(&do_irq_key, sizeof(do_irq_key),
-			waking_key, sizeof(*waking_key), 0, 0, 1);
-	if (!s)
-		return;
-	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
+	event_in = latency_tracker_get_event_by_key(tracker, &do_irq_key,
+			sizeof(do_irq_key), NULL);
+	if (!event_in)
+		goto end;
+
+	event_out = event_transition(event_in, waking_key,
+			sizeof(*waking_key), 0, 0, 1);
+	latency_tracker_unref_event(event_in);
+	if (!event_out)
+		goto end;
+
+	append_delta_ts(event_out, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
 			NULL, 0);
-	latency_tracker_unref_event(s);
+	latency_tracker_unref_event(event_out);
 #ifdef DEBUG
 	trace_printk("%llu waking %d\n", trace_clock_monotonic_wrapper(),
 			waking_key->pid);
 #endif
+
+end:
+	return;
 }
 
 static
 void softirq_waking(struct waking_key_t *waking_key)
 {
 	struct softirq_key_t softirq_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
 
 	softirq_key.p.type = KEY_SOFTIRQ;
 	softirq_key.cpu = smp_processor_id();
 	softirq_key.pid = current->pid;
 
-	s = event_transition(&softirq_key, sizeof(softirq_key),
-			waking_key, sizeof(*waking_key), 0, 0, 1);
-	if (!s)
-		return;
-	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
-			NULL, 0);
-	latency_tracker_unref_event(s);
+	event_in = latency_tracker_get_event_by_key(tracker, &softirq_key,
+			sizeof(softirq_key), NULL);
+	if (!event_in)
+		goto end;
+
+	event_out = event_transition(event_in, waking_key,
+			sizeof(*waking_key), 0, 0, 1);
+	latency_tracker_unref_event(event_in);
+	if (!event_out) {
+		goto end;
+	}
+
+	append_delta_ts(event_out, KEY_WAKEUP, "to sched_waking", 0,
+			waking_key->pid, NULL, 0);
+	latency_tracker_unref_event(event_out);
 #ifdef DEBUG
 	trace_printk("%llu waking %d\n", trace_clock_monotonic_wrapper(),
 			waking_key->pid);
 #endif
+
+end:
+	return;
 }
 
 /*
@@ -1039,19 +1090,36 @@ static
 int hrtimer_waking(struct waking_key_t *waking_key)
 {
 	struct hrtimer_key_t hrtimer_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
+	int ret;
 
 	/* TODO: PREEMPT_RT */
 	hrtimer_key.p.type = KEY_HRTIMER;
 	hrtimer_key.cpu = smp_processor_id();
-	s = event_transition(&hrtimer_key, sizeof(hrtimer_key),
-			waking_key, sizeof(*waking_key), 0, 0, 1);
-	if (!s)
-		return 0;
-	append_delta_ts(s, KEY_WAKEUP, "to sched_waking", 0, waking_key->pid,
-			NULL, 0);
-	latency_tracker_unref_event(s);
-	return 1;
+
+	event_in = latency_tracker_get_event_by_key(tracker, &hrtimer_key,
+			sizeof(hrtimer_key), NULL);
+	if (!event_in) {
+		ret = 0;
+		goto end;
+	}
+
+	event_out = event_transition(event_in, waking_key,
+			sizeof(*waking_key), 0, 0, 1);
+	latency_tracker_unref_event(event_in);
+	if (!event_out) {
+		ret = 0;
+		goto end;
+	}
+
+	append_delta_ts(event_out, KEY_WAKEUP, "to sched_waking", 0,
+			waking_key->pid, NULL, 0);
+	latency_tracker_unref_event(event_out);
+
+	ret = 1;
+
+end:
+	return ret;
 }
 
 /*
@@ -1063,7 +1131,7 @@ static
 void thread_waking(struct waking_key_t *waking_key)
 {
 	struct switch_key_t switch_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	switch_key.p.type = KEY_SWITCH;
@@ -1073,22 +1141,26 @@ void thread_waking(struct waking_key_t *waking_key)
 	else
 		switch_key.cpu = -1;
 
-	s = event_transition(&switch_key, sizeof(switch_key), waking_key,
+	event_in = latency_tracker_get_event_by_key(tracker, &switch_key,
+			sizeof(switch_key), NULL);
+	if (!event_in)
+		goto end;
+
+	event_out = event_transition(event_in, waking_key,
 			sizeof(*waking_key), 0, 0, 1);
-	if (s) {
+	if (event_out) {
 		/* switch_in after a waking */
-		append_delta_ts(s, KEY_WAKEUP, "to sched_waking", now,
+		append_delta_ts(event_out, KEY_WAKEUP, "to sched_waking", now,
 				waking_key->pid, NULL, 0);
-		latency_tracker_unref_event(s);
+		latency_tracker_unref_event(event_out);
 	}
 
-	s = latency_tracker_get_event_by_key(tracker, &switch_key,
-			sizeof(switch_key), NULL);
-	if (s) {
-		append_delta_ts(s, KEY_WAKEUP, "to sched_waking", now,
-				waking_key->pid, NULL, 0);
-		latency_tracker_unref_event(s);
-	}
+	append_delta_ts(event_in, KEY_WAKEUP, "to sched_waking", now,
+			waking_key->pid, NULL, 0);
+	latency_tracker_unref_event(event_in);
+
+end:
+	return;
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0) || \
@@ -1158,7 +1230,7 @@ static
 void sched_switch_in(struct task_struct *next)
 {
 	struct waking_key_t waking_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
 	struct switch_key_t switch_key;
 	struct event_data *data;
 	int nr_found = 0, ret;
@@ -1183,27 +1255,34 @@ void sched_switch_in(struct task_struct *next)
 
 	/* switch after one or multiple waking */
 	do {
-		s = event_transition(&waking_key, sizeof(waking_key),
-				&switch_key, sizeof(switch_key), 1, 0, 0);
-		if (!s)
+		event_in = latency_tracker_get_event_by_key(tracker,
+				&waking_key, sizeof(waking_key), NULL);
+		if (!event_in)
+			goto end;
+
+		event_out = event_transition(event_in, &switch_key,
+				sizeof(switch_key), 1, 0, 0);
+		latency_tracker_unref_event(event_in);
+		if (!event_out)
 			break;
 		nr_found++;
-		append_delta_ts(s, KEY_SWITCH, "to switch_in", now, next->pid,
-				next->comm, wrapper_task_prio(next));
+		append_delta_ts(event_out, KEY_SWITCH, "to switch_in", now,
+				next->pid, next->comm, wrapper_task_prio(next));
 		data = (struct event_data *)
-			latency_tracker_event_get_priv_data(s);
+			latency_tracker_event_get_priv_data(event_out);
 		strncpy(data->userspace_proc, next->comm, TASK_COMM_LEN);
-		latency_tracker_unref_event(s);
+		latency_tracker_unref_event(event_out);
 		if (config.enter_userspace && next->mm) {
-			latency_tracker_event_out(tracker, &switch_key,
-					sizeof(switch_key),
+			latency_tracker_event_out(tracker, event_out, NULL, 0,
 					OUT_ENTER_USERSPACE, now);
 		}
-	} while (s);
+	} while (event_out);
 
 	/* switch after a preempt */
 	if (!nr_found) {
 		/* FIXME: does not work with duplicates */
+		struct latency_tracker_event *s;
+
 		s = latency_tracker_get_event_by_key(tracker, &switch_key,
 				sizeof(switch_key), NULL);
 		if (!s)
@@ -1213,8 +1292,8 @@ void sched_switch_in(struct task_struct *next)
 		ret = check_current_branch(data);
 		if (ret != 0) {
 			latency_tracker_unref_event(s);
-			latency_tracker_event_out(tracker, &switch_key,
-					sizeof(switch_key), OUT_NO_CB, 0);
+			latency_tracker_event_out(tracker, s, NULL, 0,
+					OUT_NO_CB, 0);
 			goto end;
 		}
 		append_delta_ts(s, KEY_SWITCH, "to switch_in", now,
@@ -1248,33 +1327,33 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 		switch_key.cpu = -1;
 	/* Handle duplicates */
 	for (;;) {
-		if (config.text_breakdown) {
-			struct latency_tracker_event *s;
+		struct latency_tracker_event *event;
 
-			s = latency_tracker_get_event_by_key(tracker, &switch_key,
-					sizeof(switch_key), NULL);
-			if (!s)
+		event = latency_tracker_get_event_by_key(tracker, &switch_key,
+				sizeof(switch_key), NULL);
+		if (!event)
+			goto end;
+		/* preempted */
+		if (prev->state == TASK_RUNNING) {
+			struct event_data *data;
+
+			append_delta_ts(event, KEY_SWITCH, "to switch_out_preempt",
+					now, next->pid, next->comm,
+					wrapper_task_prio(next));
+			data = (struct event_data *)
+				latency_tracker_event_get_priv_data(event);
+			if (!data) {
+				WARN_ON_ONCE(1);
+				latency_tracker_unref_event(event);
 				goto end;
-			if (prev->state == TASK_RUNNING) {
-				struct event_data *data;
-
-				append_delta_ts(s, KEY_SWITCH, "to switch_out",
-						now, next->pid, next->comm,
-						wrapper_task_prio(next));
-				data = (struct event_data *)
-					latency_tracker_event_get_priv_data(s);
-				if (!data) {
-					latency_tracker_unref_event(s);
-					goto end;
-				}
-				data->preempt_count++;
-			} else {
-				append_delta_ts(s, KEY_SWITCH,
-						"to switch_out_blocked", now,
-						next->pid, next->comm,
-						wrapper_task_prio(next));
 			}
-			latency_tracker_unref_event(s);
+			data->preempt_count++;
+		} else {
+			/* blocked */
+			append_delta_ts(event, KEY_SWITCH,
+					"to switch_out_blocked", now,
+					next->pid, next->comm,
+					wrapper_task_prio(next));
 		}
 
 		/*
@@ -1286,11 +1365,9 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 			goto end;
 
 		if (config.switch_out_blocked) {
-			ret = latency_tracker_event_out(tracker, &switch_key,
-					sizeof(switch_key), OUT_SWITCH_BLOCKED,
-					now);
-			if (ret != 0)
-				break;
+			ret = latency_tracker_event_out(tracker, event, NULL, 0,
+					OUT_SWITCH_BLOCKED, now);
+			WARN_ON_ONCE(ret);
 #ifdef DEBUG
 			if (ret == 0) {
 				trace_printk("%llu switch_out %d (%s)\n",
@@ -1298,9 +1375,8 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 						prev->pid, prev->comm);
 			}
 #endif
-		} else {
-			break;
 		}
+		latency_tracker_unref_event(event);
 	}
 end:
 	return;
@@ -1372,7 +1448,7 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		size_t cnt, loff_t *ppos)
 {
 	int ret, r;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event;
 	struct work_begin_key_t work_begin_key;
 	struct event_data *data;
 	//struct tracker_config *cfg = filp->private_data;
@@ -1409,33 +1485,31 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 			switch_key.cpu = smp_processor_id();
 		else
 			switch_key.cpu = -1;
-		s = latency_tracker_get_event_by_key(tracker, &switch_key,
+		event = latency_tracker_get_event_by_key(tracker, &switch_key,
 				sizeof(switch_key), NULL);
-		if (!s)
+		if (!event)
 			return -ENOENT;
-		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
+		append_delta_ts(event, KEY_WORK_DONE, "to work_done", now, 0,
 				NULL, 0);
-		latency_tracker_unref_event(s);
-		latency_tracker_event_out(tracker, &switch_key,
-				sizeof(switch_key),
+		latency_tracker_unref_event(event);
+		latency_tracker_event_out(tracker, event, NULL, 0,
 				OUT_WORK_DONE, now);
 	} else {
 		work_begin_key.p.type = KEY_WORK_BEGIN;
 		work_begin_key.cookie_size = r;
 
-		s = latency_tracker_get_event_by_key(tracker, &work_begin_key,
+		event = latency_tracker_get_event_by_key(tracker, &work_begin_key,
 				sizeof(work_begin_key), NULL);
-		if (!s)
+		if (!event)
 			return -ENOENT;
-		append_delta_ts(s, KEY_WORK_DONE, "to work_done", now, 0,
+		append_delta_ts(event, KEY_WORK_DONE, "to work_done", now, 0,
 				NULL, 0);
-		latency_tracker_unref_event(s);
-		latency_tracker_event_out(tracker, &work_begin_key,
-				sizeof(work_begin_key),
+		latency_tracker_unref_event(event);
+		latency_tracker_event_out(tracker, event, NULL, 0,
 				OUT_WORK_DONE, now);
 	}
 	data = (struct event_data *)
-		latency_tracker_event_get_priv_data(s);
+		latency_tracker_event_get_priv_data(event);
 	if (data->root) {
 		struct event_data *data_root;
 
@@ -1445,7 +1519,7 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		latency_tracker_unref_event(data->root);
 		data->root = NULL;
 	}
-	latency_tracker_unref_event(s);
+	latency_tracker_unref_event(event);
 
 	return cnt;
 }
@@ -1469,7 +1543,7 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	int ret, r;
 	struct switch_key_t switch_key;
 	struct work_begin_key_t work_begin_key;
-	struct latency_tracker_event *s;
+	struct latency_tracker_event *event_in, *event_out;
 	struct event_data *data;
 	u64 now = trace_clock_monotonic_wrapper();
 
@@ -1501,26 +1575,36 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	work_begin_key.p.type = KEY_WORK_BEGIN;
 	work_begin_key.cookie_size = r;
 
+	event_in = latency_tracker_get_event_by_key(tracker, &switch_key,
+			sizeof(switch_key), NULL);
+	if (!event_in)
+		goto enoent;
+
 	/*
 	 * From now on, only a work_done event can complete this branch.
 	 */
-	s = event_transition(&switch_key, sizeof(switch_key),
-			&work_begin_key, sizeof(work_begin_key), 1, 1, 0);
+	event_out = event_transition(event_in, &work_begin_key,
+			sizeof(work_begin_key), 1, 1, 0);
+	latency_tracker_unref_event(event_in);
 	/*
 	 * FIXME: we could accept not knowing the origin and at least compute
 	 * the user-space processing-time in case we missed the associated
 	 * interrupt event.
 	 */
-	if (!s)
-		return -ENOENT;
-	data = (struct event_data *) latency_tracker_event_get_priv_data(s);
+	if (!event_out)
+		goto enoent;
+
+	data = (struct event_data *) latency_tracker_event_get_priv_data(event_out);
 	set_good_branch(data);
 
-	append_delta_ts(s, KEY_WORK_BEGIN, "to work_begin", now,
+	append_delta_ts(event_out, KEY_WORK_BEGIN, "to work_begin", now,
 			r, work_begin_key.cookie, 0);
-	latency_tracker_unref_event(s);
+	latency_tracker_unref_event(event_out);
 
 	return cnt;
+
+enoent:
+	return -ENOENT;
 }
 
 static const

@@ -242,6 +242,11 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
 
 /*
  * Stop the tracking of an event.
+ *
+ * If the event parameter is passed, perform the event_out only that event,
+ * if it is NULL, perform a lookup of the key and the event_out on all
+ * duplicate keys.
+ *
  * Cancels the timer if it was set.
  * The optional id is passed to the callback in cb_out_id, it can be used
  * to identify the origin of the event_out (eg: error or normal).
@@ -251,9 +256,11 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in(
  * rcu_read_lock_sched_notrace.
  */
 int latency_tracker_event_out(struct latency_tracker *tracker,
+		struct latency_tracker_event *event,
 		void *key, unsigned int key_len, unsigned int id,
 		u64 ts_override);
 int _latency_tracker_event_out(struct latency_tracker *tracker,
+		struct latency_tracker_event *event,
 		void *key, unsigned int key_len, unsigned int id,
 		u64 ts_override);
 

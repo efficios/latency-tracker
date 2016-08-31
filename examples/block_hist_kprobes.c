@@ -51,7 +51,7 @@ int exit_new_sync_write(struct kretprobe_instance *p, struct pt_regs *regs)
 	latency_tracker_unref_event(s);
 
 end:
-	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
+	latency_tracker_event_out(tracker, NULL, &key, sizeof(key), 0, 0);
 	return 0;
 }
 
@@ -107,7 +107,7 @@ int exit_new_sync_read(struct kretprobe_instance *p, struct pt_regs *regs)
 	latency_tracker_unref_event(s);
 
 end:
-	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
+	latency_tracker_event_out(tracker, NULL, &key, sizeof(key), 0, 0);
 	return 0;
 }
 

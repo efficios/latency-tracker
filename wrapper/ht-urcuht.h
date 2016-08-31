@@ -218,6 +218,14 @@ end:
 }
 
 static inline
+void wrapper_check_cb(struct latency_tracker *tracker, uint64_t now,
+		unsigned int id, struct latency_tracker_event *event)
+{
+	if ((now - event->start_ts) > tracker->threshold)
+		callback(event, tracker, now, id, LATENCY_TRACKER_CB_NORMAL);
+}
+
+static inline
 int wrapper_ht_check_event(struct latency_tracker *tracker,
 		struct latency_tracker_key *tkey, unsigned int id, uint64_t now)
 {
@@ -231,8 +239,7 @@ int wrapper_ht_check_event(struct latency_tracker *tracker,
 	rcu_read_lock_sched_notrace();
 	cds_lfht_for_each_entry_duplicate(tracker->urcu_ht, k,
 			urcu_match, tkey, &iter, s, urcunode) {
-		if ((now - s->start_ts) > tracker->threshold)
-			callback(s, tracker, now, id, LATENCY_TRACKER_CB_NORMAL);
+		wrapper_check_cb(tracker, now, id, s);
 		ret = wrapper_ht_del(tracker, s);
 		if (!ret)
 			kref_put(&s->refcount, __latency_tracker_event_destroy);

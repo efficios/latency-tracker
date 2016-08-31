@@ -182,7 +182,7 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		return;
 
 	rq_to_key(&key, rq);
-	latency_tracker_event_out(tracker, &key, sizeof(key), 0, 0);
+	latency_tracker_event_out(tracker, NULL, &key, sizeof(key), 0, 0);
 }
 
 static
