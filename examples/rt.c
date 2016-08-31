@@ -1316,6 +1316,8 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 {
 	struct switch_key_t switch_key;
 	int ret;
+	struct latency_tracker_event *event;
+	struct latency_tracker_event_iter iter;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	/* switch out */
@@ -1325,14 +1327,15 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 		switch_key.cpu = smp_processor_id();
 	else
 		switch_key.cpu = -1;
-	/* Handle duplicates */
-	for (;;) {
-		struct latency_tracker_event *event;
+//	rcu_read_lock_sched_notrace();
 
-		event = latency_tracker_get_event_by_key(tracker, &switch_key,
-				sizeof(switch_key), NULL);
-		if (!event)
-			goto end;
+	event = latency_tracker_get_event_by_key(tracker, &switch_key,
+			sizeof(switch_key), &iter);
+	if (!event)
+		goto end;
+
+	/* Handle duplicates */
+	while (event) {
 		/* preempted */
 		if (prev->state == TASK_RUNNING) {
 			struct event_data *data;
@@ -1361,10 +1364,7 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 		 * means that it is still actively working on an event, so we
 		 * continue tracking its state until it blocks.
 		 */
-		if (prev->state == TASK_RUNNING)
-			goto end;
-
-		if (config.switch_out_blocked) {
+		if (prev->state != TASK_RUNNING && config.switch_out_blocked) {
 			ret = latency_tracker_event_out(tracker, event, NULL, 0,
 					OUT_SWITCH_BLOCKED, now);
 			WARN_ON_ONCE(ret);
@@ -1377,8 +1377,11 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 #endif
 		}
 		latency_tracker_unref_event(event);
+		event = latency_tracker_get_next_duplicate(tracker,
+				&switch_key, sizeof(switch_key), &iter);
 	}
 end:
+//	rcu_read_unlock_sched_notrace();
 	return;
 }
 
