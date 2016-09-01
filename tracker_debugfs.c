@@ -300,15 +300,7 @@ ssize_t tracking_on_write(struct file *filp, const char __user *ubuf,
 	if (tracker->tracking_on == val)
 		goto end;
 
-	if (tracker->change_tracking_on_cb) {
-		int old = tracker->tracking_on;
-
-		tracker->tracking_on = val;
-		synchronize_sched();
-		if (old > 0 && val == 0)
-			latency_tracker_clear_ht(tracker);
-		tracker->change_tracking_on_cb(tracker, old, val);
-	}
+	latency_tracker_set_tracking_on(tracker, val);
 
 end:
 	return count;

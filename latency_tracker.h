@@ -128,8 +128,11 @@ uint64_t latency_tracker_get_timeout(struct latency_tracker *tracker);
 int latency_tracker_set_threshold(struct latency_tracker *tracker, uint64_t
 		threshold);
 uint64_t latency_tracker_get_threshold(struct latency_tracker *tracker);
-/* default: NULL */
+/* default: 0 */
 int latency_tracker_get_tracking_on(struct latency_tracker *tracker);
+int latency_tracker_set_tracking_on(struct latency_tracker *tracker,
+		int value);
+/* default: NULL */
 int latency_tracker_set_callback(struct latency_tracker *tracker, void
 		(*cb)(struct latency_tracker_event_ctx *ctx));
 /* default: sizeof(long) */

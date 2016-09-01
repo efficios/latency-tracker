@@ -383,6 +383,23 @@ int latency_tracker_get_tracking_on(struct latency_tracker *tracker)
 }
 EXPORT_SYMBOL_GPL(latency_tracker_get_tracking_on);
 
+int latency_tracker_set_tracking_on(struct latency_tracker *tracker,
+		int val)
+{
+	int old;
+
+	old = tracker->tracking_on;
+	tracker->tracking_on = val;
+	synchronize_sched();
+	if (old > 0 && val == 0)
+		latency_tracker_clear_ht(tracker);
+	if (tracker->change_tracking_on_cb)
+		tracker->change_tracking_on_cb(tracker, old, val);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_set_tracking_on);
+
 int latency_tracker_set_callback(struct latency_tracker *tracker,
 		void (*cb)(struct latency_tracker_event_ctx *ctx))
 {
