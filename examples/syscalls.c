@@ -277,6 +277,9 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 	u32 hash;
 	struct sched_key_t sched_key;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!watch_all)
 	{
 		process_key.tgid = task->tgid;
@@ -300,6 +303,10 @@ static
 void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 {
 	struct sched_key_t key;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	key.pid = current->pid;
 	latency_tracker_event_out(tracker, NULL, &key, sizeof(key), 0, 0);
 }
@@ -307,6 +314,9 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 static
 void probe_sched_process_exit(void *__data, struct task_struct *p)
 {
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	// If this is the main thread of a process, unregister the process.
 	if (p->pid == p->tgid) {
 		process_unregister(p->tgid);
@@ -322,6 +332,9 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	struct latency_tracker_event *s;
 	char stacktxt[MAX_STACK_TXT];
 	u64 now, delta, threshold;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	if (!task)
 		goto end;

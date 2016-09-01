@@ -116,6 +116,9 @@ void probe_core_critical_timing_hit(void *ignore, unsigned long ip,
 	struct task_struct *p = current;
 	char stacktxt[MAX_STACK_TXT];
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	rcu_read_lock();
 	extract_stack(p, stacktxt, 0);
 	trace_latency_tracker_critical_timing_stack(current->comm, current->pid, stacktxt);

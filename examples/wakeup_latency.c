@@ -125,6 +125,9 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	int i;
 	enum latency_tracker_event_in_ret ret;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!p || !p->pid)
 		return;
 
@@ -152,6 +155,9 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 		struct task_struct *next)
 {
 	struct schedkey key;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	if (!next || !next->pid)
 		return;

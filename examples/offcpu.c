@@ -197,6 +197,9 @@ void probe_sched_switch(void *ignore, struct task_struct *prev,
 	struct schedkey key;
 	enum latency_tracker_event_in_ret ret;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	rcu_read_lock();
 	if (!next || !prev)
 		goto end;
@@ -223,6 +226,9 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	struct latency_tracker_event *s;
 	u64 now, delta;
 	int i;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	/*
 	 * Make sure we are not waking up a process already running on

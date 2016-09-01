@@ -132,6 +132,9 @@ void probe_netif_receive_skb(void *ignore, struct sk_buff *skb)
 	struct netkey key;
 	enum latency_tracker_event_in_ret ret;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!skb)
 		return;
 
@@ -153,6 +156,9 @@ void probe_skb_copy_datagram_iovec(void *ignore, struct sk_buff *skb, int len)
 {
 	struct netkey key;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!skb)
 		return;
 
@@ -167,6 +173,9 @@ void probe_consume_skb(void *ignore, struct sk_buff *skb)
 {
 	struct netkey key;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!skb)
 		return;
 
@@ -180,6 +189,9 @@ static
 void probe_kfree_skb(void *ignore, struct sk_buff *skb, void *location)
 {
 	struct netkey key;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	if (!skb)
 		return;

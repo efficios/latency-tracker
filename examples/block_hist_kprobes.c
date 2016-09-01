@@ -17,6 +17,9 @@ int entry_new_sync_write(struct kretprobe_instance *p, struct pt_regs *regs)
 	struct kprobe_key_t kprobe_key;
 	enum latency_tracker_event_in_ret ret;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return 0;
+
 	kprobe_key.pid = task->pid;
 	kprobe_key.type = KEY_FS;
 
@@ -38,6 +41,9 @@ int exit_new_sync_write(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	struct kprobe_key_t key;
 	struct latency_tracker_event *s;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return 0;
 
 	key.pid = current->pid;
 	key.type = KEY_FS;
@@ -73,6 +79,9 @@ int entry_new_sync_read(struct kretprobe_instance *p, struct pt_regs *regs)
 	struct kprobe_key_t kprobe_key;
 	enum latency_tracker_event_in_ret ret;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return 0;
+
 	kprobe_key.pid = task->pid;
 	kprobe_key.type = KEY_FS;
 
@@ -94,6 +103,9 @@ int exit_new_sync_read(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	struct kprobe_key_t key;
 	struct latency_tracker_event *s;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return 0;
 
 	key.pid = current->pid;
 	key.type = KEY_FS;

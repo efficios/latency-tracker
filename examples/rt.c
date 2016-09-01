@@ -678,6 +678,9 @@ LT_PROBE_DEFINE(local_timer_entry, int vector)
 	struct local_timer_key_t key;
 	u64 now;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!config.timer_tracing)
 		goto end;
 
@@ -710,6 +713,9 @@ LT_PROBE_DEFINE(local_timer_exit, int vector)
 {
 	struct local_timer_key_t local_timer_key;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!config.timer_tracing)
 		goto end;
 	local_timer_key.p.type = KEY_TIMER_INTERRUPT;
@@ -725,6 +731,9 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 	struct do_irq_key_t do_irq_key;
 	struct hardirq_key_t hardirq_key;
 	struct latency_tracker_event *event_in, *event_out;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	if (!config.irq_tracing)
 		goto end;
@@ -768,6 +777,9 @@ LT_PROBE_DEFINE(irq_handler_exit, int irq, struct irqaction *action,
 	struct hardirq_key_t hardirq_key;
 	struct latency_tracker_event *event;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!config.irq_tracing)
 		goto end;
 
@@ -800,6 +812,9 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	struct raise_softirq_key_t raise_softirq_key;
 	struct switch_key_t switch_key;
 	struct latency_tracker_event *event_in, *event_out;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
@@ -844,6 +859,9 @@ LT_PROBE_DEFINE(softirq_raise, unsigned int vec_nr)
 	struct raise_softirq_key_t raise_softirq_key;
 	struct latency_tracker_event *event_in, *event_out;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	event_in = NULL;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
@@ -885,6 +903,9 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *event_in, *event_out;
 	struct latency_tracker_event_iter iter;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
@@ -932,6 +953,9 @@ LT_PROBE_DEFINE(hrtimer_expire_entry, struct hrtimer *hrtimer,
 	struct hrtimer_key_t hrtimer_key;
 	struct latency_tracker_event *event_in, *event_out;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!config.timer_tracing)
 		goto end;
 	local_timer_key.p.type = KEY_TIMER_INTERRUPT;
@@ -969,6 +993,9 @@ LT_PROBE_DEFINE(hrtimer_expire_exit, struct timer_list *timer)
 {
 	struct hrtimer_key_t hrtimer_key;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (!config.timer_tracing)
 		goto end;
 	hrtimer_key.p.type = KEY_HRTIMER;
@@ -993,6 +1020,9 @@ LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *event;
 	struct latency_tracker_event_iter iter;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	if (config.softirq_filter > 0 && config.softirq_filter != vec_nr)
 		goto end;
@@ -1188,6 +1218,8 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 	struct waking_key_t waking_key;
 	//struct latency_tracker_event *s;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!p)
@@ -1396,6 +1428,9 @@ LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
 		struct task_struct *next)
 #endif
 {
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!prev || !next)
 		goto end;

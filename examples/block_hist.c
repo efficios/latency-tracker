@@ -148,6 +148,9 @@ void probe_block_rq_insert(void *ignore, struct request_queue *q,
 	struct blk_key_t key;
 	enum latency_tracker_event_in_ret ret;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	rq_cnt++;
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
@@ -178,6 +181,9 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 	struct blk_key_t key;
 	enum latency_tracker_event_in_ret ret;
 	struct latency_tracker_event *s;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	rq_cnt++;
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
@@ -342,6 +348,9 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 	struct blk_key_t key;
 	struct latency_tracker_event *s;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
 
@@ -449,6 +458,9 @@ void probe_syscall_enter(void *ignore, struct pt_regs *regs,
 	enum latency_tracker_event_in_ret ret;
 	u64 thresh, timeout;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	if (io_syscall(id) < 0)
 		return;
 
@@ -473,6 +485,9 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 {
 	struct syscall_key_t key;
 	struct latency_tracker_event *s;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	key.pid = current->pid;
 	key.type = KEY_SYSCALL;

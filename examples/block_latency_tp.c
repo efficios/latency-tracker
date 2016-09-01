@@ -153,6 +153,9 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 	struct blkkey key;
 	enum latency_tracker_event_in_ret ret;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
 	rq_cnt++;
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
@@ -177,6 +180,9 @@ void probe_block_rq_complete(void *ignore, struct request_queue *q,
 		struct request *rq, unsigned int nr_bytes)
 {
 	struct blkkey key;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
 
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
 		return;
@@ -243,7 +249,6 @@ int tracker_proc_release(struct inode *inode, struct file *filp)
 	module_put(THIS_MODULE);
 	return 0;
 }
-
 
 static const
 struct file_operations block_tracker_fops = {
