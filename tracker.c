@@ -377,6 +377,12 @@ uint64_t latency_tracker_get_threshold(struct latency_tracker *tracker)
 }
 EXPORT_SYMBOL_GPL(latency_tracker_get_threshold);
 
+int latency_tracker_get_tracking_on(struct latency_tracker *tracker)
+{
+	return tracker->tracking_on;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_get_tracking_on);
+
 int latency_tracker_set_callback(struct latency_tracker *tracker,
 		void (*cb)(struct latency_tracker_event_ctx *ctx))
 {
@@ -418,6 +424,18 @@ int latency_tracker_set_destroy_event_cb(struct latency_tracker *tracker,
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_destroy_event_cb);
 
+int latency_tracker_set_change_tracking_on_cb(struct latency_tracker *tracker,
+		void (*change_tracking_on_cb) (struct latency_tracker *tracker,
+			int prev_value, int new_value))
+{
+	if (tracker->enabled)
+		return -1;
+
+	tracker->change_tracking_on_cb = change_tracking_on_cb;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(latency_tracker_set_change_tracking_on_cb);
+
 struct latency_tracker *latency_tracker_create(const char *name)
 {
 	struct latency_tracker *tracker;
@@ -433,6 +451,7 @@ struct latency_tracker *latency_tracker_create(const char *name)
 	tracker->key_size = sizeof(long);
 	tracker->free_list_nelems = DEFAULT_STARTUP_ALLOC_EVENTS;
 	tracker->threshold = DEFAULT_THRESHOLD;
+	tracker->tracking_on = 0;
 	if (!name)
 		goto error_free;
 	strncpy(tracker->tracker_name, name, 32);
@@ -475,6 +494,12 @@ int latency_tracker_enable(struct latency_tracker *tracker)
 }
 EXPORT_SYMBOL_GPL(latency_tracker_enable);
 
+int latency_tracker_clear_ht(struct latency_tracker *tracker)
+{
+	return wrapper_ht_clear(tracker);
+}
+EXPORT_SYMBOL_GPL(latency_tracker_clear_ht);
+
 void latency_tracker_destroy(struct latency_tracker *tracker)
 {
 	int nb = 0;
@@ -505,7 +530,7 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	destroy_workqueue(tracker->tracker_call_rcu_q);
 #endif
 
-	nb = wrapper_ht_clear(tracker);
+	nb = latency_tracker_clear_ht(tracker);
 	printk("latency_tracker: %d events were still pending at destruction\n", nb);
 
 	if (tracker->timer_period)

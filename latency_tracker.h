@@ -81,10 +81,19 @@ struct latency_tracker *latency_tracker_create(const char *name);
 void latency_tracker_destroy(struct latency_tracker *tracker);
 
 /*
- * Start the tracker.
+ * Start the tracker, this allocates the memory in the freelist and allows
+ * events to be stored by the tracker, it is different from tracking_on
+ * which controls whether or not the tracker processes the events.
+ *
  * Returns 0 on success, a negative value and a printk on error.
  */
 int latency_tracker_enable(struct latency_tracker *tracker);
+
+/*
+ * Empty the tracker's HT, return the number of entries that were still
+ * present.
+ */
+int latency_tracker_clear_ht(struct latency_tracker *tracker);
 
 /*
  * Setters to various tracker parameters.
@@ -120,6 +129,7 @@ int latency_tracker_set_threshold(struct latency_tracker *tracker, uint64_t
 		threshold);
 uint64_t latency_tracker_get_threshold(struct latency_tracker *tracker);
 /* default: NULL */
+int latency_tracker_get_tracking_on(struct latency_tracker *tracker);
 int latency_tracker_set_callback(struct latency_tracker *tracker, void
 		(*cb)(struct latency_tracker_event_ctx *ctx));
 /* default: sizeof(long) */
@@ -142,6 +152,16 @@ int latency_tracker_set_gc_thresh(struct latency_tracker *tracker,
  */
 int latency_tracker_set_destroy_event_cb(struct latency_tracker *tracker,
 		void (*destroy_event_cb) (struct latency_tracker_event *event));
+
+/*
+ * The change_tracking_on_cb callback if not NULL is called when the tracker
+ * tracking_on value changes. When tracking_on changes from any value to 0,
+ * the HT of the tracker is emptied, no callbacks are emitted when this
+ * happens.
+ */
+int latency_tracker_set_change_tracking_on_cb(struct latency_tracker *tracker,
+		void (*change_tracking_on_cb) (struct latency_tracker *tracker,
+			int prev_value, int new_value));
 
 void *latency_tracker_get_priv(struct latency_tracker *tracker);
 

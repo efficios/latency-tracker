@@ -28,6 +28,9 @@
 #define DEBUGFSNAME "latency"
 
 static struct dentry *debugfs_root;
+static struct dentry *debugfs_create_tracking_on(umode_t mode,
+		struct dentry *parent, int *value,
+		struct latency_tracker *tracker);
 
 int latency_tracker_debugfs_setup(void)
 {
@@ -56,6 +59,10 @@ int setup_default_entries(struct latency_tracker *tracker)
 		goto error;
 	dir = debugfs_create_u64("timeout", S_IRUSR|S_IWUSR,
 			tracker->debugfs_dir, &tracker->timeout);
+	if (!dir)
+		goto error;
+	dir = debugfs_create_tracking_on(S_IRUSR|S_IWUSR,
+			tracker->debugfs_dir, &tracker->tracking_on, tracker);
 	if (!dir)
 		goto error;
 
@@ -263,4 +270,62 @@ struct dentry *debugfs_create_int(const char *name, umode_t mode,
 		struct dentry *parent, int *value)
 {
 	return debugfs_create_file(name, mode, parent, value, &fops_int);
+}
+
+static
+ssize_t tracking_on_read(struct file *filp, char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	int r, ret;
+	char buf[64];
+	struct latency_tracker *tracker = filp->private_data;
+
+	r = snprintf(buf, min_t(size_t, count, 64), "%d\n",
+			tracker->tracking_on);
+
+	ret = simple_read_from_buffer(ubuf, count, ppos, buf, r);
+	return ret;
+}
+
+static
+ssize_t tracking_on_write(struct file *filp, const char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	int val, ret;
+	struct latency_tracker *tracker = filp->private_data;
+
+	ret = kstrtoint_from_user(ubuf, count, 10, &val);
+	if (ret)
+		return ret;
+	if (tracker->tracking_on == val)
+		goto end;
+
+	if (tracker->change_tracking_on_cb) {
+		int old = tracker->tracking_on;
+
+		tracker->tracking_on = val;
+		synchronize_sched();
+		if (old > 0 && val == 0)
+			latency_tracker_clear_ht(tracker);
+		tracker->change_tracking_on_cb(tracker, old, val);
+	}
+
+end:
+	return count;
+}
+
+static
+const struct file_operations fops_tracking_on = {
+	.open           = open_int,
+	.read           = tracking_on_read,
+	.write		= tracking_on_write,
+	.llseek         = default_llseek,
+};
+
+static
+struct dentry *debugfs_create_tracking_on(umode_t mode, struct dentry *parent,
+		int *value, struct latency_tracker *tracker)
+{
+	return  debugfs_create_file("tracking_on", mode, parent,
+			tracker, &fops_tracking_on);
 }

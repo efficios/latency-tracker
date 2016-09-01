@@ -74,6 +74,15 @@ struct latency_tracker {
 	struct numa_pool *per_node_pool;
 #endif
 	/*
+	 * Is the tracker active ?
+	 * When creating a tracker, this is set to 0 and needs to be set to 1
+	 * by the user (from the API or debugfs) to start the tracking. The
+	 * trackers are responsible to check the state when processing events.
+	 * When switching to a different value, the change_tracking_on_cb is
+	 * called if it is set.
+	 */
+	int tracking_on;
+	/*
 	 * Period of the timer (nsec) that performs various housekeeping tasks:
 	 * - garbage collection checks (if enabled)
 	 * - check if the freelist needs to be resized
@@ -152,6 +161,11 @@ struct latency_tracker {
 	 * the HT on latency_tracker_destroy.
 	 */
 	void (*destroy_event_cb) (struct latency_tracker_event *event);
+	/*
+	 * Clear all the internal state of the tracker.
+	 */
+	void (*change_tracking_on_cb) (struct latency_tracker *tracker,
+			int old_value, int new_value);
         /*
          * Protects the access to the HT, the free_list and the timer.
          */
