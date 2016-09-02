@@ -130,8 +130,14 @@ int latency_tracker_set_threshold(struct latency_tracker *tracker, uint64_t
 uint64_t latency_tracker_get_threshold(struct latency_tracker *tracker);
 /* default: 0 */
 int latency_tracker_get_tracking_on(struct latency_tracker *tracker);
+/*
+ * Set the tracker->tracking_on value, if cleanup is set to 1, then the tracker
+ * waits for a RCU grace period and clears the HT if needed (when switching
+ * to 0). This cannot be performed from within a tracepoint probe without
+ * deadlocking.
+ */
 int latency_tracker_set_tracking_on(struct latency_tracker *tracker,
-		int value);
+		int value, int cleanup);
 /* default: NULL */
 int latency_tracker_set_callback(struct latency_tracker *tracker, void
 		(*cb)(struct latency_tracker_event_ctx *ctx));

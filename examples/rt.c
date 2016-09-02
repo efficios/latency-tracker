@@ -80,7 +80,7 @@ MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts "
 static struct latency_tracker *tracker;
 
 static int cnt = 0;
-static int failed_event_in = 0;
+static int tracker_aborted = 0;
 
 struct tracker_config {
 	/* enable/disable tracing of local_timer and hrtimer events */
@@ -97,6 +97,8 @@ struct tracker_config {
 	int out_work_done;
 	/* append in the payload of the event the breakdown (costly). */
 	int text_breakdown;
+	/* maximum number of duplicate we allow iterating over before aborting. */
+	int nr_duplicates_max;
 	/*
 	 * output an event and stop the tracking as soon as a chain of
 	 * event results in a user-space entry.
@@ -113,10 +115,11 @@ struct tracker_config config  = {
 	.irq_filter = -1,
 	.softirq_filter = -1,
 	.switch_out_blocked = 1,
-	.out_work_done = 0,
+	.out_work_done = 1,
 	.text_breakdown = 0,
 	.enter_userspace = 1,
 	.procname_filter_size = 0,
+	.nr_duplicates_max = 10,
 };
 
 enum rt_key_type {
@@ -464,10 +467,8 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	key.cpu = smp_processor_id();
 	ret = _latency_tracker_event_in_get(tracker, &key, sizeof(key), 1, now,
 			NULL, &s);
-	if (ret != LATENCY_TRACKER_OK) {
-		failed_event_in++;
+	if (ret != LATENCY_TRACKER_OK)
 		return 0;
-	}
 	WARN_ON_ONCE(!s);
 
 	if (config.text_breakdown) {
@@ -564,6 +565,12 @@ void set_good_branch(struct event_data *data_in)
 	return;
 }
 
+void abort_tracker(void)
+{
+	latency_tracker_set_tracking_on(tracker, 0, 0);
+	tracker_aborted++;
+}
+
 /*
  * - create the key_out with the original timestamp
  * - copy the payload of key_in to key_out
@@ -618,10 +625,8 @@ struct latency_tracker_event *event_transition(
 
 	ret = _latency_tracker_event_in_get(tracker, key_out,
 			key_out_len, unique, orig_ts, NULL, &event_out);
-	if (ret != LATENCY_TRACKER_OK) {
-		failed_event_in++;
+	if (ret != LATENCY_TRACKER_OK)
 		goto end_del;
-	}
 	WARN_ON_ONCE(!event_out);
 	data_out = (struct event_data *)
 		latency_tracker_event_get_priv_data(event_out);
@@ -689,10 +694,8 @@ LT_PROBE_DEFINE(local_timer_entry, int vector)
 	key.cpu = smp_processor_id();
 	ret = _latency_tracker_event_in_get(tracker, &key, sizeof(key), 1, now,
 			NULL, &s);
-	if (ret != LATENCY_TRACKER_OK) {
-		failed_event_in++;
+	if (ret != LATENCY_TRACKER_OK)
 		goto end;
-	}
 	WARN_ON_ONCE(!s);
 	if (config.text_breakdown) {
 		append_delta_ts(s, KEY_TIMER_INTERRUPT, "local_timer_entry", now,
@@ -903,6 +906,7 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *event_in, *event_out;
 	struct latency_tracker_event_iter iter;
+	int nr_duplicates = 0;
 
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
@@ -936,6 +940,10 @@ LT_PROBE_DEFINE(softirq_entry, unsigned int vec_nr)
 		event_in = latency_tracker_get_next_duplicate(tracker,
 				&raise_softirq_key, sizeof(raise_softirq_key),
 				&iter);
+		if (nr_duplicates++ > config.nr_duplicates_max) {
+			abort_tracker();
+			break;
+		}
 	}
 
 #ifdef DEBUG
@@ -1020,6 +1028,7 @@ LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *event;
 	struct latency_tracker_event_iter iter;
+	int nr_duplicates = 0;
 
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
@@ -1045,6 +1054,10 @@ LT_PROBE_DEFINE(softirq_exit, unsigned int vec_nr)
 				OUT_IRQHANDLER_NO_CB, 0);
 		event = latency_tracker_get_next_duplicate(tracker, &softirq_key,
 				sizeof(softirq_key), &iter);
+		if (nr_duplicates++ > config.nr_duplicates_max) {
+			abort_tracker();
+			break;
+		}
 	}
 end:
 	return;
@@ -1094,6 +1107,7 @@ void softirq_waking(struct waking_key_t *waking_key)
 	struct softirq_key_t softirq_key;
 	struct latency_tracker_event *event_in, *event_out;
 	struct latency_tracker_event_iter iter;
+	int nr_duplicates = 0;
 
 	softirq_key.p.type = KEY_SOFTIRQ;
 	softirq_key.cpu = smp_processor_id();
@@ -1113,6 +1127,10 @@ void softirq_waking(struct waking_key_t *waking_key)
 		}
 		event_in = latency_tracker_get_next_duplicate(tracker,&softirq_key,
 				sizeof(softirq_key), &iter);
+		if (nr_duplicates++ > config.nr_duplicates_max) {
+			abort_tracker();
+			break;
+		}
 	}
 #ifdef DEBUG
 	trace_printk("%llu waking %d\n", trace_clock_monotonic_wrapper(),
@@ -1171,6 +1189,7 @@ void thread_waking(struct waking_key_t *waking_key)
 	struct switch_key_t switch_key;
 	struct latency_tracker_event *event_in, *event_out;
 	struct latency_tracker_event_iter iter;
+	int nr_duplicates = 0;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	switch_key.p.type = KEY_SWITCH;
@@ -1197,6 +1216,10 @@ void thread_waking(struct waking_key_t *waking_key)
 		latency_tracker_unref_event(event_in);
 		event_in = latency_tracker_get_next_duplicate(tracker, &switch_key,
 				sizeof(switch_key), &iter);
+		if (nr_duplicates++ > config.nr_duplicates_max) {
+			abort_tracker();
+			break;
+		}
 	}
 }
 
@@ -1274,6 +1297,7 @@ void sched_switch_in(struct task_struct *next)
 	struct switch_key_t switch_key;
 	struct event_data *data;
 	int ret;
+	int nr_duplicates = 0;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	switch_key.p.type = KEY_SWITCH;
@@ -1317,12 +1341,17 @@ void sched_switch_in(struct task_struct *next)
 		}
 		event_in = latency_tracker_get_next_duplicate(tracker,
 				&waking_key, sizeof(waking_key), &iter);
+		if (nr_duplicates++ > config.nr_duplicates_max) {
+			abort_tracker();
+			break;
+		}
 	}
 
 	/*
 	 * Switch after a preempt, no transition, just check the current
 	 * branch and eventually append text.
 	 */
+	nr_duplicates = 0;
 	event_in = latency_tracker_get_event_by_key(tracker,
 			&switch_key, sizeof(switch_key), &iter);
 	while (event_in) {
@@ -1340,6 +1369,10 @@ void sched_switch_in(struct task_struct *next)
 		latency_tracker_unref_event(event_in);
 		event_in = latency_tracker_get_next_duplicate(tracker,
 				&switch_key, sizeof(switch_key), &iter);
+		if (nr_duplicates++ > config.nr_duplicates_max) {
+			abort_tracker();
+			break;
+		}
 	}
 
 #ifdef DEBUG
@@ -1358,6 +1391,7 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 	int ret;
 	struct latency_tracker_event *event;
 	struct latency_tracker_event_iter iter;
+	int nr_duplicates = 0;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	/* switch out */
@@ -1372,7 +1406,11 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 			sizeof(switch_key), &iter);
 	/* Handle duplicates */
 	while (event) {
-		/* preempted */
+		/*
+		 * If the task is still running, but just got preempted, it
+		 * means that it is still actively working on an event, so we
+		 * continue tracking its state until it blocks.
+		 */
 		if (prev->state == TASK_RUNNING) {
 			struct event_data *data;
 
@@ -1393,28 +1431,26 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 					"to switch_out_blocked", now,
 					next->pid, next->comm,
 					wrapper_task_prio(next));
-		}
-
-		/*
-		 * If the task is still running, but just got preempted, it
-		 * means that it is still actively working on an event, so we
-		 * continue tracking its state until it blocks.
-		 */
-		if (prev->state != TASK_RUNNING && config.switch_out_blocked) {
-			ret = latency_tracker_event_out(tracker, event, NULL, 0,
-					OUT_SWITCH_BLOCKED, now);
-			WARN_ON_ONCE(ret);
+			if (config.switch_out_blocked) {
+				ret = latency_tracker_event_out(tracker, event,
+						NULL, 0, OUT_SWITCH_BLOCKED,
+						now);
+				WARN_ON_ONCE(ret);
 #ifdef DEBUG
-			if (ret == 0) {
 				trace_printk("%llu switch_out %d (%s)\n",
 						trace_clock_read64(),
 						prev->pid, prev->comm);
-			}
 #endif
+			}
 		}
+
 		latency_tracker_unref_event(event);
 		event = latency_tracker_get_next_duplicate(tracker,
 				&switch_key, sizeof(switch_key), &iter);
+		if (nr_duplicates++ > config.nr_duplicates_max) {
+			abort_tracker();
+			break;
+		}
 	}
 end:
 	return;
@@ -1493,6 +1529,7 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 	struct latency_tracker_event_iter iter;
 	struct work_begin_key_t work_begin_key;
 	struct event_data *data;
+	int nr_duplicates = 0;
 	int found = 0;
 
 	//struct tracker_config *cfg = filp->private_data;
@@ -1551,6 +1588,10 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 			}
 			event = latency_tracker_get_next_duplicate(tracker, &switch_key,
 					sizeof(switch_key), &iter);
+			if (nr_duplicates++ > config.nr_duplicates_max) {
+				abort_tracker();
+				break;
+			}
 		}
 		if (!found)
 			return -ENOENT;
@@ -1580,6 +1621,10 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 			}
 			event = latency_tracker_get_next_duplicate(tracker, &work_begin_key,
 					sizeof(work_begin_key), &iter);
+			if (nr_duplicates++ > config.nr_duplicates_max) {
+				abort_tracker();
+				break;
+			}
 		}
 		if (!found)
 			return -ENOENT;
@@ -1611,6 +1656,7 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 	struct latency_tracker_event_iter iter;
 	struct event_data *data;
 	int found = 0;
+	int nr_duplicates = 0;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	r = min_t(unsigned int, cnt, sizeof(work_begin_key.cookie));
@@ -1664,6 +1710,10 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 		latency_tracker_unref_event(event_in);
 		event_in = latency_tracker_get_next_duplicate(tracker,
 				&switch_key, sizeof(switch_key), &iter);
+		if (nr_duplicates++ > config.nr_duplicates_max) {
+			abort_tracker();
+			break;
+		}
 	}
 
 	/*
@@ -1707,6 +1757,12 @@ int setup_debugfs_extras(void)
 
 	file = debugfs_create_u32("irq_tracing",
 			S_IRUSR|S_IWUSR, filters_dir, &config.irq_tracing);
+	if (!file)
+		goto error;
+
+	file = debugfs_create_u32("nr_duplicates_max",
+			S_IRUSR|S_IWUSR, filters_dir,
+			&config.nr_duplicates_max);
 	if (!file)
 		goto error;
 
@@ -1894,7 +1950,7 @@ void __exit rt_exit(void)
 	latency_tracker_destroy(tracker);
 	printk("Tracked events : %llu\n", tracked);
 	printk("Missed events : %llu\n", skipped);
-	printk("Failed event in : %d\n", failed_event_in);
+	printk("Tracker aborted : %d\n", tracker_aborted);
 	printk("Total rt alerts : %d\n", cnt);
 #ifdef BENCH
 	output_measurements();
