@@ -92,7 +92,7 @@ struct tracker_config {
 	/* softirq number to track (-1 for all) */
 	int softirq_filter;
 	/* output an event when a woken up task gets blocked */
-	int switch_out_blocked;
+	int output_switch_out_blocked;
 	/* output an event when a target process write to the work_done file */
 	int out_work_done;
 	/* append in the payload of the event the breakdown (costly). */
@@ -114,7 +114,7 @@ struct tracker_config config  = {
 	.irq_tracing = 1,
 	.irq_filter = -1,
 	.softirq_filter = -1,
-	.switch_out_blocked = 1,
+	.output_switch_out_blocked = 1,
 	.out_work_done = 1,
 	.text_breakdown = 0,
 	.enter_userspace = 1,
@@ -409,7 +409,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	case OUT_IRQHANDLER_NO_CB:
 		return;
 	case OUT_SWITCH_BLOCKED:
-		if (!config.switch_out_blocked)
+		if (!config.output_switch_out_blocked)
 			return;
 		if (config.procname_filter_size)
 			if (strncmp(data->userspace_proc, config.procname_filter,
@@ -1431,17 +1431,20 @@ void sched_switch_out(struct task_struct *prev, struct task_struct *next)
 					"to switch_out_blocked", now,
 					next->pid, next->comm,
 					wrapper_task_prio(next));
-			if (config.switch_out_blocked) {
+			if (config.output_switch_out_blocked) {
 				ret = latency_tracker_event_out(tracker, event,
 						NULL, 0, OUT_SWITCH_BLOCKED,
 						now);
-				WARN_ON_ONCE(ret);
-#ifdef DEBUG
-				trace_printk("%llu switch_out %d (%s)\n",
-						trace_clock_read64(),
-						prev->pid, prev->comm);
-#endif
+			} else {
+				ret = latency_tracker_event_out(tracker, event,
+						NULL, 0, OUT_NO_CB, now);
 			}
+			WARN_ON_ONCE(ret);
+#ifdef DEBUG
+			trace_printk("%llu switch_out %d (%s)\n",
+					trace_clock_read64(),
+					prev->pid, prev->comm);
+#endif
 		}
 
 		latency_tracker_unref_event(event);
@@ -1766,8 +1769,9 @@ int setup_debugfs_extras(void)
 	if (!file)
 		goto error;
 
-	file = debugfs_create_u32("switch_out_blocked",
-			S_IRUSR|S_IWUSR, filters_dir, &config.switch_out_blocked);
+	file = debugfs_create_u32("output_switch_out_blocked",
+			S_IRUSR|S_IWUSR, filters_dir,
+			&config.output_switch_out_blocked);
 	if (!file)
 		goto error;
 
