@@ -48,7 +48,7 @@ entry point when analysing the trace either manually or with
 
 This project exposes the `latency-tracker` API to other kernel modules, but
 also comes with a list of ready-to-use trackers (source code in
-[`examples`](examples/).
+[`examples`](examples/)).
 
 Installation requirements
 -------------------------
@@ -84,7 +84,7 @@ Implemented modules
 -------------------
 
 Here is a list and the description of the examples ready to run (in the
-[`examples/`] directory.
+[`examples/`](examples/) directory).
 
 
 ### Wakeup latency
