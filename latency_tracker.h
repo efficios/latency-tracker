@@ -124,7 +124,8 @@ int latency_tracker_set_timeout(struct latency_tracker *tracker, uint64_t
 		timeout);
 uint64_t latency_tracker_get_timeout(struct latency_tracker *tracker);
 /*
- * nanoseconds default: DEFAULT_THRESHOLD */
+ * nanoseconds default: DEFAULT_THRESHOLD
+ */
 int latency_tracker_set_threshold(struct latency_tracker *tracker, uint64_t
 		threshold);
 uint64_t latency_tracker_get_threshold(struct latency_tracker *tracker);

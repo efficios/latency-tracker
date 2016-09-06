@@ -242,6 +242,40 @@ TRACE_EVENT(
 		)
    );
 
+/*
+ * Limited to MAX_FILTER_STR_VAL (256) for ftrace compatibility.
+ */
+#define LT_MAX_JOBID_SIZE MAX_FILTER_STR_VAL
+TRACE_EVENT(
+	latency_tracker_begin,
+	TP_PROTO(const __user char *data, size_t len),
+	TP_ARGS(data, len),
+	TP_STRUCT__entry(
+		 __array(char, data, LT_MAX_JOBID_SIZE)
+		__field(size_t, len)
+		),
+	TP_fast_assign(
+		memcpy(__entry->data, data, len);
+		entry->len = len;
+		),
+	TP_printk("data=%s, len=%lu", __entry->data,  __entry->len)
+   );
+
+TRACE_EVENT(
+	latency_tracker_end,
+	TP_PROTO(const __user char *data, size_t len),
+	TP_ARGS(data, len),
+	TP_STRUCT__entry(
+		 __array(char, data, LT_MAX_JOBID_SIZE)
+		__field(size_t, len)
+		),
+	TP_fast_assign(
+		memcpy(__entry->data, data, len);
+		entry->len = len;
+		),
+	TP_printk("data=%s, len=%lu", __entry->data,  __entry->len)
+   );
+
 #endif /* _TRACE_LATENCY_TRACKER_H */
 
 /* this part must be outside protection */

@@ -41,6 +41,8 @@ obj-m += latency_tracker_critical_timing.o
 latency_tracker_rt-objs := examples/rt.o wrapper/trace-clock.o tracker_debugfs.o
 obj-m += latency_tracker_rt.o
 
+obj-m += latency_tracker_begin_end.o
+
 else # KERNELRELEASE
 
 # This part of the Makefile is used when the 'make' command is run in the
