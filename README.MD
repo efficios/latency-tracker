@@ -1,35 +1,58 @@
-latency_tracker
+latency-tracker
 =============
 
-_by [Julien Desfossez](mailto:jdesfossez@efficios.com)_
+_by [Julien Desfossez](mailto:jdesfossez@efficios.com), [Mathieu Desnoyers](mailto:mathieu.desnoyers@efficios.com)_
 
 This kernel module is a simple latency tracker. It is designed to be called
-from anywhere in the kernel (including tracepoints and kprobes) and is designed
-to execute lightweight actions when an operation takes longer than a specified
-threshold (and/or timeout).
+from anywhere in the kernel (mostly used with tracepoints and kprobes) and is
+designed to execute actions when an operation takes longer than a specified
+threshold. It can also be configured to execute an action if an operation is
+not completed before a timeout is reached.
 
-The main intent is to use it to output alerts and latency metrics on production
-servers (not just in debugging situations).
+The basic idea is to call the `latency_tracker_event_in($key)` at the beginning
+and `latency_tracker_event_out($key)` at the end of an operation, no matter
+where the operation begins and ends, only the `key` must match. A `threshold`
+is configured by the user through a `debugfs` interface (using `cat` and
+`echo`). If the delay between the entry and exit event is higher than the
+`threshold`, a callback action is executed. By default, all trackers have a
+`wakeup_pipe` file. This file blocks the `read` operation until a callback is
+emitted. Most trackers also emit a tracepoint event when the callback is
+executed. These events can be collected by the kernel tracers (`LTTng`,
+`ftrace` and `perf`).
 
-It is designed to be fast and can be called in various situations including IRQ
-handlers (no memory allocation and irq-safe spin-locks). It is still a work in
-progress, so any suggestions to improve the above statement will be taken into
-account.
+The latency-tracker takes care of the out-of-context memory allocation,
+refcounting and synchronisation required to scale this kind of measurement and
+reaction to highly concurrent environments. It is designed to be fast and to be
+called from various execution contexts including IRQ and NMI handlers. The core
+of the tracker relies on the [userspace-rcu](http://liburcu.org/) lock-less
+hashtable ported to the kernel to match the entry and exit events, and the
+kernel lock-less RCU linked-list to handle the memory. The latency-tracker has
+its own NUMA-aware memory allocator to avoid doing allocation/freeing during
+the measurements.
 
-The user is responsible to create callback functions that won't crash their
-kernel, so you have to be careful to use it. Some ready to use examples are
-provided in [`examples/`](examples/). Calling tracepoints, registering stack
-traces and doing all kinds of basic aggregations from the callbacks (with
-output when you unload the module or in a deferred timer handler) seems to be
-the most interesting usage for this module for now. Everything that does I/O
-operations during a callback (even printk) can create feedback loops depending
-on the context and eventually hang the kernel).
+It is a work in progress and operates in very sensitive contexts, so make sure
+to try it in a non-critical environment before deploying it in production.
 
-For more secure and user-friendly use cases, please consider using SystemTap
-instead.
+The main intent is to use it to output alerts, latency metrics and run
+diagnostic scripts on production servers or embedded platforms when debugging
+hard to diagnose latency problems. Also, it should be fast enough to run as a
+background monitoring tool without a significant impact on the production.
 
-Installation
-------------
+Coupled with a buffering kernel tracer (`LTTng` in snapshot mode or `ftrace`),
+it can be used to stop the tracing and extract the trace from memory only when
+an unusual latency is detected. This use-case is very powerful to collect
+highly detailed information but still keep the trace short enough and focused
+around the interesting event. The emitted tracepoint event also serves as an
+entry point when analysing the trace either manually or with
+[LTTng-analyses](https://github.com/lttng-analyses).
+
+This project exposes the `latency-tracker` API to other kernel modules, but
+also comes with a list of ready-to-use trackers (source code in
+[`examples`](examples/).
+
+Installation requirements
+-------------------------
+  - Linux kernel starting at 3.12 (or 3.10 in RHEL7)
   - Linux kernel headers (`linux-headers-generic` on ubuntu)
   - gcc and make
 
@@ -38,36 +61,46 @@ On Ubuntu:
 ```
 apt-get update
 apt-get install git gcc make linux-headers-generic
-git clone https://github.com/jdesfossez/latency_tracker.git
+git clone https://github.com/efficios/latency-tracker.git
 cd latency_tracker
 make
+```
+
+Usage
+-----
+
+The `latency_tracker.ko` is required for all trackers it is the base
+architecture. Each tracker is compiled as its own module:
+`latency_tracker_$TRACKER.ko`. When a tracker is loaded in memory, it can be
+configured through `debugfs`.
+
+```
+insmod latency_tracker.ko
+insmod latency_tracker_$TRACKER.ko
+ls /sys/kernel/debug/latency/$TRACKER
 ```
 
 Implemented modules
 -------------------
 
 Here is a list and the description of the examples ready to run (in the
-[`examples/`] directory.  For all these examples, the threshold and timeout
-parameters can be controlled at run-time in
-/sys/module/<module_name>/parameters/usec_{treshold|timeout}`.
+[`examples/`] directory.
 
-All of these examples require first that the `latency_tracker.ko` module is loaded
-(`insmod latency_tracker.ko`).
 
 ### Wakeup latency
 
 Measure the delay between the time a task has been woken up and the time it
 actually runs. When the delay is higher than the specified threshold (5 usec by
-default), a tracepoint is emitted (`wakeup_latency`).
+default), a tracepoint is emitted (`latency_tracker_wakeup`).
 Example with ftrace (works also with LTTng, see below for the configuration):
 
 ```
 # insmod latency_tracker.ko
 # insmod latency_tracker_wakeup.ko
 # echo 1 > /sys/kernel/debug/tracing/tracing_on
-# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/wakeup_latency/enable 
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/latency_tracker_wakeup/enable 
 # cat /sys/kernel/debug/tracing/trace_pipe
-rsyslogd   [001] d...   171.919230: wakeup_latency: comm=in:imklog, pid=412, delay=1496644, flag=0
+rsyslogd   [001] d...   171.919230: latency_tracker_wakeup: comm=in:imklog, pid=412, delay=1496644, flag=0
 ```
 
 ###  Offcpu latency
@@ -81,10 +114,10 @@ Example with ftrace (works also with LTTng, see below for the configuration):
 # insmod latency_tracker.ko
 # insmod latency_tracker_offcpu.ko
 # echo 1 > /sys/kernel/debug/tracing/tracing_on
-# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/offcpu_sched_switch/enable
-# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/offcpu_sched_wakeup/enable
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/latency_tracker_offcpu_sched_switch/enable
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/latency_tracker_offcpu_sched_wakeup/enable
 # cat /sys/kernel/debug/tracing/trace_pipe
-          <idle>-0     [002] dNh.   446.936781: offcpu_sched_wakeup: waker_comm=swapper/2 (0), wakee_comm=rcuos/1 (18), wakee_offcpu_delay=9999903039, flag=0, waker_stack=ttwu_do_wakeup+0xe2/0x100
+          <idle>-0     [002] dNh.   446.936781: latency_tracker_offcpu_sched_wakeup: waker_comm=swapper/2 (0), wakee_comm=rcuos/1 (18), wakee_offcpu_delay=9999903039, flag=0, waker_stack=ttwu_do_wakeup+0xe2/0x100
 ttwu_do_activate.constprop.112+0x66/0x70
 sched_ttwu_pending+0x4f/0x70
 scheduler_ipi+0x5b/0x170
@@ -93,7 +126,7 @@ reschedule_interrupt+0x6d/0x80
 default_idle+0x23/0xe0
 arch_cpu_idle+0xf/0x20
 cpuidle_idle_call+0xce
-          <idle>-0     [002] d...   446.936841: offcpu_sched_switch: comm=rcuos/1, pid=18, delay=9999959521, flag=0, stack=schedule+0x29/0x70
+          <idle>-0     [002] d...   446.936841: latency_tracker_offcpu_sched_switch: comm=rcuos/1, pid=18, delay=9999959521, flag=0, stack=schedule+0x29/0x70
 nocb_follower_wait+0xa2/0xf0
 rcu_nocb_kthread+0x3d/0x190
 kthread+0xc9/0xe0
@@ -113,10 +146,10 @@ Example with ftrace (works also with LTTng, see below for the configuration):
 # insmod latency_tracker_syscalls.ko
 # echo 1 > /sys/module/latency_tracker_syscalls/parameters/watch_all
 # echo 1 > /sys/kernel/debug/tracing/tracing_on
-# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/syscall_latency/enable
-# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/syscall_latency_stack/enable
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/latency_tracker_syscall/enable
+# echo 1 > /sys/kernel/debug/tracing/events/latency_tracker/latency_tracker_syscall_stack/enable
 # cat /sys/kernel/debug/tracing/trace_pipe # example with a "sync" process that is blocked in the kernel
-     kworker/3:2-28326 [003] d... 81136.470321: syscall_latency_stack: comm=sync, pid=32224, start_ts=81106437283881, delay=8559610219 flag=0, stack=_cond_resched+0x29/0x40
+     kworker/3:2-28326 [003] d... 81136.470321: latency_tracker_syscall_stack: comm=sync, pid=32224, start_ts=81106437283881, delay=8559610219 flag=0, stack=_cond_resched+0x29/0x40
 write_cache_pages+0x283/0x480
 generic_writepages+0x40/0x60
 do_writepages+0x1e/0x40
@@ -127,7 +160,7 @@ iterate_bdevs+0xd9/0x120
 sys_sync+0x63/0x90
 tracesys
 
-     ksoftirqd/0-3     [000] d... 81136.471039: syscall_latency_stack: comm=sync, pid=32224, start_ts=81106437283881, delay=8560313476 flag=0, stack=io_schedule+0x9d/0x140
+     ksoftirqd/0-3     [000] d... 81136.471039: latency_tracker_syscall_stack: comm=sync, pid=32224, start_ts=81106437283881, delay=8560313476 flag=0, stack=io_schedule+0x9d/0x140
 sleep_on_page+0xe/0x20
 __wait_on_bit+0x62/0x90
 wait_on_page_bit+0x7f/0x90
@@ -138,7 +171,7 @@ iterate_bdevs+0xd9/0x120
 sys_sync+0x71/0x90
 tracesys+0xe1/0xe6
 
-          <idle>-0     [001] d... 81136.471234: syscall_latency_stack: comm=rngd, pid=1937, start_ts=81113031566114, delay=1966228144 flag=0, stack=schedule+0x29/0x70
+          <idle>-0     [001] d... 81136.471234: latency_tracker_syscall_stack: comm=rngd, pid=1937, start_ts=81113031566114, delay=1966228144 flag=0, stack=schedule+0x29/0x70
 schedule_hrtimeout_range_clock+0x14d/0x170
 schedule_hrtimeout_range+0x13/0x20
 poll_schedule_timeout+0x49/0x70
@@ -147,7 +180,7 @@ SyS_poll+0x65/0x100
 tracesys+0xe1/0xe6
 
 [...]
-            sync-32224 [000] d... 81136.471297: syscall_latency: comm=sync, pid=32224, start_ts=81106437283881, delay=8560621068
+            sync-32224 [000] d... 81136.471297: latency_tracker_syscall: comm=sync, pid=32224, start_ts=81106437283881, delay=8560621068
 ```
 
 
@@ -157,7 +190,8 @@ Classify the I/O requests at various level (syscall, FS, I/O scheduler and
 block device) into buckets of latency to give a quick overview of the current
 I/O activity and latency. Every time the data is output, the counters are
 reset, so it is possible to accurately measure what happened between 2 commands
-in terms of I/O, or just let it run and output the files once a day.
+in terms of I/O, or just let it run and output periodically to get a profile of
+the activity of a machine.
 
 [Video demo](http://ju.klipix.org/demo-latency_tracker.ogv)
 
@@ -294,11 +328,12 @@ lttng destroy
 
 Example output:
 
-```
-[16:04:02.378122496] (+0.000030737) trusty wakeup_latency: { cpu_id = 1 }, { pid = 7, delay = 21239915, timeout = 0 }
-[16:04:13.029794374] (+10.651671878) trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7668496, delay = 6486352 }
-[16:04:13.029836068] (+0.000041694) trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7669504, delay = 6531005 }
-```
+``` [16:04:02.378122496] (+0.000030737) trusty wakeup_latency: { cpu_id = 1 },
+{ pid = 7, delay = 21239915, timeout = 0 } [16:04:13.029794374] (+10.651671878)
+trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector =
+7668496, delay = 6486352 } [16:04:13.029836068] (+0.000041694) trusty
+block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7669504,
+delay = 6531005 } ```
 
 Integration with LTTng snapshots
 --------------------------------
@@ -380,5 +415,5 @@ Mathieu Desnoyers.
 Final words
 -----------
 
-I hope you enjoy this module, please remember it is a work in progress so all
+We hope you enjoy this module, please remember it is a work in progress so all
 the feedback is really appreciated and try not to break your system !
