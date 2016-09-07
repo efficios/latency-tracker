@@ -35,6 +35,7 @@
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
+#include "../wrapper/lt_probe.h"
 #include "../tracker_debugfs.h"
 
 #include <trace/events/latency_tracker.h>
@@ -108,8 +109,7 @@ void extract_stack(struct task_struct *p, char *stacktxt, int skip)
 	}
 }
 
-static
-void probe_core_critical_timing_hit(void *ignore, unsigned long ip,
+LT_PROBE_DEFINE(core_critical_timing_hit, unsigned long ip,
 		unsigned long parent_ip, unsigned long flags, int preempt_cnt,
 		cycles_t delta_ns)
 {

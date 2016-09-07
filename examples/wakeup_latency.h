@@ -67,12 +67,4 @@ struct file_operations wakeup_tracker_fops = {
 	.poll = tracker_proc_poll,
 };
 
-DECLARE_TRACE(sched_wakeup,
-	TP_PROTO(struct task_struct *p, int success),
-	TP_ARGS(p, success));
-
-DECLARE_TRACE(sched_switch,
-	TP_PROTO(struct task_struct *prev, struct task_struct *next),
-	TP_ARGS(prev, next));
-
 #endif /* _TP_WAKEUP_LATENCY_H */

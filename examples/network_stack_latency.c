@@ -50,6 +50,7 @@
 #include "../latency_tracker.h"
 #include "../wrapper/kallsyms.h"
 #include "../wrapper/tracepoint.h"
+#include "../wrapper/lt_probe.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -126,8 +127,7 @@ void net_cb(struct latency_tracker_event_ctx *ctx)
 			cb_flag, cb_out_id);
 }
 
-static
-void probe_netif_receive_skb(void *ignore, struct sk_buff *skb)
+LT_PROBE_DEFINE(netif_receive_skb, struct sk_buff *skb)
 {
 	struct netkey key;
 	enum latency_tracker_event_in_ret ret;
@@ -151,8 +151,7 @@ void probe_netif_receive_skb(void *ignore, struct sk_buff *skb)
 	}
 }
 
-static
-void probe_skb_copy_datagram_iovec(void *ignore, struct sk_buff *skb, int len)
+LT_PROBE_DEFINE(skb_copy_datagram_iovec, struct sk_buff *skb, int len)
 {
 	struct netkey key;
 
@@ -168,8 +167,7 @@ void probe_skb_copy_datagram_iovec(void *ignore, struct sk_buff *skb, int len)
 			NET_EXIT_COPY_IOVEC, 0);
 }
 
-static
-void probe_consume_skb(void *ignore, struct sk_buff *skb)
+LT_PROBE_DEFINE(consume_skb, struct sk_buff *skb)
 {
 	struct netkey key;
 
@@ -185,8 +183,7 @@ void probe_consume_skb(void *ignore, struct sk_buff *skb)
 			NET_EXIT_CONSUME, 0);
 }
 
-static
-void probe_kfree_skb(void *ignore, struct sk_buff *skb, void *location)
+LT_PROBE_DEFINE(kfree_skb, struct sk_buff *skb, void *location)
 {
 	struct netkey key;
 

@@ -32,6 +32,7 @@
 #include "block_latency_tp.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
+#include "../wrapper/lt_probe.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -146,8 +147,7 @@ void rq_to_key(struct blkkey *key, struct request *rq)
 	key->dev = rq->rq_disk ? disk_devt(rq->rq_disk) : 0;
 }
 
-static
-void probe_block_rq_issue(void *ignore, struct request_queue *q,
+LT_PROBE_DEFINE(block_rq_issue, struct request_queue *q,
 		struct request *rq)
 {
 	struct blkkey key;
@@ -175,8 +175,7 @@ void probe_block_rq_issue(void *ignore, struct request_queue *q,
 	}
 }
 
-static
-void probe_block_rq_complete(void *ignore, struct request_queue *q,
+LT_PROBE_DEFINE(block_rq_complete, struct request_queue *q,
 		struct request *rq, unsigned int nr_bytes)
 {
 	struct blkkey key;

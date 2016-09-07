@@ -43,6 +43,7 @@
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
+#include "../wrapper/lt_probe.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -190,9 +191,13 @@ end:
 	rcu_read_unlock();
 }
 
-static
-void probe_sched_switch(void *ignore, struct task_struct *prev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+LT_PROBE_DEFINE(sched_switch, bool preempt, struct task_struct *prev,
 		struct task_struct *next)
+#else
+LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
+		struct task_struct *next)
+#endif
 {
 	struct schedkey key;
 	enum latency_tracker_event_in_ret ret;
@@ -218,8 +223,12 @@ end:
 	rcu_read_unlock();
 }
 
-static
-void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0) || \
+	LT_RT_KERNEL_RANGE(4,1,10,11, 4,2,0,0))
+LT_PROBE_DEFINE(sched_waking, struct task_struct *p)
+#else
+LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
+#endif
 {
 	struct schedkey key;
 	char stacktxt_waker[MAX_STACK_TXT];
@@ -323,8 +332,8 @@ int __init offcpu_init(void)
 			probe_sched_switch, NULL);
 	WARN_ON(ret);
 
-	ret = lttng_wrapper_tracepoint_probe_register("sched_wakeup",
-			probe_sched_wakeup, NULL);
+	ret = lttng_wrapper_tracepoint_probe_register("sched_waking",
+			probe_sched_waking, NULL);
 	WARN_ON(ret);
 
 	goto end;
@@ -344,8 +353,8 @@ void __exit offcpu_exit(void)
 
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("sched_wakeup",
-			probe_sched_wakeup, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("sched_waking",
+			probe_sched_waking, NULL);
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
 	offcpu_priv = latency_tracker_get_priv(tracker);

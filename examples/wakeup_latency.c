@@ -43,6 +43,8 @@
 #include "wakeup_latency.h"
 #include "../latency_tracker.h"
 #include "../wrapper/tracepoint.h"
+#include "../wrapper/lt_probe.h"
+#include "../wrapper/trace-clock.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -118,8 +120,12 @@ end:
 	return;
 }
 
-static
-void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0) || \
+	LT_RT_KERNEL_RANGE(4,1,10,11, 4,2,0,0))
+LT_PROBE_DEFINE(sched_waking, struct task_struct *p)
+#else
+LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
+#endif
 {
 	struct schedkey key;
 	int i;
@@ -150,9 +156,13 @@ void probe_sched_wakeup(void *ignore, struct task_struct *p, int success)
 	}
 }
 
-static
-void probe_sched_switch(void *ignore, struct task_struct *prev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+LT_PROBE_DEFINE(sched_switch, bool preempt, struct task_struct *prev,
 		struct task_struct *next)
+#else
+LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
+		struct task_struct *next)
+#endif
 {
 	struct schedkey key;
 
@@ -195,8 +205,8 @@ int __init wakeup_latency_init(void)
 	if (ret)
 		goto error;
 
-	ret = lttng_wrapper_tracepoint_probe_register("sched_wakeup",
-			probe_sched_wakeup, NULL);
+	ret = lttng_wrapper_tracepoint_probe_register("sched_waking",
+			probe_sched_waking, NULL);
 	WARN_ON(ret);
 
 	ret = lttng_wrapper_tracepoint_probe_register("sched_switch",
@@ -219,8 +229,8 @@ void __exit wakeup_latency_exit(void)
 	uint64_t skipped;
 	struct wakeup_tracker *wakeup_priv;
 
-	lttng_wrapper_tracepoint_probe_unregister("sched_wakeup",
-			probe_sched_wakeup, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("sched_waking",
+			probe_sched_waking, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
 			probe_sched_switch, NULL);
 	tracepoint_synchronize_unregister();

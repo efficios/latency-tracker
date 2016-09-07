@@ -39,6 +39,7 @@
 #include "../wrapper/percpu-defs.h"
 #include "../wrapper/jiffies.h"
 #include "../wrapper/vmalloc.h"
+#include "../wrapper/lt_probe.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -141,8 +142,7 @@ void rq_to_key(struct blk_key_t *key, struct request *rq,
 /*
  * Insert into the I/O scheduler.
  */
-static
-void probe_block_rq_insert(void *ignore, struct request_queue *q,
+LT_PROBE_DEFINE(block_rq_insert, struct request_queue *q,
 		struct request *rq)
 {
 	struct blk_key_t key;
@@ -174,8 +174,7 @@ void probe_block_rq_insert(void *ignore, struct request_queue *q,
 /*
  * Dequeue from the I/O scheduler and send to the disk.
  */
-static
-void probe_block_rq_issue(void *ignore, struct request_queue *q,
+LT_PROBE_DEFINE(block_rq_issue, struct request_queue *q,
 		struct request *rq)
 {
 	struct blk_key_t key;
@@ -341,8 +340,7 @@ void update_hist(struct latency_tracker_event *s, enum io_type t,
 	spin_unlock_irqrestore(&h->lock, flags);
 }
 
-static
-void probe_block_rq_complete(void *ignore, struct request_queue *q,
+LT_PROBE_DEFINE(block_rq_complete, struct request_queue *q,
 		struct request *rq, unsigned int nr_bytes)
 {
 	struct blk_key_t key;
@@ -449,9 +447,7 @@ int io_syscall(long id)
 	return -1;
 }
 
-static
-void probe_syscall_enter(void *ignore, struct pt_regs *regs,
-		long id)
+LT_PROBE_DEFINE(syscall_enter, struct pt_regs *regs, long id)
 {
 	struct task_struct* task = current;
 	struct syscall_key_t syscall_key;
@@ -480,8 +476,7 @@ void probe_syscall_enter(void *ignore, struct pt_regs *regs,
 	}
 }
 
-static
-void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
+LT_PROBE_DEFINE(syscall_exit, struct pt_regs *regs, long ret)
 {
 	struct syscall_key_t key;
 	struct latency_tracker_event *s;

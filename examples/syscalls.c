@@ -43,6 +43,7 @@
 #include "../wrapper/vmalloc.h"
 #include "../wrapper/syscall_name.h"
 #include "../wrapper/trace-clock.h"
+#include "../wrapper/lt_probe.h"
 
 #include <trace/events/latency_tracker.h>
 
@@ -269,8 +270,7 @@ end:
 	return;
 }
 
-static
-void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
+LT_PROBE_DEFINE(syscall_enter, struct pt_regs *regs, long id)
 {
 	struct task_struct* task = current;
 	struct process_key_t process_key;
@@ -299,8 +299,7 @@ void probe_syscall_enter(void *__data, struct pt_regs *regs, long id)
 			1, (void *) id);
 }
 
-static
-void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
+LT_PROBE_DEFINE(syscall_exit, struct pt_regs *regs, long ret)
 {
 	struct sched_key_t key;
 
@@ -311,8 +310,7 @@ void probe_syscall_exit(void *__data, struct pt_regs *regs, long ret)
 	latency_tracker_event_out(tracker, NULL, &key, sizeof(key), 0, 0);
 }
 
-static
-void probe_sched_process_exit(void *__data, struct task_struct *p)
+LT_PROBE_DEFINE(sched_process_exit, struct task_struct *p)
 {
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
@@ -323,9 +321,13 @@ void probe_sched_process_exit(void *__data, struct task_struct *p)
 	}
 }
 
-static
-void probe_sched_switch(void *ignore, struct task_struct *prev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+LT_PROBE_DEFINE(sched_switch, bool preempt, struct task_struct *prev,
 		struct task_struct *next)
+#else
+LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
+		struct task_struct *next)
+#endif
 {
 	struct task_struct* task = next;
 	struct sched_key_t sched_key;
