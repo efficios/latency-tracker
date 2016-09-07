@@ -1,5 +1,5 @@
-#ifndef _LTTNG_WRAPPER_HT_BASEHT_H
-#define _LTTNG_WRAPPER_HT_BASEHT_H
+#ifndef _LTTNG_WRAPPER_HT_URCUHT_H
+#define _LTTNG_WRAPPER_HT_URCUHT_H
 
 /*
  * wrapper/ht-base.h
@@ -256,4 +256,4 @@ void wrapper_ht_unique_check(struct latency_tracker *tracker,
 {
 }
 
-#endif /* _LTTNG_WRAPPER_HT_BASEHT_H */
+#endif /* _LTTNG_WRAPPER_HT_URCUHT_H */

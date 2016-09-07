@@ -27,28 +27,6 @@
 #include "../latency_tracker.h"
 #include "../tracker_private.h"
 
-#if !defined(BASEHT) && !defined(URCUHT)
-#define URCUHT
-#endif
-
-#ifdef BASEHT
-#undef URCUHT
-#include "ht-base.h"
-#else /* BASEHT */
-#if !defined(URCUHT)
-#define URCUHT
-#endif /* !defined(URCUHT) */
 #include "ht-urcuht.h"
-#endif /* BASEHT */
-
-#ifdef COMPILEDEBUG
-/* Just debug warnings */
-#ifdef URCUHT
-#warning Compiling with URCU HT
-#endif
-#ifdef BASEHT
-#warning Compiling with BASEHT
-#endif
-#endif /* COMPILEDEBUG */
 
 #endif /* _LTTNG_WRAPPER_HT_H */
