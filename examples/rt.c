@@ -191,10 +191,9 @@ struct switch_key_t {
 	int pid;
 } __attribute__((__packed__));
 
-#define MAX_COOKIE_SIZE 32
 struct work_begin_key_t {
 	struct generic_key_t p;
-	char cookie[MAX_COOKIE_SIZE];
+	char cookie[LT_MAX_JOBID_SIZE];
 	int cookie_size;
 } __attribute__((__packed__));
 
@@ -1529,39 +1528,28 @@ struct file_operations procname_filter_fops = {
 	.llseek         = default_llseek,
 };
 
-static
-ssize_t write_work_done(struct file *filp, const char __user *ubuf,
-		size_t cnt, loff_t *ppos)
+LT_PROBE_DEFINE(tracker_end, char *tp_data, size_t len)
 {
-	int ret, r;
 	struct latency_tracker_event *event;
 	struct latency_tracker_event_iter iter;
 	struct work_begin_key_t work_begin_key;
 	struct event_data *data;
 	int nr_duplicates = 0;
-	int found = 0;
 
 	//struct tracker_config *cfg = filp->private_data;
 	u64 now = trace_clock_monotonic_wrapper();
 
 	if (!config.out_work_done)
-		return -EINVAL;
+		return;
 
-	/*
-	 * The data is unused for now, but it might become an ID
-	 * someday on which we could apply filters.
-	 */
-	r = min_t(unsigned int, cnt, sizeof(work_begin_key.cookie));
 	memset(&work_begin_key.cookie, 0, sizeof(work_begin_key.cookie));
-	ret = copy_from_user(&work_begin_key.cookie, ubuf, r);
-	if (ret)
-		return ret;
+	memcpy(&work_begin_key.cookie, tp_data, len);
 
 	/*
 	 * If we got \n or \0, we don't expect to find a cookie created
 	 * by work_begin, so lookup the current process instead.
 	 */
-	if (r == 1 && (work_begin_key.cookie[0] == '\n' ||
+	if (len == 1 && (work_begin_key.cookie[0] == '\n' ||
 				work_begin_key.cookie[0] == '\0')) {
 		struct switch_key_t switch_key;
 
@@ -1578,7 +1566,6 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 		event = latency_tracker_get_event_by_key(tracker, &switch_key,
 				sizeof(switch_key), &iter);
 		while (event) {
-			found++;
 			append_delta_ts(event, KEY_WORK_DONE, "to work_done", now, 0,
 					NULL, 0);
 			latency_tracker_event_out(tracker, event, NULL, 0,
@@ -1602,16 +1589,13 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 				break;
 			}
 		}
-		if (!found)
-			return -ENOENT;
 	} else {
 		work_begin_key.p.type = KEY_WORK_BEGIN;
-		work_begin_key.cookie_size = r;
+		work_begin_key.cookie_size = len;
 
 		event = latency_tracker_get_event_by_key(tracker, &work_begin_key,
 				sizeof(work_begin_key), &iter);
 		while (event) {
-			found++;
 			append_delta_ts(event, KEY_WORK_DONE, "to work_done", now, 0,
 					NULL, 0);
 			latency_tracker_event_out(tracker, event, NULL, 0,
@@ -1635,18 +1619,10 @@ ssize_t write_work_done(struct file *filp, const char __user *ubuf,
 				break;
 			}
 		}
-		if (!found)
-			return -ENOENT;
 	}
 
-	return cnt;
+	return;
 }
-
-static const
-struct file_operations work_done_fops = {
-	.open           = latency_open_generic,
-	.write          = write_work_done,
-};
 
 /*
  * This should be called from a task that has been woken up in the
@@ -1654,33 +1630,26 @@ struct file_operations work_done_fops = {
  * FIXME: what happens if the task was already awake when the interrupt
  * arrived ?
  */
-static
-ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
-		size_t cnt, loff_t *ppos)
+LT_PROBE_DEFINE(tracker_begin, char *tp_data, size_t len)
 {
-	int ret, r;
 	struct switch_key_t switch_key;
 	struct work_begin_key_t work_begin_key;
 	struct latency_tracker_event *event_in, *event_out;
 	struct latency_tracker_event_iter iter;
 	struct event_data *data;
-	int found = 0;
 	int nr_duplicates = 0;
 	u64 now = trace_clock_monotonic_wrapper();
 
-	r = min_t(unsigned int, cnt, sizeof(work_begin_key.cookie));
 	memset(&work_begin_key.cookie, 0, sizeof(work_begin_key.cookie));
-	ret = copy_from_user(&work_begin_key.cookie, ubuf, r);
-	if (ret)
-		return ret;
+	memcpy(&work_begin_key.cookie, tp_data, len);
 
 	/*
 	 * Cookies must be strings, just a "echo > work_begin" is not
 	 * accepted, empty strings are valid for work_done.
 	 */
-	if (r == 1 && (work_begin_key.cookie[0] == '\n' ||
+	if (len == 1 && (work_begin_key.cookie[0] == '\n' ||
 				work_begin_key.cookie[0] == '\0'))
-		return -EINVAL;
+		return;
 
 	/*
 	 * The current process should be tracked otherwise we can't link
@@ -1694,13 +1663,11 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 		switch_key.cpu = -1;
 
 	work_begin_key.p.type = KEY_WORK_BEGIN;
-	work_begin_key.cookie_size = r;
+	work_begin_key.cookie_size = len;
 
 	event_in = latency_tracker_get_event_by_key(tracker, &switch_key,
 			sizeof(switch_key), &iter);
 	while (event_in) {
-		found++;
-
 		/*
 		 * From now on, only a work_done event can complete this branch.
 		 */
@@ -1712,7 +1679,7 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 			set_good_branch(data);
 
 			append_delta_ts(event_out, KEY_WORK_BEGIN,
-					"to work_begin", now, r,
+					"to work_begin", now, len,
 					work_begin_key.cookie, 0);
 			latency_tracker_unref_event(event_out);
 		}
@@ -1725,22 +1692,8 @@ ssize_t write_work_begin(struct file *filp, const char __user *ubuf,
 		}
 	}
 
-	/*
-	 * FIXME: we could accept not knowing the origin and at least compute
-	 * the user-space processing-time in case we missed the associated
-	 * interrupt event.
-	 */
-	if (!found)
-		return -ENOENT;
-
-	return cnt;
+	return;
 }
-
-static const
-struct file_operations work_begin_fops = {
-	.open           = latency_open_generic,
-	.write          = write_work_begin,
-};
 
 static
 int setup_debugfs_extras(void)
@@ -1808,16 +1761,6 @@ int setup_debugfs_extras(void)
 
 	file = debugfs_create_int("softirq_filter",
 			S_IRUSR|S_IWUSR, filters_dir, &config.softirq_filter);
-	if (!file)
-		goto error;
-
-	file = debugfs_create_file("work_done", S_IWUSR,
-			actions_dir, &config, &work_done_fops);
-	if (!file)
-		goto error;
-
-	file = debugfs_create_file("work_begin", S_IWUSR,
-			actions_dir, &config, &work_begin_fops);
 	if (!file)
 		goto error;
 
@@ -1914,6 +1857,14 @@ int __init rt_init(void)
 			probe_sched_waking, NULL);
 	WARN_ON(ret);
 
+	ret = lttng_wrapper_tracepoint_probe_register("latency_tracker_begin",
+			probe_tracker_begin, NULL);
+	WARN_ON(ret);
+
+	ret = lttng_wrapper_tracepoint_probe_register("latency_tracker_end",
+			probe_tracker_end, NULL);
+	WARN_ON(ret);
+
 	ret = register_kretprobe(&probe_do_irq);
 	WARN_ON(ret);
 
@@ -1953,6 +1904,10 @@ void __exit rt_exit(void)
 			probe_softirq_entry, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("softirq_exit",
 			probe_softirq_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("latency_tracker_begin",
+			probe_tracker_begin, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("latency_tracker_end",
+			probe_tracker_end, NULL);
 	unregister_kretprobe(&probe_do_irq);
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
