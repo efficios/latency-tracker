@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <linux/module.h>
 #include <linux/debugfs.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
@@ -100,9 +101,14 @@ void latency_tracker_debugfs_wakeup_pipe(struct latency_tracker *tracker)
 static
 int open_wakeup_pipe(struct inode *inode, struct file *filp)
 {
+	int ret;
 	struct latency_tracker *tracker = inode->i_private;
+
 	filp->private_data = tracker;
 	atomic_inc(&tracker->wakeup_readers);
+	ret = try_module_get(THIS_MODULE);
+	if (!ret)
+		return -1;
 
 	return 0;
 }
@@ -112,6 +118,7 @@ int release_wakeup_pipe(struct inode *inode, struct file *filp)
 {
 	struct latency_tracker *tracker = filp->private_data;
 	atomic_dec(&tracker->wakeup_readers);
+	module_put(THIS_MODULE);
 
 	return 0;
 }
