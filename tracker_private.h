@@ -13,7 +13,6 @@
 //#include "rculfhash-internal.h"
 //#include "urcu/wfcqueue.h"
 
-#ifndef OLDFREELIST
 struct numa_pool {
 	struct llist_head llist;
 };
@@ -23,7 +22,6 @@ struct per_cpu_ll {
 	struct numa_pool *pool;
 	struct llist_head llist;
 };
-#endif
 
 struct latency_tracker {
 	/*  basic kernel HT */
@@ -64,15 +62,11 @@ struct latency_tracker {
 	uint64_t tracked_count;
 	/* How many event could not be tracked due to an empty free list. */
 	uint64_t skipped_count;
-#ifdef OLDFREELIST
-	struct list_head events_free_list;
-#else
 	int per_cpu_alloc;
 	int nr_cpus;
 	int numa_node_max;
 	struct per_cpu_ll __percpu *per_cpu_ll;
 	struct numa_pool *per_node_pool;
-#endif
 	/*
 	 * Is the tracker active ?
 	 * When creating a tracker, this is set to 0 and needs to be set to 1
@@ -197,10 +191,6 @@ struct latency_tracker_event {
 	/* basic kernel HT */
 	struct hlist_node hlist;
 #endif
-#if defined(OLDFREELIST)
-	/* Node in the spin_locked freelist. */
-	struct list_head list;
-#endif
 	/* Node in the LL freelist. */
 	struct llist_node llist;
 	/* Node in the URCU HT */
@@ -249,9 +239,6 @@ struct latency_tracker_event {
 	struct latency_tracker_key tkey;
 };
 
-#if defined(OLDFREELIST)
-void latency_tracker_event_destroy(struct kref *kref);
-#endif
 void __latency_tracker_event_destroy(struct kref *kref);
 
 #endif /* _TRACKER_PRIVATE_H */

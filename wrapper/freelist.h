@@ -27,23 +27,6 @@
 #include "../latency_tracker.h"
 #include "../tracker_private.h"
 
-#if !defined(LLFREELIST) && !defined(OLDFREELIST)
-#define LLFREELIST
-#endif
-
-#ifdef LLFREELIST
-#undef OLDFREELIST
 #include "freelist-ll.h"
-#else /* LLFREELIST */
-#include "freelist-base.h"
-#endif /* LLFREELIST */
-
-#ifdef COMPILEDEBUG
-#ifdef LLFREELIST
-#warning Compiling with LLFREELIST
-#else
-#warning Compiling with basic linked-list
-#endif
-#endif /* COMPILEDEBUG */
 
 #endif /* _LTTNG_WRAPPER_FREELIST_H */
