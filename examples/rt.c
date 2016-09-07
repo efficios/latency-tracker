@@ -459,6 +459,9 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	struct do_irq_key_t key;
 	u64 now;
 
+	if (!latency_tracker_get_tracking_on(tracker))
+		return 0;
+
 	if (!config.irq_tracing)
 		return 0;
 
@@ -488,6 +491,9 @@ static
 int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	struct do_irq_key_t key;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return 0;
 
 	if (!config.irq_tracing)
 		return 0;
