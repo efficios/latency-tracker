@@ -1867,6 +1867,7 @@ int __init rt_init(void)
 
 	ret = register_kretprobe(&probe_do_irq);
 	WARN_ON(ret);
+	ret = 0;
 
 	goto end;
 
