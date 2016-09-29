@@ -111,10 +111,19 @@ __save_stack_address(void *data, unsigned long addr, bool reliable, bool nosched
                 trace->entries[trace->nr_entries++] = addr;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0))
+static int save_stack_address(void *data, unsigned long addr, int reliable)
+{
+        __save_stack_address(data, addr, reliable, false);
+	return 0;
+}
+#else
 static void save_stack_address(void *data, unsigned long addr, int reliable)
 {
-        return __save_stack_address(data, addr, reliable, false);
+	__save_stack_address(data, addr, reliable, false);
 }
+
+#endif
 
 static const struct stacktrace_ops backtrace_ops = {
         .stack                  = print_trace_stack,
