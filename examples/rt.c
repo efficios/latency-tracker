@@ -668,11 +668,54 @@ end:
 	return;
 }
 
+#ifndef CONFIG_KRETPROBES
+static
+void irq_handler_entry_no_do_irq(int irq)
+{
+	enum latency_tracker_event_in_ret ret;
+	struct latency_tracker_event *s;
+	struct hardirq_key_t key;
+	u64 now;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return;
+
+	if (!config.irq_tracing)
+		return;
+
+	now = trace_clock_monotonic_wrapper();
+	key.p.type = KEY_HARDIRQ;
+	key.cpu = smp_processor_id();
+	ret = _latency_tracker_event_in_get(tracker, &key, sizeof(key), 1, now,
+			NULL, &s);
+	if (ret != LATENCY_TRACKER_OK)
+		return;
+	WARN_ON_ONCE(!s);
+
+	if (config.text_breakdown) {
+		/* fake do_IRQ text entry */
+		append_delta_ts(s, KEY_DO_IRQ, "irq_handler_entry",
+				now, 0, NULL, 0);
+	}
+	latency_tracker_unref_event(s);
+
+#ifdef DEBUG
+	trace_printk("%llu irq_handler_entry_no_do_irq (cpu %u)\n",
+			trace_clock_monotonic_wrapper(), key.cpu);
+#endif
+	return;
+}
+#endif /* CONFIG_KRETPROBES */
+
 LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 {
 	struct do_irq_key_t do_irq_key;
 	struct hardirq_key_t hardirq_key;
 	struct latency_tracker_event *event_in, *event_out;
+
+#ifndef CONFIG_KRETPROBES
+	return irq_handler_entry_no_do_irq(irq);
+#endif
 
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
@@ -1799,8 +1842,10 @@ int __init rt_init(void)
 			probe_tracker_end, NULL);
 	WARN_ON(ret);
 
+#ifdef CONFIG_KRETPROBES
 	ret = register_kretprobe(&probe_do_irq);
 	WARN_ON(ret);
+#endif
 	ret = 0;
 
 	goto end;
@@ -1843,7 +1888,9 @@ void __exit rt_exit(void)
 			probe_tracker_begin, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("latency_tracker_end",
 			probe_tracker_end, NULL);
+#ifdef CONFIG_KRETPROBES
 	unregister_kretprobe(&probe_do_irq);
+#endif
 	tracepoint_synchronize_unregister();
 	skipped = latency_tracker_skipped_count(tracker);
 	tracked = latency_tracker_tracked_count(tracker);
