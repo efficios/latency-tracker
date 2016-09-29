@@ -305,6 +305,13 @@
 /* Value of the end pointer. Should not interact with flags. */
 #define END_VALUE		NULL
 
+/*
+ * Since commit d7127b5e5fa0551be21b86640f1648b224e36d43 in the
+ * kernel, a check makes sure p is a pointer, this breaks the code
+ * in this file.
+ */
+#undef lockless_dereference
+
 #if !defined(lockless_dereference)
 /* Copied from include/linux/rcupdate.h 3.18+ */
 #define lockless_dereference(p) \
