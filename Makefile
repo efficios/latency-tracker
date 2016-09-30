@@ -43,6 +43,9 @@ obj-m += latency_tracker_rt.o
 
 obj-m += latency_tracker_begin_end.o
 
+latency_tracker_ttfb-objs := examples/ttfb.o wrapper/trace-clock.o
+obj-m += latency_tracker_ttfb.o
+
 else # KERNELRELEASE
 
 # This part of the Makefile is used when the 'make' command is run in the
