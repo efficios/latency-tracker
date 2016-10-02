@@ -27,6 +27,7 @@
 #include <linux/stacktrace.h>
 #include <linux/fdtable.h>
 #include <linux/tcp.h>
+#include <linux/ipv6.h>
 #include <asm/syscall.h>
 #include <asm/stacktrace.h>
 #include "../latency_tracker.h"
@@ -79,6 +80,23 @@ void ipv4_str(unsigned long ip, char *str, uint16_t port)
 }
 
 static
+void ipv6_str(const u8 *ip, char *str, uint16_t port)
+{
+	snprintf(str, 47,
+		"[%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:"
+		"%02x%02x:%02x%02x]:%u\n",
+			ip[0], ip[1],
+			ip[2], ip[3],
+			ip[4], ip[5],
+			ip[6], ip[7],
+			ip[8], ip[9],
+			ip[10], ip[11],
+			ip[12], ip[13],
+			ip[14], ip[15],
+			port);
+}
+
+static
 int get_peer_str(int fd, char *s_str, char *d_str)
 {
 	struct files_struct *files = current->files;
@@ -87,6 +105,7 @@ int get_peer_str(int fd, char *s_str, char *d_str)
 	struct fd f;
 	int ret = -1;
 	struct inet_sock *inet;
+	struct ipv6_pinfo *inet6;
 
 	spin_lock(&files->file_lock);
 	f = fdget(fd);
@@ -97,9 +116,19 @@ int get_peer_str(int fd, char *s_str, char *d_str)
 	if (!sock)
 		goto end_put;
 
+	inet6 = inet6_sk(sock->sk);
 	inet = inet_sk(sock->sk);
-	ipv4_str(ntohl(inet->inet_saddr), s_str, ntohs(inet->inet_sport));
-	ipv4_str(ntohl(inet->inet_daddr), d_str, ntohs(inet->inet_dport));
+	if (sock->sk->sk_family == AF_INET6) {
+		ipv6_str(sock->sk->sk_v6_daddr.s6_addr, s_str,
+				ntohs(inet->inet_sport));
+		ipv6_str(sock->sk->sk_v6_rcv_saddr.s6_addr, d_str,
+				ntohs(inet->inet_dport));
+	} else if (sock->sk->sk_family == AF_INET) {
+		ipv4_str(ntohl(inet->inet_saddr), s_str,
+				ntohs(inet->inet_sport));
+		ipv4_str(ntohl(inet->inet_daddr), d_str,
+				ntohs(inet->inet_dport));
+	}
 	ret = 0;
 
 end_put:
@@ -119,7 +148,7 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 	unsigned int fd = latency_tracker_event_ctx_get_cb_out_id(ctx);
 	enum latency_tracker_cb_flag cb_flag =
 		latency_tracker_event_ctx_get_cb_flag(ctx);
-	char s_str[22], d_str[22];
+	char s_str[47], d_str[47];
 	u64 delay;
 
 	if (cb_flag != LATENCY_TRACKER_CB_NORMAL)
