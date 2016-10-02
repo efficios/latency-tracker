@@ -84,7 +84,7 @@ void ipv6_str(const u8 *ip, char *str, uint16_t port)
 {
 	snprintf(str, 47,
 		"[%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:"
-		"%02x%02x:%02x%02x]:%u\n",
+		"%02x%02x:%02x%02x]:%u",
 			ip[0], ip[1],
 			ip[2], ip[3],
 			ip[4], ip[5],
@@ -128,6 +128,9 @@ int get_peer_str(int fd, char *s_str, char *d_str)
 				ntohs(inet->inet_sport));
 		ipv4_str(ntohl(inet->inet_daddr), d_str,
 				ntohs(inet->inet_dport));
+	} else {
+		ret = -1;
+		goto end_put;
 	}
 	ret = 0;
 
@@ -150,8 +153,12 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 		latency_tracker_event_ctx_get_cb_flag(ctx);
 	char s_str[47], d_str[47];
 	u64 delay;
+	int ret;
 
 	if (cb_flag != LATENCY_TRACKER_CB_NORMAL)
+		return;
+
+	if (fd == -1U)
 		return;
 
 	delay = (end_ts - start_ts) / 1000;
@@ -159,7 +166,10 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 	usec_threshold = delay;
 #endif
 
-	get_peer_str(fd, s_str, d_str);
+	ret = get_peer_str(fd, s_str, d_str);
+	if (ret)
+		return;
+
 	rcu_read_lock();
 	printk("ttfb: %s (%d), delay = %llu us, %s -> %s\n",
 			current->comm,
@@ -186,6 +196,8 @@ LT_PROBE_DEFINE(syscall_enter, struct pt_regs *regs, long id)
 	struct ttfbkey key;
 	struct file *file;
 	int fd;
+	unsigned int cb_id;
+	unsigned long x;
 
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
@@ -195,14 +207,29 @@ LT_PROBE_DEFINE(syscall_enter, struct pt_regs *regs, long id)
 	case __NR_writev:
 		fd = fd_from_regs(regs);
 		file = fcheck_files(current->files, fd);
+		if (!file)
+			return;
 		key.f_inode = file->f_inode;
+		cb_id = fd;
+		break;
+	case __NR_close:
+	case __NR_shutdown:
+		fd = fd_from_regs(regs);
+		file = fcheck_files(current->files, fd);
+		if (!file)
+			return;
+		x = atomic_long_read(&file->f_count);
+		if (x > 1)
+			return;
+		key.f_inode = file->f_inode;
+		cb_id = -1U;
 		break;
 	default:
 		return;
 	}
 
 	/* Pass the FD as cb_out_id so that it is easy to get in the cb */
-	latency_tracker_event_out(tracker, NULL, &key, sizeof(key), fd, 0);
+	latency_tracker_event_out(tracker, NULL, &key, sizeof(key), cb_id, 0);
 }
 
 LT_PROBE_DEFINE(syscall_exit, struct pt_regs *regs, long ret)
@@ -220,6 +247,8 @@ LT_PROBE_DEFINE(syscall_exit, struct pt_regs *regs, long ret)
 	case __NR_accept:
 	case __NR_accept4:
 		file = fcheck_files(current->files, ret);
+		if (!file)
+			return;
 		key.f_inode = file->f_inode;
 		break;
 	default:
