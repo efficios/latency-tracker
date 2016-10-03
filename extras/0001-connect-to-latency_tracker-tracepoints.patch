@@ -1,4 +1,4 @@
-From e81e2733a1b634577a4dbe502d465401bc241374 Mon Sep 17 00:00:00 2001
+From 2a5fe691e19edbef97d284a894a12b84f54a1365 Mon Sep 17 00:00:00 2001
 From: Julien Desfossez <jdesfossez@efficios.com>
 Date: Mon, 8 Feb 2016 11:20:19 -0500
 Subject: [PATCH lttng-modules] Connect to latency_tracker tracepoints
@@ -16,7 +16,7 @@ Signed-off-by: Julien Desfossez <jdesfossez@efficios.com>
 
 diff --git a/instrumentation/events/lttng-module/latency_tracker.h b/instrumentation/events/lttng-module/latency_tracker.h
 new file mode 100644
-index 0000000..3760062
+index 0000000..3c29045
 --- /dev/null
 +++ b/instrumentation/events/lttng-module/latency_tracker.h
 @@ -0,0 +1,148 @@
@@ -155,11 +155,11 @@ index 0000000..3760062
 +		ctf_integer(pid_t, tid, pid)
 +		ctf_integer(u64, delay, delay)
 +		ctf_integer(int, family, family)
-+		ctf_string(sadd4, saddr4)
-+		ctf_string(sadd6, saddr6)
++		ctf_string(saddr4, saddr4)
++		ctf_string(saddr6, saddr6)
 +		ctf_integer(unsigned int, sport, sport)
-+		ctf_string(dadd4, daddr4)
-+		ctf_string(dadd6, daddr6)
++		ctf_string(daddr4, daddr4)
++		ctf_string(daddr6, daddr6)
 +		ctf_integer(unsigned int, dport, dport)
 +	)
 +)
