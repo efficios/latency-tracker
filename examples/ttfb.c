@@ -126,7 +126,8 @@ int get_peers_data(int fd, int *family, char *saddr4, char *saddr6,
 		*family = AF_INET;
 	} else if (sock->sk->sk_family == AF_INET6) {
 		ipv6_str(sock->sk->sk_v6_daddr.s6_addr, saddr6);
-		ipv6_str(sock->sk->sk_v6_rcv_saddr.s6_addr, daddr6);
+		ipv6_str(sock->sk->__sk_common.skc_v6_rcv_saddr.s6_addr,
+				daddr6);
 		saddr4[0] = '\0';
 		daddr4[0] = '\0';
 		*family = AF_INET6;
