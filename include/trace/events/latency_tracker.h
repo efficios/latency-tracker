@@ -276,6 +276,46 @@ TRACE_EVENT(
 	TP_printk("data=%s, len=%lu", __entry->data,  __entry->len)
    );
 
+TRACE_EVENT(
+	latency_tracker_ttfb,
+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
+		int family, char saddr4[16], char saddr6[40],
+		unsigned int sport, char daddr4[16], char daddr6[40],
+		unsigned int dport),
+	TP_ARGS(comm, pid, delay, family, saddr4, saddr6, sport,
+		daddr4, daddr6, dport),
+	TP_STRUCT__entry(
+		__array(char, comm, TASK_COMM_LEN)
+		__field(int, pid)
+		__field(u64, delay)
+		__field(int, family)
+		__array(char, saddr4, 16)
+		__array(char, saddr6, 40)
+		__field(unsigned int, sport)
+		__array(char, daddr4, 16)
+		__array(char, daddr6, 40)
+		__field(unsigned int, dport)
+		),
+	TP_fast_assign(
+		memcpy(__entry->comm, comm, TASK_COMM_LEN);
+		entry->pid = pid;
+		entry->delay = delay;
+		entry->family = family;
+		memcpy(__entry->saddr4, saddr4, 16);
+		memcpy(__entry->saddr6, saddr6, 40);
+		entry->sport = sport;
+		memcpy(__entry->daddr4, daddr4, 16);
+		memcpy(__entry->daddr6, daddr6, 40);
+		entry->dport = dport;
+		),
+	TP_printk("comm=%s, pid=%d, delay=%llu, family=%d, saddr4=%s, "
+			"saddr6=%s, sport=%u, daddr4=%s, daddr6=%s, dport=%u",
+			__entry->comm,  __entry->pid, __entry->delay,
+			__entry->family, __entry->saddr4, __entry->saddr6,
+			__entry->sport, __entry->daddr4, __entry->daddr6,
+			__entry->dport)
+   );
+
 #endif /* _TRACE_LATENCY_TRACKER_H */
 
 /* this part must be outside protection */

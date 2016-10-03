@@ -69,22 +69,21 @@ static struct latency_tracker *tracker;
 static int cnt = 0;
 
 static
-void ipv4_str(unsigned long ip, char *str, uint16_t port)
+void ipv4_str(unsigned long ip, char *str)
 {
-	snprintf(str, 22, "%lu.%lu.%lu.%lu:%u",
+	snprintf(str, 16, "%lu.%lu.%lu.%lu",
 			ip >> 24,
 			ip >> 16 & 0xFF,
 			ip >> 8 & 0xFF,
-			ip & 0xFF,
-			port);
+			ip & 0xFF);
 }
 
 static
-void ipv6_str(const u8 *ip, char *str, uint16_t port)
+void ipv6_str(const u8 *ip, char *str)
 {
-	snprintf(str, 47,
-		"[%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:"
-		"%02x%02x:%02x%02x]:%u",
+	snprintf(str, 40,
+		"%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:"
+		"%02x%02x:%02x%02x",
 			ip[0], ip[1],
 			ip[2], ip[3],
 			ip[4], ip[5],
@@ -92,12 +91,13 @@ void ipv6_str(const u8 *ip, char *str, uint16_t port)
 			ip[8], ip[9],
 			ip[10], ip[11],
 			ip[12], ip[13],
-			ip[14], ip[15],
-			port);
+			ip[14], ip[15]);
 }
 
 static
-int get_peer_str(int fd, char *s_str, char *d_str)
+int get_peers_data(int fd, int *family, char *saddr4, char *saddr6,
+		unsigned int *sport, char *daddr4, char *daddr6,
+		unsigned int *dport)
 {
 	struct files_struct *files = current->files;
 	struct socket *sock;
@@ -118,20 +118,24 @@ int get_peer_str(int fd, char *s_str, char *d_str)
 
 	inet6 = inet6_sk(sock->sk);
 	inet = inet_sk(sock->sk);
-	if (sock->sk->sk_family == AF_INET6) {
-		ipv6_str(sock->sk->sk_v6_daddr.s6_addr, s_str,
-				ntohs(inet->inet_sport));
-		ipv6_str(sock->sk->sk_v6_rcv_saddr.s6_addr, d_str,
-				ntohs(inet->inet_dport));
-	} else if (sock->sk->sk_family == AF_INET) {
-		ipv4_str(ntohl(inet->inet_saddr), s_str,
-				ntohs(inet->inet_sport));
-		ipv4_str(ntohl(inet->inet_daddr), d_str,
-				ntohs(inet->inet_dport));
+	if (sock->sk->sk_family == AF_INET) {
+		ipv4_str(ntohl(inet->inet_saddr), saddr4);
+		ipv4_str(ntohl(inet->inet_daddr), daddr4);
+		saddr6[0] = '\0';
+		daddr6[0] = '\0';
+		*family = AF_INET;
+	} else if (sock->sk->sk_family == AF_INET6) {
+		ipv6_str(sock->sk->sk_v6_daddr.s6_addr, saddr6);
+		ipv6_str(sock->sk->sk_v6_rcv_saddr.s6_addr, daddr6);
+		saddr4[0] = '\0';
+		daddr4[0] = '\0';
+		*family = AF_INET6;
 	} else {
 		ret = -1;
 		goto end_put;
 	}
+	*sport = ntohs(inet->inet_sport);
+	*dport = ntohs(inet->inet_dport);
 	ret = 0;
 
 end_put:
@@ -151,9 +155,11 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 	unsigned int fd = latency_tracker_event_ctx_get_cb_out_id(ctx);
 	enum latency_tracker_cb_flag cb_flag =
 		latency_tracker_event_ctx_get_cb_flag(ctx);
-	char s_str[47], d_str[47];
+	char saddr4[16], daddr4[16];
+	char saddr6[40], daddr6[40];
+	unsigned int sport = 0, dport = 0;
 	u64 delay;
-	int ret;
+	int family = -1, ret;
 
 	if (cb_flag != LATENCY_TRACKER_CB_NORMAL)
 		return;
@@ -166,16 +172,20 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 	usec_threshold = delay;
 #endif
 
-	ret = get_peer_str(fd, s_str, d_str);
+	ret = get_peers_data(fd, &family, saddr4, saddr6, &sport,
+			daddr4, daddr6, &dport);
 	if (ret)
 		return;
 
 	rcu_read_lock();
+	/*
 	printk("ttfb: %s (%d), delay = %llu us, %s -> %s\n",
 			current->comm,
 			current->pid, delay,
 			s_str, d_str);
-//	trace_latency_tracker_ttfb_sched_switch(p->comm, key->pid, end_ts - start_ts,
+			*/
+	trace_latency_tracker_ttfb(current->comm, current->pid, delay,
+			family, saddr4, saddr6, sport, daddr4, daddr6, dport);
 //			cb_flag, stacktxt);
 	cnt++;
 

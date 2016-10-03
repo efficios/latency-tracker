@@ -55,6 +55,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_critical_timing_stack);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_rt);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_begin);
 EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_end);
+EXPORT_TRACEPOINT_SYMBOL_GPL(latency_tracker_ttfb);
 
 static void latency_tracker_enable_timer(struct latency_tracker *tracker);
 static void latency_tracker_timer_cb(unsigned long ptr);
