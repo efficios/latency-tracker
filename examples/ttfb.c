@@ -254,7 +254,9 @@ LT_PROBE_DEFINE(syscall_exit, struct pt_regs *regs, long ret)
 	id = syscall_get_nr(current, regs);
 
 	switch(id) {
+#ifndef __i386_
 	case __NR_accept:
+#endif
 	case __NR_accept4:
 		file = fcheck_files(current->files, ret);
 		if (!file)
