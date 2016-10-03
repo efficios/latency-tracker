@@ -258,7 +258,7 @@ TRACE_EVENT(
 		memcpy(__entry->data, data, len);
 		entry->len = len;
 		),
-	TP_printk("data=%s, len=%u", __entry->data,  __entry->len)
+	TP_printk("data=%s, len=%zu", __entry->data,  __entry->len)
    );
 
 TRACE_EVENT(
@@ -273,7 +273,7 @@ TRACE_EVENT(
 		memcpy(__entry->data, data, len);
 		entry->len = len;
 		),
-	TP_printk("data=%s, len=%u", __entry->data,  __entry->len)
+	TP_printk("data=%s, len=%zu", __entry->data,  __entry->len)
    );
 
 TRACE_EVENT(
