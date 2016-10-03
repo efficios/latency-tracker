@@ -1,25 +1,25 @@
-From 6c259ca38ce39bed07fea2652d70bb7ee0bd2c51 Mon Sep 17 00:00:00 2001
+From e81e2733a1b634577a4dbe502d465401bc241374 Mon Sep 17 00:00:00 2001
 From: Julien Desfossez <jdesfossez@efficios.com>
 Date: Mon, 8 Feb 2016 11:20:19 -0500
-Subject: [MODULES PATCH] Connect to latency_tracker tracepoints
+Subject: [PATCH lttng-modules] Connect to latency_tracker tracepoints
 
 Signed-off-by: Julien Desfossez <jdesfossez@efficios.com>
 ---
- .../events/lttng-module/latency_tracker.h          | 125 ++++++++++
- instrumentation/events/mainline/latency_tracker.h  | 254 +++++++++++++++++++++
+ .../events/lttng-module/latency_tracker.h          | 148 ++++++++++
+ instrumentation/events/mainline/latency_tracker.h  | 304 +++++++++++++++++++++
  probes/Kbuild                                      |   1 +
  probes/lttng-probe-latency-tracker.c               |  22 ++
- 4 files changed, 402 insertions(+)
+ 4 files changed, 475 insertions(+)
  create mode 100644 instrumentation/events/lttng-module/latency_tracker.h
  create mode 100644 instrumentation/events/mainline/latency_tracker.h
  create mode 100644 probes/lttng-probe-latency-tracker.c
 
 diff --git a/instrumentation/events/lttng-module/latency_tracker.h b/instrumentation/events/lttng-module/latency_tracker.h
 new file mode 100644
-index 0000000..e17e88c
+index 0000000..3760062
 --- /dev/null
 +++ b/instrumentation/events/lttng-module/latency_tracker.h
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,148 @@
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
 +
@@ -38,7 +38,7 @@ index 0000000..e17e88c
 +		ctf_integer(u64, delay, delay)
 +		ctf_integer(unsigned int, flag, flag)
 +	)
-+   )
++)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_offcpu,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
@@ -51,7 +51,7 @@ index 0000000..e17e88c
 +		ctf_integer(unsigned int, flag, flag)
 +		ctf_array_text(char, stack, stack, 256)
 +	)
-+   )
++)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_syscall,
 +	TP_PROTO(char comm[TASK_COMM_LEN],
@@ -63,7 +63,7 @@ index 0000000..e17e88c
 +		ctf_integer(u64, start_ts, start_ts)
 +		ctf_integer(u64, delay, delay)
 +	)
-+   )
++)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_syscall_stack,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid,
@@ -77,7 +77,7 @@ index 0000000..e17e88c
 +		ctf_integer(unsigned int, flag, flag)
 +		ctf_array_text(char, stack, stack, 256)
 +	)
-+   )
++)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_block,
 +	TP_PROTO(dev_t dev, sector_t sector, u64 delay),
@@ -88,7 +88,7 @@ index 0000000..e17e88c
 +		ctf_integer(sector_t, sector, sector)
 +		ctf_integer(u64, delay, delay)
 +	)
-+   )
++)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_net,
 +	TP_PROTO(struct net_device *dev, u64 delay,
@@ -100,7 +100,7 @@ index 0000000..e17e88c
 +		ctf_integer(unsigned int, flag, flag)
 +		ctf_integer(unsigned int, out_id, out_id)
 +	)
-+   )
++)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_critical_timing_stack,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, char stack[256]),
@@ -110,7 +110,7 @@ index 0000000..e17e88c
 +		ctf_integer(pid_t, tid, pid)
 +		ctf_array_text(char, stack, stack, 256)
 +	)
-+   )
++)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_rt,
 +	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
@@ -123,23 +123,46 @@ index 0000000..e17e88c
 +		ctf_integer(unsigned int, preempt_count, preempt_c)
 +		ctf_string(breakdown, breakdown)
 +	)
-+   )
++)
 +
-+/*
-+ * Used to measure the overhead introduced by the latency_tracker probes
-+ * position = 1 when this TP is emitted from the beginning of a probe,
-+ * and 0 when exiting the probe. It can be set to anything else for other
-+ * measurements, the field "custom" can be used arbitrarily as well.
-+ */
-+LTTNG_TRACEPOINT_EVENT(latency_tracker_measurement,
-+	TP_PROTO(char name[32], unsigned int position, u64 custom),
-+	TP_ARGS(name, position, custom),
++LTTNG_TRACEPOINT_EVENT(latency_tracker_begin,
++	TP_PROTO(const __user char *data, size_t len),
++	TP_ARGS(data, len),
 +	TP_FIELDS(
-+		ctf_array_text(char, name, name, 32)
-+		ctf_integer(unsigned int, position, position)
-+		ctf_integer(u64, custom, custom)
++		ctf_string(data, data)
++		ctf_integer(size_t, len, len)
 +	)
-+   )
++)
++
++LTTNG_TRACEPOINT_EVENT(latency_tracker_end,
++	TP_PROTO(const __user char *data, size_t len),
++	TP_ARGS(data, len),
++	TP_FIELDS(
++		ctf_string(data, data)
++		ctf_integer(size_t, len, len)
++	)
++)
++
++LTTNG_TRACEPOINT_EVENT(latency_tracker_ttfb,
++	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++		int family, char saddr4[16], char saddr6[40],
++		unsigned int sport, char daddr4[16], char daddr6[40],
++		unsigned int dport),
++	TP_ARGS(comm, pid, delay, family, saddr4, saddr6, sport,
++		daddr4, daddr6, dport),
++	TP_FIELDS(
++		ctf_array_text(char, comm, comm, TASK_COMM_LEN)
++		ctf_integer(pid_t, tid, pid)
++		ctf_integer(u64, delay, delay)
++		ctf_integer(int, family, family)
++		ctf_string(sadd4, saddr4)
++		ctf_string(sadd6, saddr6)
++		ctf_integer(unsigned int, sport, sport)
++		ctf_string(dadd4, daddr4)
++		ctf_string(dadd6, daddr6)
++		ctf_integer(unsigned int, dport, dport)
++	)
++)
 +
 +#endif /* LTTNG_TRACE_LATENCY_TRACKER_H */
 +
@@ -147,10 +170,10 @@ index 0000000..e17e88c
 +#include "../../../probes/define_trace.h"
 diff --git a/instrumentation/events/mainline/latency_tracker.h b/instrumentation/events/mainline/latency_tracker.h
 new file mode 100644
-index 0000000..4e43521
+index 0000000..ea5ce6c
 --- /dev/null
 +++ b/instrumentation/events/mainline/latency_tracker.h
-@@ -0,0 +1,254 @@
+@@ -0,0 +1,304 @@
 +/* subsystem name is "latency_tracker" */
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
@@ -378,27 +401,77 @@ index 0000000..4e43521
 +   );
 +
 +/*
-+ * Used to measure the overhead introduced by the latency_tracker probes
-+ * position = 1 when this TP is emitted from the beginning of a probe,
-+ * and 0 when exiting the probe. It can be set to anything else for other
-+ * measurements, the field "custom" can be used arbitrarily as well.
++ * Limited to MAX_FILTER_STR_VAL (256) for ftrace compatibility.
 + */
++#define LT_MAX_JOBID_SIZE MAX_FILTER_STR_VAL
 +TRACE_EVENT(
-+	latency_tracker_measurement,
-+	TP_PROTO(char name[32], unsigned int position, u64 custom),
-+	TP_ARGS(name, position, custom),
++	latency_tracker_begin,
++	TP_PROTO(const __user char *data, size_t len),
++	TP_ARGS(data, len),
 +	TP_STRUCT__entry(
-+		__array(char, name, 32)
-+		__field(unsigned int, position)
-+		__field(u64, custom)
-+	),
++		 __array(char, data, LT_MAX_JOBID_SIZE)
++		__field(size_t, len)
++		),
 +	TP_fast_assign(
-+		memcpy(__entry->name, name, 32);
-+		entry->custom = custom;
-+		entry->position = position;
-+	),
-+	TP_printk("name=%s, position=%u, custom=%llu", __entry->name,
-+		__entry->position, __entry->custom)
++		memcpy(__entry->data, data, len);
++		entry->len = len;
++		),
++	TP_printk("data=%s, len=%lu", __entry->data,  __entry->len)
++   );
++
++TRACE_EVENT(
++	latency_tracker_end,
++	TP_PROTO(const __user char *data, size_t len),
++	TP_ARGS(data, len),
++	TP_STRUCT__entry(
++		 __array(char, data, LT_MAX_JOBID_SIZE)
++		__field(size_t, len)
++		),
++	TP_fast_assign(
++		memcpy(__entry->data, data, len);
++		entry->len = len;
++		),
++	TP_printk("data=%s, len=%lu", __entry->data,  __entry->len)
++   );
++
++TRACE_EVENT(
++	latency_tracker_ttfb,
++	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++		int family, char saddr4[16], char saddr6[40],
++		unsigned int sport, char daddr4[16], char daddr6[40],
++		unsigned int dport),
++	TP_ARGS(comm, pid, delay, family, saddr4, saddr6, sport,
++		daddr4, daddr6, dport),
++	TP_STRUCT__entry(
++		__array(char, comm, TASK_COMM_LEN)
++		__field(int, pid)
++		__field(u64, delay)
++		__field(int, family)
++		__array(char, saddr4, 16)
++		__array(char, saddr6, 40)
++		__field(unsigned int, sport)
++		__array(char, daddr4, 16)
++		__array(char, daddr6, 40)
++		__field(unsigned int, dport)
++		),
++	TP_fast_assign(
++		memcpy(__entry->comm, comm, TASK_COMM_LEN);
++		entry->pid = pid;
++		entry->delay = delay;
++		entry->family = family;
++		memcpy(__entry->saddr4, saddr4, 16);
++		memcpy(__entry->saddr6, saddr6, 40);
++		entry->sport = sport;
++		memcpy(__entry->daddr4, daddr4, 16);
++		memcpy(__entry->daddr6, daddr6, 40);
++		entry->dport = dport;
++		),
++	TP_printk("comm=%s, pid=%d, delay=%llu, family=%d, saddr4=%s, "
++			"saddr6=%s, sport=%u, daddr4=%s, daddr6=%s, dport=%u",
++			__entry->comm,  __entry->pid, __entry->delay,
++			__entry->family, __entry->saddr4, __entry->saddr6,
++			__entry->sport, __entry->daddr4, __entry->daddr6,
++			__entry->dport)
 +   );
 +
 +#endif /* _TRACE_LATENCY_TRACKER_H */
@@ -406,10 +479,10 @@ index 0000000..4e43521
 +/* this part must be outside protection */
 +#include <trace/define_trace.h>
 diff --git a/probes/Kbuild b/probes/Kbuild
-index 13e7bd8..90cb885 100644
+index 8ae9a6b..3f9eab9 100644
 --- a/probes/Kbuild
 +++ b/probes/Kbuild
-@@ -12,6 +12,7 @@ obj-$(CONFIG_LTTNG) += lttng-probe-kmem.o
+@@ -11,6 +11,7 @@ obj-$(CONFIG_LTTNG) += lttng-probe-kmem.o
  obj-$(CONFIG_LTTNG) += lttng-probe-module.o
  obj-$(CONFIG_LTTNG) += lttng-probe-power.o
  obj-$(CONFIG_LTTNG) += lttng-probe-statedump.o
@@ -446,5 +519,5 @@ index 0000000..10db175
 +    __stringify(LTTNG_MODULES_PATCHLEVEL_VERSION)
 +    LTTNG_MODULES_EXTRAVERSION);
 -- 
-1.9.1
+2.7.4
 
