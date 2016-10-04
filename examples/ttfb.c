@@ -31,6 +31,7 @@
 #include <asm/syscall.h>
 #include <asm/stacktrace.h>
 #include "../latency_tracker.h"
+#include "../tracker_debugfs.h"
 #include "../wrapper/tracepoint.h"
 #include "../wrapper/trace-clock.h"
 #include "../wrapper/lt_probe.h"
@@ -167,7 +168,7 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 	if (fd == -1U)
 		return;
 
-	delay = (end_ts - start_ts) / 1000;
+	delay = end_ts - start_ts;
 #ifdef SCHEDWORST
 	usec_threshold = delay;
 #endif
@@ -190,6 +191,13 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 	cnt++;
 
 	rcu_read_unlock();
+
+	/*
+	 * Test: only wakeup if delay > 10ms.
+	 * FIXME: should be configurable.
+	 */
+	if (delay > (10 * 1000 * 1000))
+		latency_tracker_debugfs_wakeup_pipe(tracker);
 }
 
 int fd_from_regs(struct pt_regs *regs)
@@ -297,6 +305,11 @@ int __init ttfb_init(void)
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, ttfb_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
+
+	ret = latency_tracker_debugfs_setup_wakeup_pipe(tracker);
+	if (ret != 0)
+		goto error;
+
 	ret = latency_tracker_enable(tracker);
 	if (ret)
 		goto error;

@@ -45,7 +45,7 @@ obj-m += latency_tracker_begin_end.o
 
 # TTFB tracker disabled before 3.13 because of a change in the
 # IPv6 kernel structs. Fixable if needed.
-latency_tracker_ttfb-objs := examples/ttfb.o wrapper/trace-clock.o
+latency_tracker_ttfb-objs := examples/ttfb.o wrapper/trace-clock.o tracker_debugfs.o
 obj-m += $(shell \
 	if [ $(VERSION) -ge 4 -o \
 		\( $(VERSION) -eq 3 -a $(PATCHLEVEL) -ge 13 -a $(SUBLEVEL) -ge 0 \) ] ; then \
