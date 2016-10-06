@@ -106,8 +106,6 @@ void wakeup_cb(struct latency_tracker_event_ctx *ctx)
 		goto end_unlock;
 	trace_latency_tracker_wakeup(p->comm, key->pid, end_ts - start_ts,
 			cb_flag);
-	printk("wakeup_latency: (%d) %s (%d), %llu us\n", cb_flag,
-			p->comm, key->pid, delay);
 	rcu_read_unlock();
 	cnt++;
 	wakeup_handle_proc(wakeup_priv, end_ts);
@@ -152,7 +150,7 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 //		printk("latency_tracker sched: no more free events, consider "
 //				"increasing the max_events parameter\n");
 	} else if (ret) {
-		printk("latency_tracker sched: error adding event\n");
+	//	printk("latency_tracker sched: error adding event\n");
 	}
 }
 
