@@ -1761,6 +1761,37 @@ void destroy_event_cb(struct latency_tracker_event *event)
 	return;
 }
 
+void unregister_tracepoints(void)
+{
+	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
+			probe_local_timer_entry, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
+			probe_local_timer_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
+			probe_hrtimer_expire_entry, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_exit",
+			probe_hrtimer_expire_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
+			probe_sched_switch, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("sched_waking",
+			probe_sched_waking, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("irq_handler_entry",
+			probe_irq_handler_entry, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("irq_handler_exit",
+			probe_irq_handler_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("softirq_raise",
+			probe_softirq_raise, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("softirq_entry",
+			probe_softirq_entry, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("softirq_exit",
+			probe_softirq_exit, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("latency_tracker_begin",
+			probe_tracker_begin, NULL);
+	lttng_wrapper_tracepoint_probe_unregister("latency_tracker_end",
+			probe_tracker_end, NULL);
+
+}
+
 static
 int __init rt_init(void)
 {
@@ -1794,46 +1825,86 @@ int __init rt_init(void)
 	alloc_measurements();
 #endif
 
+	/* Required tracepoints */
 	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
 			probe_local_timer_entry, NULL);
-	WARN_ON(ret);
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint local_timer_entry"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("local_timer_exit",
 			probe_local_timer_exit, NULL);
-	WARN_ON(ret);
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint local_timer_exit"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
 			probe_hrtimer_expire_entry, NULL);
-	WARN_ON(ret);
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint hrtimer_expire_entry"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_exit",
 			probe_hrtimer_expire_exit, NULL);
-	WARN_ON(ret);
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint hrtimer_expire_exit"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("irq_handler_entry",
 			probe_irq_handler_entry, NULL);
-	WARN_ON(ret);
-
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint irq_handler_entry"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("irq_handler_exit",
 			probe_irq_handler_exit, NULL);
-	WARN_ON(ret);
-
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint irq_handler_exit"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("softirq_raise",
 			probe_softirq_raise, NULL);
-	WARN_ON(ret);
-
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint softirq_raise"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("softirq_entry",
 			probe_softirq_entry, NULL);
-	WARN_ON(ret);
-
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint softirq_entry"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("softirq_exit",
 			probe_softirq_exit, NULL);
-	WARN_ON(ret);
-
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint softirq_exit"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("sched_switch",
 			probe_sched_switch, NULL);
-	WARN_ON(ret);
-
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint sched_switch"
+				" not available\n");
+		goto end_unregister;
+	}
 	ret = lttng_wrapper_tracepoint_probe_register("sched_waking",
 			probe_sched_waking, NULL);
-	WARN_ON(ret);
+	if (ret) {
+		printk("latency-tracker: Error, required tracepoint sched_waking"
+				" not available\n");
+		goto end_unregister;
+	}
 
+	/* Optional */
 	ret = lttng_wrapper_tracepoint_probe_register("latency_tracker_begin",
 			probe_tracker_begin, NULL);
 	WARN_ON(ret);
@@ -1854,6 +1925,10 @@ error:
 	ret = -1;
 end:
 	return ret;
+end_unregister:
+	unregister_tracepoints();
+	latency_tracker_destroy(tracker);
+	return ret;
 }
 module_init(rt_init);
 
@@ -1862,32 +1937,7 @@ void __exit rt_exit(void)
 {
 	uint64_t skipped, tracked;
 
-	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
-			probe_local_timer_entry, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
-			probe_local_timer_exit, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
-			probe_hrtimer_expire_entry, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_exit",
-			probe_hrtimer_expire_exit, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("sched_switch",
-			probe_sched_switch, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("sched_waking",
-			probe_sched_waking, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("irq_handler_entry",
-			probe_irq_handler_entry, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("irq_handler_exit",
-			probe_irq_handler_exit, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("softirq_raise",
-			probe_softirq_raise, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("softirq_entry",
-			probe_softirq_entry, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("softirq_exit",
-			probe_softirq_exit, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("latency_tracker_begin",
-			probe_tracker_begin, NULL);
-	lttng_wrapper_tracepoint_probe_unregister("latency_tracker_end",
-			probe_tracker_end, NULL);
+	unregister_tracepoints();
 #ifdef CONFIG_KRETPROBES
 	unregister_kretprobe(&probe_do_irq);
 #endif

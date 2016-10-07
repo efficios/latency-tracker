@@ -101,7 +101,6 @@ int remove_probe(struct tracepoint_entry *e, void *probe, void *data)
 		kfree(p);
 		return 0;
 	} else {
-		WARN_ON(1);
 		return -ENOENT;
 	}
 }
@@ -191,10 +190,13 @@ int lttng_tracepoint_probe_register(const char *name, void *probe, void *data)
 	if (ret)
 		goto end;
 	e->refcount++;
+
 	if (e->tp) {
 		ret = tracepoint_probe_register(e->tp, probe, data);
 		WARN_ON_ONCE(ret);
 		ret = 0;
+	} else {
+		ret = -ENOENT;
 	}
 end:
 	mutex_unlock(&lttng_tracepoint_mutex);
