@@ -1,25 +1,25 @@
-From 2a5fe691e19edbef97d284a894a12b84f54a1365 Mon Sep 17 00:00:00 2001
+From 2b77fb4fa883607c2c34521ff4f5468f618257a3 Mon Sep 17 00:00:00 2001
 From: Julien Desfossez <jdesfossez@efficios.com>
 Date: Mon, 8 Feb 2016 11:20:19 -0500
 Subject: [PATCH lttng-modules] Connect to latency_tracker tracepoints
 
 Signed-off-by: Julien Desfossez <jdesfossez@efficios.com>
 ---
- .../events/lttng-module/latency_tracker.h          | 148 ++++++++++
- instrumentation/events/mainline/latency_tracker.h  | 304 +++++++++++++++++++++
+ .../events/lttng-module/latency_tracker.h          | 149 ++++++++++
+ instrumentation/events/mainline/latency_tracker.h  | 306 +++++++++++++++++++++
  probes/Kbuild                                      |   1 +
  probes/lttng-probe-latency-tracker.c               |  22 ++
- 4 files changed, 475 insertions(+)
+ 4 files changed, 478 insertions(+)
  create mode 100644 instrumentation/events/lttng-module/latency_tracker.h
  create mode 100644 instrumentation/events/mainline/latency_tracker.h
  create mode 100644 probes/lttng-probe-latency-tracker.c
 
 diff --git a/instrumentation/events/lttng-module/latency_tracker.h b/instrumentation/events/lttng-module/latency_tracker.h
 new file mode 100644
-index 0000000..3c29045
+index 0000000..0dc184a
 --- /dev/null
 +++ b/instrumentation/events/lttng-module/latency_tracker.h
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,149 @@
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
 +
@@ -113,10 +113,11 @@ index 0000000..3c29045
 +)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_rt,
-+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++	TP_PROTO(int irq, char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
 +		unsigned int preempt_c, char *breakdown),
-+	TP_ARGS(comm, pid, delay, preempt_c, breakdown),
++	TP_ARGS(irq, comm, pid, delay, preempt_c, breakdown),
 +	TP_FIELDS(
++		ctf_integer(int, irq, irq)
 +		ctf_array_text(char, comm, comm, TASK_COMM_LEN)
 +		ctf_integer(pid_t, tid, pid)
 +		ctf_integer(u64, delay, delay)
@@ -170,10 +171,10 @@ index 0000000..3c29045
 +#include "../../../probes/define_trace.h"
 diff --git a/instrumentation/events/mainline/latency_tracker.h b/instrumentation/events/mainline/latency_tracker.h
 new file mode 100644
-index 0000000..ea5ce6c
+index 0000000..dee91cf
 --- /dev/null
 +++ b/instrumentation/events/mainline/latency_tracker.h
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,306 @@
 +/* subsystem name is "latency_tracker" */
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
@@ -376,10 +377,11 @@ index 0000000..ea5ce6c
 +
 +TRACE_EVENT(
 +	latency_tracker_rt,
-+	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++	TP_PROTO(int irq, char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
 +		unsigned int preempt_c, char *breakdown),
-+	TP_ARGS(comm, pid, delay, preempt_c, breakdown),
++	TP_ARGS(irq, comm, pid, delay, preempt_c, breakdown),
 +	TP_STRUCT__entry(
++		__field(int, irq)
 +		__array(char, comm, TASK_COMM_LEN)
 +		__field(int, pid)
 +		__field(u64, delay)
@@ -387,15 +389,16 @@ index 0000000..ea5ce6c
 +		__dynamic_array(char, buf, 4* MAX_FILTER_STR_VAL)
 +	),
 +	TP_fast_assign(
++		entry->irq = irq;
 +		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 +		entry->pid = pid;
 +		entry->delay = delay;
 +		entry->preempt_c = preempt_c;
 +		memcpy(__get_dynamic_array(buf), breakdown, 4* MAX_FILTER_STR_VAL);
 +	),
-+	TP_printk("comm=%s, pid=%d, delay=%llu, preempt_count=%u, "
++	TP_printk("irq=%d, comm=%s, pid=%d, delay=%llu, preempt_count=%u, "
 +			"breakdown={%s}",
-+		__entry->comm, __entry->pid, __entry->delay,
++		__entry->irq, __entry->comm, __entry->pid, __entry->delay,
 +		__entry->preempt_c, __get_str(buf)
 +		)
 +   );
@@ -479,7 +482,7 @@ index 0000000..ea5ce6c
 +/* this part must be outside protection */
 +#include <trace/define_trace.h>
 diff --git a/probes/Kbuild b/probes/Kbuild
-index 8ae9a6b..3f9eab9 100644
+index 2afb6dd..791eba7 100644
 --- a/probes/Kbuild
 +++ b/probes/Kbuild
 @@ -11,6 +11,7 @@ obj-$(CONFIG_LTTNG) += lttng-probe-kmem.o
@@ -488,8 +491,8 @@ index 8ae9a6b..3f9eab9 100644
  obj-$(CONFIG_LTTNG) += lttng-probe-statedump.o
 +obj-$(CONFIG_LTTNG) += lttng-probe-latency-tracker.o
  
- ifneq ($(CONFIG_KVM),)
-   obj-$(CONFIG_LTTNG) += lttng-probe-kvm.o
+ i2c_dep = $(srctree)/include/trace/events/i2c.h
+ ifneq ($(wildcard $(i2c_dep)),)
 diff --git a/probes/lttng-probe-latency-tracker.c b/probes/lttng-probe-latency-tracker.c
 new file mode 100644
 index 0000000..10db175

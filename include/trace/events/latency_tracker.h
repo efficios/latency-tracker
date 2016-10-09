@@ -218,10 +218,11 @@ TRACE_EVENT(
 
 TRACE_EVENT(
 	latency_tracker_rt,
-	TP_PROTO(char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
+	TP_PROTO(int irq, char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
 		unsigned int preempt_c, char *breakdown),
-	TP_ARGS(comm, pid, delay, preempt_c, breakdown),
+	TP_ARGS(irq, comm, pid, delay, preempt_c, breakdown),
 	TP_STRUCT__entry(
+		__field(int, irq)
 		__array(char, comm, TASK_COMM_LEN)
 		__field(int, pid)
 		__field(u64, delay)
@@ -229,15 +230,16 @@ TRACE_EVENT(
 		__dynamic_array(char, buf, 4* MAX_FILTER_STR_VAL)
 	),
 	TP_fast_assign(
+		entry->irq = irq;
 		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 		entry->pid = pid;
 		entry->delay = delay;
 		entry->preempt_c = preempt_c;
 		memcpy(__get_dynamic_array(buf), breakdown, 4* MAX_FILTER_STR_VAL);
 	),
-	TP_printk("comm=%s, pid=%d, delay=%llu, preempt_count=%u, "
+	TP_printk("irq=%d, comm=%s, pid=%d, delay=%llu, preempt_count=%u, "
 			"breakdown={%s}",
-		__entry->comm, __entry->pid, __entry->delay,
+		__entry->irq, __entry->comm, __entry->pid, __entry->delay,
 		__entry->preempt_c, __get_str(buf)
 		)
    );

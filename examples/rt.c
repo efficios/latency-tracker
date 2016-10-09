@@ -221,6 +221,7 @@ union max_key_size {
 
 struct event_data {
 	unsigned int pos;
+	int irq;
 	unsigned int preempt_count;
 	union {
 		/*
@@ -373,7 +374,7 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 		return;
 
 	end_ts = data->prev_ts;
-	trace_latency_tracker_rt(comm, current->pid,
+	trace_latency_tracker_rt(data->irq, comm, current->pid,
 			end_ts - start_ts, data->preempt_count,
 			data->breakdown);
 	latency_tracker_debugfs_wakeup_pipe(tracker);
@@ -675,6 +676,7 @@ void irq_handler_entry_no_do_irq(int irq)
 	enum latency_tracker_event_in_ret ret;
 	struct latency_tracker_event *s;
 	struct hardirq_key_t key;
+	struct event_data *data;
 	u64 now;
 
 	if (!latency_tracker_get_tracking_on(tracker))
@@ -697,6 +699,9 @@ void irq_handler_entry_no_do_irq(int irq)
 		append_delta_ts(s, KEY_DO_IRQ, "irq_handler_entry",
 				now, 0, NULL, 0);
 	}
+	data = (struct event_data *)
+		latency_tracker_event_get_priv_data(s);
+	data->irq = irq;
 	latency_tracker_unref_event(s);
 
 #ifdef DEBUG
@@ -712,6 +717,7 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 	struct do_irq_key_t do_irq_key;
 	struct hardirq_key_t hardirq_key;
 	struct latency_tracker_event *event_in, *event_out;
+	struct event_data *data;
 
 #ifndef CONFIG_KRETPROBES
 	return irq_handler_entry_no_do_irq(irq);
@@ -739,8 +745,13 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 	if (!event_in)
 		goto end;
 
+	data = (struct event_data *)
+		latency_tracker_event_get_priv_data(event_in);
+	data->irq = irq;
+
 	event_out = event_transition(event_in, &hardirq_key,
 			sizeof(hardirq_key), 0, 1, 0);
+
 	latency_tracker_unref_event(event_in);
 	if (!event_out)
 		goto end;
