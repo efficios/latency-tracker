@@ -1,25 +1,25 @@
-From 2b77fb4fa883607c2c34521ff4f5468f618257a3 Mon Sep 17 00:00:00 2001
+From ed66bf05ae18ca49f4207ce71a7ddd5387fd73a5 Mon Sep 17 00:00:00 2001
 From: Julien Desfossez <jdesfossez@efficios.com>
 Date: Mon, 8 Feb 2016 11:20:19 -0500
 Subject: [PATCH lttng-modules] Connect to latency_tracker tracepoints
 
 Signed-off-by: Julien Desfossez <jdesfossez@efficios.com>
 ---
- .../events/lttng-module/latency_tracker.h          | 149 ++++++++++
- instrumentation/events/mainline/latency_tracker.h  | 306 +++++++++++++++++++++
+ .../events/lttng-module/latency_tracker.h          | 152 ++++++++++
+ instrumentation/events/mainline/latency_tracker.h  | 312 +++++++++++++++++++++
  probes/Kbuild                                      |   1 +
  probes/lttng-probe-latency-tracker.c               |  22 ++
- 4 files changed, 478 insertions(+)
+ 4 files changed, 487 insertions(+)
  create mode 100644 instrumentation/events/lttng-module/latency_tracker.h
  create mode 100644 instrumentation/events/mainline/latency_tracker.h
  create mode 100644 probes/lttng-probe-latency-tracker.c
 
 diff --git a/instrumentation/events/lttng-module/latency_tracker.h b/instrumentation/events/lttng-module/latency_tracker.h
 new file mode 100644
-index 0000000..0dc184a
+index 0000000..0f59914
 --- /dev/null
 +++ b/instrumentation/events/lttng-module/latency_tracker.h
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,152 @@
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
 +
@@ -113,13 +113,16 @@ index 0000000..0dc184a
 +)
 +
 +LTTNG_TRACEPOINT_EVENT(latency_tracker_rt,
-+	TP_PROTO(int irq, char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++	TP_PROTO(int irq, char comm[TASK_COMM_LEN], pid_t pid,
++		u64 enter_userspace_delay, u64 delay,
 +		unsigned int preempt_c, char *breakdown),
-+	TP_ARGS(irq, comm, pid, delay, preempt_c, breakdown),
++	TP_ARGS(irq, comm, pid, enter_userspace_delay, delay, preempt_c,
++		breakdown),
 +	TP_FIELDS(
 +		ctf_integer(int, irq, irq)
 +		ctf_array_text(char, comm, comm, TASK_COMM_LEN)
 +		ctf_integer(pid_t, tid, pid)
++		ctf_integer(u64, enter_userspace_delay, enter_userspace_delay)
 +		ctf_integer(u64, delay, delay)
 +		ctf_integer(unsigned int, preempt_count, preempt_c)
 +		ctf_string(breakdown, breakdown)
@@ -171,10 +174,10 @@ index 0000000..0dc184a
 +#include "../../../probes/define_trace.h"
 diff --git a/instrumentation/events/mainline/latency_tracker.h b/instrumentation/events/mainline/latency_tracker.h
 new file mode 100644
-index 0000000..dee91cf
+index 0000000..58780f1
 --- /dev/null
 +++ b/instrumentation/events/mainline/latency_tracker.h
-@@ -0,0 +1,306 @@
+@@ -0,0 +1,312 @@
 +/* subsystem name is "latency_tracker" */
 +#undef TRACE_SYSTEM
 +#define TRACE_SYSTEM latency_tracker
@@ -377,13 +380,16 @@ index 0000000..dee91cf
 +
 +TRACE_EVENT(
 +	latency_tracker_rt,
-+	TP_PROTO(int irq, char comm[TASK_COMM_LEN], pid_t pid, u64 delay,
++	TP_PROTO(int irq, char comm[TASK_COMM_LEN], pid_t pid,
++		u64 enter_userspace_delay, u64 delay,
 +		unsigned int preempt_c, char *breakdown),
-+	TP_ARGS(irq, comm, pid, delay, preempt_c, breakdown),
++	TP_ARGS(irq, comm, pid, enter_userspace_delay, delay, preempt_c,
++		breakdown),
 +	TP_STRUCT__entry(
 +		__field(int, irq)
 +		__array(char, comm, TASK_COMM_LEN)
 +		__field(int, pid)
++		__field(u64, enter_userspace_delay)
 +		__field(u64, delay)
 +		__field(unsigned int, preempt_c)
 +		__dynamic_array(char, buf, 4* MAX_FILTER_STR_VAL)
@@ -392,13 +398,16 @@ index 0000000..dee91cf
 +		entry->irq = irq;
 +		memcpy(__entry->comm, comm, TASK_COMM_LEN);
 +		entry->pid = pid;
++		entry->enter_userspace_delay = enter_userspace_delay;
 +		entry->delay = delay;
 +		entry->preempt_c = preempt_c;
 +		memcpy(__get_dynamic_array(buf), breakdown, 4* MAX_FILTER_STR_VAL);
 +	),
-+	TP_printk("irq=%d, comm=%s, pid=%d, delay=%llu, preempt_count=%u, "
++	TP_printk("irq=%d, comm=%s, pid=%d, enter_userspace_delay=%llu, "
++			"delay=%llu, preempt_count=%u, "
 +			"breakdown={%s}",
-+		__entry->irq, __entry->comm, __entry->pid, __entry->delay,
++		__entry->irq, __entry->comm, __entry->pid,
++		__entry->enter_userspace_delay, __entry->delay,
 +		__entry->preempt_c, __get_str(buf)
 +		)
 +   );

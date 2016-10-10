@@ -220,6 +220,10 @@ union max_key_size {
 #define MAX_PAYLOAD (4 * MAX_FILTER_STR_VAL)
 
 struct event_data {
+	char breakdown[MAX_PAYLOAD];
+	char userspace_proc[TASK_COMM_LEN];
+	u64 enter_userspace_ts;
+	u64 prev_ts;
 	unsigned int pos;
 	int irq;
 	unsigned int preempt_count;
@@ -247,10 +251,7 @@ struct event_data {
 	 * without work_begin).
 	 */
 	unsigned int tree_closed;
-	u64 prev_ts;
 	struct latency_tracker_event *root;
-	char userspace_proc[TASK_COMM_LEN];
-	char breakdown[MAX_PAYLOAD];
 } __attribute__((__packed__));
 
 static
@@ -375,8 +376,9 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 
 	end_ts = data->prev_ts;
 	trace_latency_tracker_rt(data->irq, comm, current->pid,
-			end_ts - start_ts, data->preempt_count,
-			data->breakdown);
+		data->enter_userspace_ts ? data->enter_userspace_ts - start_ts : 0,
+		end_ts - start_ts,
+		data->preempt_count, data->breakdown);
 	latency_tracker_debugfs_wakeup_pipe(tracker);
 	/*
 	trace_printk("%s (%d), total = %llu ns, breakdown (ns): %s\n",
@@ -1325,6 +1327,8 @@ void sched_switch_in(struct task_struct *next)
 				latency_tracker_event_get_priv_data(event_out);
 			strncpy(data->userspace_proc, next->comm,
 					TASK_COMM_LEN);
+			if (next->mm)
+				data->enter_userspace_ts = now;
 			latency_tracker_unref_event(event_out);
 			if (config.enter_userspace && next->mm) {
 				latency_tracker_event_out(tracker, event_out,
