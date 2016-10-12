@@ -371,8 +371,6 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 	default:
 		return;
 	}
-	if (cb_out_id == OUT_IRQHANDLER_NO_CB)
-		return;
 
 	end_ts = data->prev_ts;
 	trace_latency_tracker_rt(data->irq, comm, current->pid,
