@@ -349,6 +349,7 @@ int __init offcpu_init(void)
 
 error:
 	ret = -1;
+	offcpu_destroy_priv(offcpu_priv);
 end:
 	return ret;
 }

@@ -300,6 +300,7 @@ int __init block_latency_tp_init(void)
 	if (!block_tracker_proc_dentry) {
 		printk(KERN_ERR "Error creating tracker control file\n");
 		ret = -ENOMEM;
+		kfree(block_priv);
 		goto end;
 	}
 
@@ -309,6 +310,7 @@ int __init block_latency_tp_init(void)
 
 error:
 	ret = -1;
+	kfree(block_priv);
 end:
 	return ret;
 }

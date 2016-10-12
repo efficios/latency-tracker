@@ -215,6 +215,7 @@ int __init wakeup_latency_init(void)
 	goto end;
 
 error:
+	wakeup_destroy_priv(wakeup_priv);
 	ret = -1;
 end:
 	return ret;

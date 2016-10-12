@@ -416,6 +416,7 @@ int __init syscalls_init(void)
 	goto end;
 
 error:
+	syscall_tracker_destroy_proc_priv(tracker_priv);
 	ret = -1;
 end:
 	return ret;
