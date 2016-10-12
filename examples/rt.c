@@ -1503,6 +1503,7 @@ write_procname_filter(struct file *filp, const char __user *ubuf,
 	if (ret)
 		return ret;
 
+	buf[r] = '\0';
 	memset(cfg->procname_filter, 0, TASK_COMM_LEN);
 	snprintf(cfg->procname_filter, r, "%s", buf);
 	cfg->procname_filter_size = r - 1;
