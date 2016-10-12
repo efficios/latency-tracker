@@ -221,7 +221,7 @@ union max_key_size {
 
 struct event_data {
 	char breakdown[MAX_PAYLOAD];
-	char userspace_proc[TASK_COMM_LEN];
+	char userspace_proc[TASK_COMM_LEN + 1];
 	u64 enter_userspace_ts;
 	u64 prev_ts;
 	unsigned int pos;
