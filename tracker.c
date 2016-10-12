@@ -127,10 +127,6 @@ void tracker_call_rcu_workqueue(struct work_struct *work)
 
        tracker = container_of(work, struct latency_tracker,
 		       tracker_call_rcu_w.work);
-
-       if (!tracker)
-	       return;
-
        list = llist_del_all(&tracker->to_release);
        synchronize_sched();
        llist_for_each_entry_safe(e, n, list, llist)
@@ -234,8 +230,6 @@ void latency_tracker_workqueue(struct work_struct *work)
 	struct latency_tracker *tracker;
 
 	tracker = container_of(work, struct latency_tracker, resize_w);
-	if (!tracker)
-		return;
 	latency_tracker_handle_timeouts(tracker, 0);
 	if (tracker->need_to_resize) {
 		tracker->need_to_resize = 0;
