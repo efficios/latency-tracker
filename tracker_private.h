@@ -13,6 +13,8 @@
 //#include "rculfhash-internal.h"
 //#include "urcu/wfcqueue.h"
 
+#define TRACKER_NAME_SIZE 32
+
 struct numa_pool {
 	struct llist_head llist;
 };
@@ -116,7 +118,7 @@ struct latency_tracker {
 	/*
 	 * name of the tracker (for debugfs)
 	 */
-	char tracker_name[32];
+	char tracker_name[TRACKER_NAME_SIZE + 1];
 	/*
 	 * debugfs control dir
 	 */
