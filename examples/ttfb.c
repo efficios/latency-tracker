@@ -348,5 +348,5 @@ void __exit ttfb_exit(void)
 module_exit(ttfb_exit);
 
 MODULE_AUTHOR("Julien Desfossez <jdesfossez@efficios.com>");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL and additional rights");
 MODULE_VERSION("1.0");

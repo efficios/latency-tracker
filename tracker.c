@@ -961,4 +961,4 @@ module_init(latency_tracker_init);
 module_exit(latency_tracker_exit);
 MODULE_AUTHOR("Julien Desfossez <jdesfossez@efficios.com>");
 MODULE_VERSION("1.0");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL and additional rights");

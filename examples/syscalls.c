@@ -461,5 +461,5 @@ void __exit syscalls_exit(void)
 module_exit(syscalls_exit);
 
 MODULE_AUTHOR("Francois Doray <francois.pierre-doray@polymtl.ca>");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL and additional rights");
 MODULE_VERSION("1.0");
