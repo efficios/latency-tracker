@@ -199,14 +199,19 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 	if (delay > (10 * 1000 * 1000))
 		latency_tracker_debugfs_wakeup_pipe(tracker);
 }
+#if defined(__x86_64__)
+#define PT_REGS_PARM1(x) ((x)->di)
+#elif defined(__i386__)
+#define PT_REGS_PARM1(x) ((x)->di)
+#elif defined(__aarch64__)
+#define PT_REGS_PARM1(x) ((x)->regs[0])
+#else
+#error "Unsupported Architecture, unable to parse pt_reg"
+#endif
 
 int fd_from_regs(struct pt_regs *regs)
 {
-#ifdef __i386__
-	return regs->ax;
-#else /* __i386__ */
-        return regs->di;
-#endif /* __i386__ */
+	return PT_REGS_PARM1(regs);
 }
 
 LT_PROBE_DEFINE(syscall_enter, struct pt_regs *regs, long id)

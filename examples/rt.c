@@ -386,6 +386,25 @@ void rt_cb(struct latency_tracker_event_ctx *ctx)
 }
 
 static
+int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
+{
+	struct do_irq_key_t key;
+
+	if (!latency_tracker_get_tracking_on(tracker))
+		return 0;
+
+	if (!config.irq_tracing)
+		return 0;
+	key.p.type = KEY_DO_IRQ;
+	key.cpu = smp_processor_id();
+	latency_tracker_event_out(tracker, NULL, &key,
+			sizeof(key), OUT_IRQHANDLER_NO_CB, 0);
+
+	return 0;
+}
+
+#ifdef CONFIG_KRETPROBES
+static
 int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
 	enum latency_tracker_event_in_ret ret;
@@ -422,29 +441,12 @@ int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 }
 
 static
-int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
-{
-	struct do_irq_key_t key;
-
-	if (!latency_tracker_get_tracking_on(tracker))
-		return 0;
-
-	if (!config.irq_tracing)
-		return 0;
-	key.p.type = KEY_DO_IRQ;
-	key.cpu = smp_processor_id();
-	latency_tracker_event_out(tracker, NULL, &key,
-			sizeof(key), OUT_IRQHANDLER_NO_CB, 0);
-
-	return 0;
-}
-
-static
 struct kretprobe probe_do_irq = {
 	.entry_handler = entry_do_irq,
 	.handler = exit_do_irq,
 	.kp.symbol_name = "do_IRQ",
 };
+#endif
 
 /*
  * Check if the event is in a branch that can continue or needs to be
