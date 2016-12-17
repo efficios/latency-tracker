@@ -88,49 +88,6 @@ static struct latency_tracker *tracker;
 
 static int cnt = 0;
 
-static int print_trace_stack(void *data, char *name)
-{
-        return 0;
-}
-
-static void
-__save_stack_address(void *data, unsigned long addr, bool reliable, bool nosched)
-{
-        struct stack_trace *trace = data;
-#ifdef CONFIG_FRAME_POINTER
-        if (!reliable)
-                return;
-#endif
-        if (nosched && in_sched_functions(addr))
-                return;
-        if (trace->skip > 0) {
-                trace->skip--;
-                return;
-        }
-        if (trace->nr_entries < trace->max_entries)
-                trace->entries[trace->nr_entries++] = addr;
-}
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0))
-static int save_stack_address(void *data, unsigned long addr, int reliable)
-{
-        __save_stack_address(data, addr, reliable, false);
-	return 0;
-}
-#else
-static void save_stack_address(void *data, unsigned long addr, int reliable)
-{
-	__save_stack_address(data, addr, reliable, false);
-}
-
-#endif
-
-static const struct stacktrace_ops backtrace_ops = {
-        .stack                  = print_trace_stack,
-        .address                = save_stack_address,
-        .walk_stack             = print_context_stack,
-};
-
 static
 void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int skip)
 {
@@ -144,8 +101,8 @@ void extract_stack(struct task_struct *p, char *stacktxt, uint64_t delay, int sk
 	trace.max_entries = ARRAY_SIZE(entries);
 	trace.entries = entries;
 	trace.skip = 0;
-	dump_trace(p, NULL, NULL, 0, &backtrace_ops, &trace);
-	//	print_stack_trace(&trace, 0);
+
+	save_stack_trace(&trace);
 
 	j = 0;
 	for (i = 0; i < trace.nr_entries; i++) {
