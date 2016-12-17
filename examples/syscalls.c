@@ -104,48 +104,6 @@ struct process_val_t {
 
 static DEFINE_HASHTABLE(process_map, 3);
 
-static int print_trace_stack(void *data, char *name)
-{
-	return 0;
-}
-
-static void
-__save_stack_address(void *data, unsigned long addr, bool reliable, bool nosched)
-{
-	struct stack_trace *trace = data;
-#ifdef CONFIG_FRAME_POINTER
-	if (!reliable)
-		return;
-#endif
-	if (nosched && in_sched_functions(addr))
-		return;
-	if (trace->skip > 0) {
-		trace->skip--;
-		return;
-	}
-	if (trace->nr_entries < trace->max_entries)
-		trace->entries[trace->nr_entries++] = addr;
-}
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0))
-static int save_stack_address(void *data, unsigned long addr, int reliable)
-{
-        __save_stack_address(data, addr, reliable, false);
-	return 0;
-}
-#else
-static void save_stack_address(void *data, unsigned long addr, int reliable)
-{
-	__save_stack_address(data, addr, reliable, false);
-}
-#endif
-
-static const struct stacktrace_ops backtrace_ops = {
-	.stack                  = print_trace_stack,
-	.address                = save_stack_address,
-	.walk_stack             = print_context_stack,
-};
-
 static void free_process_val_rcu(struct rcu_head *rcu)
 {
 	kfree(container_of(rcu, struct process_val_t, rcu));
@@ -219,7 +177,8 @@ void get_stack_txt(char *stacktxt, struct task_struct *p)
 	trace.max_entries = ARRAY_SIZE(entries);
 	trace.entries = entries;
 	trace.skip = 0;
-	dump_trace(p, NULL, NULL, 0, &backtrace_ops, &trace);
+
+	save_stack_trace(&trace);
 
 	j = 0;
 	for (i = 0; i < trace.nr_entries; i++) {
