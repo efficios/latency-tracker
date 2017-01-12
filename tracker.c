@@ -901,7 +901,6 @@ int test_tracker(void)
 	ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 0, NULL);
 	if (ret)
 		printk("failed\n");
-	udelay(10000);
 	}
 
 	printk("insert k2\n");
