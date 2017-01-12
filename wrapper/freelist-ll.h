@@ -269,9 +269,9 @@ void wrapper_freelist_destroy(struct latency_tracker *tracker)
 
 	/* Free per-cpu cache */
 	cnt += free_per_cpu_llist(tracker);
-	printk("latency_tracker: LL freed %d events (%lu bytes)\n", cnt,
-			cnt * (sizeof(struct latency_tracker_event) +
-				tracker->key_size + tracker->priv_data_size));
+	printk("latency_tracker: LL freed %d events (%u bytes)\n", cnt,
+			(uint32_t) (cnt * (sizeof(struct latency_tracker_event) +
+				tracker->key_size + tracker->priv_data_size)));
 }
 
 /*
