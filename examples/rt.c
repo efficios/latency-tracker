@@ -618,6 +618,7 @@ end:
 	return event_out;
 }
 
+#if defined(__i386) || defined(__x86_64)
 LT_PROBE_DEFINE(local_timer_entry, int vector)
 {
 	enum latency_tracker_event_in_ret ret;
@@ -670,6 +671,7 @@ LT_PROBE_DEFINE(local_timer_exit, int vector)
 end:
 	return;
 }
+#endif
 
 #ifndef CONFIG_KRETPROBES
 static
@@ -1779,10 +1781,12 @@ void destroy_event_cb(struct latency_tracker_event *event)
 
 void unregister_tracepoints(void)
 {
+#if defined(__i386) || defined(__x86_64)
 	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
 			probe_local_timer_entry, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
 			probe_local_timer_exit, NULL);
+#endif
 	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
 			probe_hrtimer_expire_entry, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_exit",
@@ -1842,6 +1846,7 @@ int __init rt_init(void)
 #endif
 
 	/* Required tracepoints */
+#if defined(__i386) || defined(__x86_64)
 	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
 			probe_local_timer_entry, NULL);
 	if (ret) {
@@ -1856,6 +1861,8 @@ int __init rt_init(void)
 				" not available\n");
 		goto end_unregister;
 	}
+#endif
+
 	ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
 			probe_hrtimer_expire_entry, NULL);
 	if (ret) {
