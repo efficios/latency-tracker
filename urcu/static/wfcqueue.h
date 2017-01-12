@@ -28,9 +28,15 @@
  */
 
 #include <asm-generic/delay.h>
-#include <stdbool.h>
+#include <linux/types.h>
+#include <linux/stddef.h>
 #include "../compiler.h"
+
+#if defined(__i386) || defined(__x86_64)
 #include "../uatomic-x86.h"
+#else
+#include "../uatomic-linux.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
