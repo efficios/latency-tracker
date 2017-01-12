@@ -20,7 +20,12 @@
  */
 
 #include "compiler.h"
+
+#if defined(__i386) || defined(__x86_64)
 #include "urcu-arch-x86.h"
+#else
+#include "urcu-arch-linux.h"
+#endif
 /*
  * Identify a shared load. A cmm_smp_rmc() or cmm_smp_mc() should come
  * before the load.
