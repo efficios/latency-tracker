@@ -22,7 +22,7 @@
 
 #include "compiler.h"
 #include "system.h"
-#include <asm/cmpxchg.h>
+#include <linux/atomic.h>
 
 #define UATOMIC_HAS_ATOMIC_BYTE
 #define UATOMIC_HAS_ATOMIC_SHORT
