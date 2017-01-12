@@ -414,7 +414,9 @@ int io_syscall(long id)
 		case __NR_fsync:
 		case __NR_fdatasync:
 		case __NR_sync:
+#if defined(__i386) || defined(__x86_64)
 		case __NR_sync_file_range:
+#endif
 		case __NR_syncfs:
 			return IO_SYSCALL_SYNC;
 
