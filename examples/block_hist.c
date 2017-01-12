@@ -542,7 +542,7 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 	struct block_hist_tracker *b = (struct block_hist_tracker *) m->private;
 	int index, i, j, k;
 	struct iohist *tmp;
-	uint64_t begin = 0, end = 0;
+	uint64_t begin = 0, end = 0, tmpdiv;
 
 	index = get_index(b, 1);
 	if (b->latency_history[index].ts_end == 0) {
@@ -570,7 +570,10 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 			}
 		}
 	}
-	seq_printf(m, "5 min [%llu, %llu] %llu\n", begin, end, ((end - begin)/1000000000)/60);
+	tmpdiv = end - begin;
+	do_div(tmpdiv, NSEC_PER_SEC);
+	do_div(tmpdiv, 60);
+	seq_printf(m, "5 min [%llu, %llu] %llu\n", begin, end, tmpdiv);
 	output_history_hist(m, &b->tmp_display);
 
 	end = 0;
@@ -588,8 +591,12 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 			}
 		}
 	}
-	seq_printf(m, "15 min [%llu, %llu] %llu\n", begin, end, ((end - begin)/1000000000)/60);
+	tmpdiv = end - begin;
+	do_div(tmpdiv, NSEC_PER_SEC);
+	do_div(tmpdiv, 60);
+	seq_printf(m, "15 min [%llu, %llu] %llu\n", begin, end, tmpdiv);
 	output_history_hist(m, &b->tmp_display);
+
 	return 0;
 }
 

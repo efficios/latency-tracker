@@ -137,7 +137,9 @@ void offcpu_cb(struct latency_tracker_event_ctx *ctx)
 	if (cb_out_id == SCHED_EXIT_DIED)
 		return;
 
-	delay = (end_ts - start_ts) / 1000;
+	delay = end_ts - start_ts;
+	do_div(delay, 1000);
+
 #ifdef SCHEDWORST
 	usec_threshold = delay;
 #endif
