@@ -61,6 +61,16 @@
 #define DEFAULT_TIMER_TRACING 1
 
 /*
+ * On x86, if we have kretprobes, we can use it to hook on the do_IRQ function
+ * and get closer to the interrupts entry point. For other architectures or
+ * when kretprobes is not available, we fallback to the irq_handler_entry
+ * tracepoint.
+ */
+#if defined(CONFIG_KRETPROBES) && (defined(__x86_64__) || defined(__i386__))
+#define DO_IRQ_KRETPROBE
+#endif
+
+/*
  * microseconds because we can't guarantee the passing of 64-bit
  * arguments to insmod on all architectures.
  */
@@ -403,7 +413,7 @@ int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	return 0;
 }
 
-#ifdef CONFIG_KRETPROBES
+#ifdef DO_IRQ_KRETPROBE
 static
 int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
@@ -647,8 +657,8 @@ LT_PROBE_DEFINE(local_timer_entry, int vector)
 	latency_tracker_unref_event(s);
 
 #ifdef DEBUG
-	trace_printk("%llu local_timer_entry (cpu %u)\n", trace_clock_monotonic_wrapper(),
-			key.cpu);
+	trace_printk("%llu local_timer_entry (cpu %u)\n",
+			trace_clock_monotonic_wrapper(), key.cpu);
 #endif
 
 end:
@@ -673,7 +683,7 @@ end:
 }
 #endif
 
-#ifndef CONFIG_KRETPROBES
+#ifndef DO_IRQ_KRETPROBE
 static
 void irq_handler_entry_no_do_irq(int irq)
 {
@@ -714,7 +724,7 @@ void irq_handler_entry_no_do_irq(int irq)
 #endif
 	return;
 }
-#endif /* CONFIG_KRETPROBES */
+#endif /* DO_IRQ_KRETPROBE */
 
 LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 {
@@ -723,7 +733,7 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 	struct latency_tracker_event *event_in, *event_out;
 	struct event_data *data;
 
-#ifndef CONFIG_KRETPROBES
+#ifndef DO_IRQ_KRETPROBE
 	return irq_handler_entry_no_do_irq(irq);
 #endif
 
@@ -1820,8 +1830,8 @@ int __init rt_init(void)
 	tracker = latency_tracker_create("rt");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 100000);
-	latency_tracker_set_max_resize(tracker, 10000);
+	latency_tracker_set_startup_events(tracker, 10000);
+	latency_tracker_set_max_resize(tracker, 1000);
 	/* FIXME: makes us crash after rmmod */
 	//latency_tracker_set_timer_period(tracker, 100000000);
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
@@ -1936,7 +1946,7 @@ int __init rt_init(void)
 			probe_tracker_end, NULL);
 	WARN_ON(ret);
 
-#ifdef CONFIG_KRETPROBES
+#ifdef DO_IRQ_KRETPROBE
 	ret = register_kretprobe(&probe_do_irq);
 	WARN_ON(ret);
 #endif
@@ -1961,7 +1971,7 @@ void __exit rt_exit(void)
 	uint64_t skipped, tracked;
 
 	unregister_tracepoints();
-#ifdef CONFIG_KRETPROBES
+#ifdef DO_IRQ_KRETPROBE
 	unregister_kretprobe(&probe_do_irq);
 #endif
 	tracepoint_synchronize_unregister();
