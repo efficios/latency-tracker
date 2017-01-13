@@ -205,6 +205,8 @@ void ttfb_cb(struct latency_tracker_event_ctx *ctx)
 #define PT_REGS_PARM1(x) ((x)->di)
 #elif defined(__aarch64__)
 #define PT_REGS_PARM1(x) ((x)->regs[0])
+#elif defined(__arm__)
+#define PT_REGS_PARM1(x) ((x)->ARM_ORIG_r0)
 #else
 #error "Unsupported Architecture, unable to parse pt_reg"
 #endif
