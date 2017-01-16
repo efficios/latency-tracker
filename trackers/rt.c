@@ -1246,20 +1246,12 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 	 * of the CPU.
 	 */
 	struct waking_key_t waking_key;
-	//struct latency_tracker_event *s;
 
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
 
-	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!p)
 		goto end;
-
-	/*
-	 * TODO: allow non-unique inserts here.
-	 * This would allow multiple processes to be waiting for the same
-	 * target process.
-	 */
 
 	waking_key.p.type = KEY_WAKEUP;
 	waking_key.pid = p->pid;
@@ -1479,7 +1471,6 @@ LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
 
-	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!prev || !next)
 		goto end;
 
@@ -1632,8 +1623,6 @@ LT_PROBE_DEFINE(tracker_end, char *tp_data, size_t len)
 /*
  * This should be called from a task that has been woken up in the
  * path of interrupt processing.
- * FIXME: what happens if the task was already awake when the interrupt
- * arrived ?
  */
 LT_PROBE_DEFINE(tracker_begin, char *tp_data, size_t len)
 {
@@ -1831,7 +1820,6 @@ int __init rt_init(void)
 	if (!tracker)
 		goto error;
 	latency_tracker_set_startup_events(tracker, 10000);
-	latency_tracker_set_max_resize(tracker, 1000);
 	/* FIXME: makes us crash after rmmod */
 	//latency_tracker_set_timer_period(tracker, 100000000);
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);

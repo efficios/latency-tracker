@@ -306,7 +306,6 @@ int __init ttfb_init(void)
 	if (!tracker)
 		goto error;
 	latency_tracker_set_startup_events(tracker, 2000);
-	latency_tracker_set_max_resize(tracker, 10000);
 	latency_tracker_set_timer_period(tracker, 100000000);
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);

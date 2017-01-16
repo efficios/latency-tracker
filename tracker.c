@@ -135,7 +135,7 @@ void tracker_call_rcu_workqueue(struct work_struct *work)
 
 
 /*
- * Must be called with proper locking.
+ * Must be called with rcu_read_lock_sched_notrace.
  */
 void __latency_tracker_event_destroy(struct kref *kref)
 {
@@ -209,7 +209,7 @@ void latency_tracker_timer_cb(unsigned long ptr)
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
-/* Must be called with the lock held. */
+/* Must be called with the tracker->lock held. */
 static
 void latency_tracker_enable_timer(struct latency_tracker *tracker)
 {
@@ -298,6 +298,10 @@ int latency_tracker_set_startup_events(struct latency_tracker *tracker,
 		return -1;
 
 	tracker->free_list_nelems = startup_events;
+
+	if (tracker->max_resize < startup_events)
+		tracker->max_resize = startup_events;
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_startup_events);

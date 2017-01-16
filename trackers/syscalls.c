@@ -348,7 +348,6 @@ int __init syscalls_init(void)
 		goto error;
 	latency_tracker_set_timer_period(tracker, 100000000);
 	latency_tracker_set_startup_events(tracker, 1000);
-	latency_tracker_set_max_resize(tracker, 20000);
 	latency_tracker_set_priv(tracker, tracker_priv);
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_callback(tracker, syscall_cb);

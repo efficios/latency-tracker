@@ -33,8 +33,6 @@ static struct dentry *debugfs_create_tracking_on(umode_t mode,
 		struct dentry *parent, struct latency_tracker *tracker);
 static struct dentry *debugfs_create_alloc_size(umode_t mode,
 		struct dentry *parent, struct latency_tracker *tracker);
-static struct dentry *debugfs_create_max_resize(umode_t mode,
-		struct dentry *parent, struct latency_tracker *tracker);
 static struct dentry *debugfs_create_allocate(umode_t mode,
 		struct dentry *parent, struct latency_tracker *tracker);
 
@@ -75,11 +73,6 @@ int setup_default_entries(struct latency_tracker *tracker)
 		goto error;
 
 	dir = debugfs_create_alloc_size(S_IRUSR|S_IWUSR,
-			tracker->debugfs_instance_dir, tracker);
-	if (!dir)
-		goto error;
-
-	dir = debugfs_create_max_resize(S_IRUSR|S_IWUSR,
 			tracker->debugfs_instance_dir, tracker);
 	if (!dir)
 		goto error;
@@ -387,6 +380,8 @@ ssize_t alloc_size_write(struct file *filp, const char __user *ubuf,
 	ret = kstrtoint_from_user(ubuf, count, 10, &val);
 	if (ret)
 		return ret;
+
+	/* Once the memory has been allocated, we cannot change this size */
 	if (tracker->allocated)
 		return -EPERM;
 
@@ -409,56 +404,6 @@ struct dentry *debugfs_create_alloc_size(umode_t mode, struct dentry *parent,
 {
 	return  debugfs_create_file("alloc_size", mode, parent,
 			tracker, &fops_alloc_size);
-}
-
-/* Tracker maximum resize */
-static
-ssize_t max_resize_read(struct file *filp, char __user *ubuf,
-		size_t count, loff_t *ppos)
-{
-	int r, ret;
-	char buf[64];
-	struct latency_tracker *tracker = filp->private_data;
-
-	r = snprintf(buf, min_t(size_t, count, 64), "%d\n",
-			tracker->max_resize);
-
-	ret = simple_read_from_buffer(ubuf, count, ppos, buf, r);
-	return ret;
-}
-
-static
-ssize_t max_resize_write(struct file *filp, const char __user *ubuf,
-		size_t count, loff_t *ppos)
-{
-	int val, ret;
-	struct latency_tracker *tracker = filp->private_data;
-
-	ret = kstrtoint_from_user(ubuf, count, 10, &val);
-	if (ret)
-		return ret;
-	if (tracker->allocated)
-		return -EPERM;
-
-	latency_tracker_set_max_resize(tracker, val);
-
-	return count;
-}
-
-static
-const struct file_operations fops_max_resize = {
-	.open           = open_int,
-	.read           = max_resize_read,
-	.write		= max_resize_write,
-	.llseek         = default_llseek,
-};
-
-static
-struct dentry *debugfs_create_max_resize(umode_t mode, struct dentry *parent,
-		struct latency_tracker *tracker)
-{
-	return  debugfs_create_file("max_resize", mode, parent,
-			tracker, &fops_max_resize);
 }
 
 /* Allocate the tracker memory */

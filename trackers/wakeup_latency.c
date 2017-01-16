@@ -192,7 +192,6 @@ int __init wakeup_latency_init(void)
 	if (!tracker)
 		goto error;
 	latency_tracker_set_timer_period(tracker, 100000000);
-	latency_tracker_set_max_resize(tracker, 1000);
 	latency_tracker_set_startup_events(tracker, 200);
 	latency_tracker_set_priv(tracker, wakeup_priv);
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
