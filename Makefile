@@ -51,6 +51,9 @@ obj-m += $(shell \
 		\( $(VERSION) -eq 3 -a $(PATCHLEVEL) -ge 13 -a $(SUBLEVEL) -ge 0 \) ] ; then \
 	echo "latency_tracker_ttfb.o" ; fi;)
 
+latency_tracker_self_test-objs := trackers/self_test.o
+obj-m += latency_tracker_self_test.o
+
 else # KERNELRELEASE
 
 # This part of the Makefile is used when the 'make' command is run in the

@@ -873,65 +873,6 @@ void example_cb(struct latency_tracker_event_ctx *ctx)
 }
 
 static
-int test_tracker(void)
-{
-	char *k1 = "blablabla1";
-	char *k2 = "bliblibli1";
-	int ret, i;
-	struct latency_tracker *tracker;
-
-	tracker = latency_tracker_create("test");
-	if (!tracker)
-		goto error;
-	ret = latency_tracker_set_startup_events(tracker, 300);
-	if (ret)
-		goto error;
-	ret = latency_tracker_set_timer_period(tracker, 100*1000*1000);
-	if (ret)
-		goto error;
-	ret = latency_tracker_set_key_size(tracker, strlen(k1) + 1);
-	if (ret)
-		goto error;
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
-
-	for (i = 0; i < 10; i++) {
-	printk("insert k1\n");
-	ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 0, NULL);
-	if (ret)
-		printk("failed\n");
-	}
-
-	printk("insert k2\n");
-	rcu_read_lock_sched_notrace();
-	ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 0, 0, NULL);
-	rcu_read_unlock_sched_notrace();
-	if (ret)
-		printk("failed\n");
-
-	printk("lookup k1\n");
-	latency_tracker_event_out(tracker, NULL, k1, strlen(k1) + 1, 0, 0);
-	printk("lookup k2\n");
-	latency_tracker_event_out(tracker, NULL, k2, strlen(k2) + 1, 0, 0);
-	printk("lookup k1\n");
-	rcu_read_lock_sched_notrace();
-	_latency_tracker_event_out(tracker, NULL, k1, strlen(k1) + 1, 0, 0);
-	rcu_read_unlock_sched_notrace();
-
-	printk("done\n");
-	latency_tracker_destroy(tracker);
-
-	ret = 0;
-	goto end;
-
-error:
-	ret = -1;
-end:
-	return ret;
-}
-
-static
 int __init latency_tracker_init(void)
 {
 	int ret;
@@ -939,7 +880,6 @@ int __init latency_tracker_init(void)
 	ret = latency_tracker_debugfs_setup();
 	if (ret < 0)
 		goto end;
-	ret = test_tracker();
 
 	ret = lttng_tracepoint_init();
 	if (ret)
