@@ -142,6 +142,11 @@ struct latency_tracker {
 	 */
 	char tracker_name[TRACKER_NAME_SIZE + 1];
 	/*
+	 * Name of this instance of the tracker (to allow multiple trackers
+	 * to run simulataneously.
+	 */
+	char instance_name[TRACKER_NAME_SIZE + 1];
+	/*
 	 * debugfs control dir
 	 */
 	struct dentry *debugfs_dir;

@@ -72,12 +72,15 @@ Usage
 The `latency_tracker.ko` is required for all trackers it is the base
 architecture. Each tracker is compiled as its own module:
 `latency_tracker_$TRACKER.ko`. When a tracker is loaded in memory, it can be
-configured through `debugfs`.
+configured through `debugfs`. For now, only instance of each tracker is created
+when loading a tracker module. In the future, it will be possible to create
+multiple instances with different parameters. The default tracker instance is
+always called "default".
 
 ```
 insmod latency_tracker.ko
 insmod latency_tracker_$TRACKER.ko
-ls /sys/kernel/debug/latency/$TRACKER
+ls /sys/kernel/debug/latency/$TRACKER/default
 ```
 
 Implemented modules

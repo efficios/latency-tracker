@@ -174,7 +174,15 @@ int latency_tracker_debugfs_add_tracker(
 	struct dentry *dir;
 	int ret;
 
+	/*
+	 * FIXME: when dealing with multiple instances, we will have to
+	 * test to see if this directory already exists.
+	 */
 	dir = debugfs_create_dir(tracker->tracker_name, debugfs_root);
+	if (!dir)
+		goto error;
+
+	dir = debugfs_create_dir(tracker->instance_name, dir);
 	if (!dir)
 		goto error;
 	tracker->debugfs_dir = dir;

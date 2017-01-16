@@ -449,7 +449,10 @@ struct latency_tracker *latency_tracker_create(const char *name)
 	tracker->tracking_on = 0;
 	if (!name)
 		goto error_free;
-	strncpy(tracker->tracker_name, name, TRACKER_NAME_SIZE);
+	if (!strncpy(tracker->tracker_name, name, TRACKER_NAME_SIZE))
+		goto error_free;
+	if (!snprintf(tracker->instance_name, TRACKER_NAME_SIZE, "default"))
+		goto error_free;
 	ret = latency_tracker_debugfs_add_tracker(tracker);
 	if (ret != 0) {
 		printk("latency_tracker: debugfs creation error\n");
