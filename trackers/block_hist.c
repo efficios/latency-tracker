@@ -740,9 +740,6 @@ int __init block_hist_latency_tp_init(void)
 	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, blk_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
 
 	init_histograms();
 	init_timer(&block_hist_priv->timer);

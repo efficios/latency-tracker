@@ -49,7 +49,7 @@ int __init self_test_init(void)
 	if (ret)
 		goto error;
 
-	ret = latency_tracker_enable(tracker);
+	ret = latency_tracker_allocate(tracker);
 	if (ret)
 		goto error;
 

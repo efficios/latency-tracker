@@ -353,9 +353,6 @@ int __init syscalls_init(void)
 	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_callback(tracker, syscall_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
 
 	ret = lttng_wrapper_tracepoint_probe_register(
 			"sys_enter", probe_syscall_enter, NULL);

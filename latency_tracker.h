@@ -66,8 +66,8 @@ enum latency_tracker_cb_flag {
  *
  * The default parameters are enough to start (FIXME: document the
  * defaultshere), but we can override with the latency_tracker_set_* functions.
- * When all the settings are done, call latency_tracker_enable to start the
- * tracking. The name needs to be unique, it is used to create the debugfs
+ * When all the settings are done, call latency_tracker_allocate to allocate
+ * the memory. The name needs to be unique, it is used to create the debugfs
  * directory, it is copied (max: 32 chars).
  */
 struct latency_tracker *latency_tracker_create(const char *name);
@@ -81,13 +81,13 @@ struct latency_tracker *latency_tracker_create(const char *name);
 void latency_tracker_destroy(struct latency_tracker *tracker);
 
 /*
- * Start the tracker, this allocates the memory in the freelist and allows
- * events to be stored by the tracker, it is different from tracking_on
- * which controls whether or not the tracker processes the events.
+ * Start the tracker, this allocates the memory in the freelist to allow events
+ * to be stored by the tracker, it is different from tracking_on which controls
+ * whether or not the tracker processes the events.
  *
  * Returns 0 on success, a negative value and a printk on error.
  */
-int latency_tracker_enable(struct latency_tracker *tracker);
+int latency_tracker_allocate(struct latency_tracker *tracker);
 
 /*
  * Empty the tracker's HT, return the number of entries that were still
@@ -96,8 +96,8 @@ int latency_tracker_enable(struct latency_tracker *tracker);
 int latency_tracker_clear_ht(struct latency_tracker *tracker);
 
 /*
- * Setters to various tracker parameters.
- * Most of these should be performed before the call to latency_tracker_enable.
+ * Setters to various tracker parameters.  Most of these should be performed
+ * before the call to latency_tracker_allocate.
  * FIXME: document which parameters can be changed at runtime.
  */
 /* default: memcmp */

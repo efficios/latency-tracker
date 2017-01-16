@@ -289,9 +289,6 @@ int __init offcpu_init(void)
 	latency_tracker_set_hash_fct(tracker, hash_fct);
 	latency_tracker_set_match_fct(tracker, match_fct);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
 
 	ret = offcpu_setup_priv(offcpu_priv);
 	WARN_ON(ret);

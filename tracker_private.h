@@ -149,7 +149,8 @@ struct latency_tracker {
 	/*
 	 * debugfs control dir
 	 */
-	struct dentry *debugfs_dir;
+	struct dentry *debugfs_instance_dir;
+	struct dentry *debugfs_tracker_dir;
 	/*
 	 * debugfs wakeup_pipe stuff
 	 */
@@ -194,12 +195,11 @@ struct latency_tracker {
          */
         spinlock_t lock;
 	/*
-	 * When enabled, the tracking actually starts and some parameters
-	 * cannot be changed anymore.
-	 *
+	 * When allocated, the tracking can start and some parameters cannot
+	 * be changed anymore.
 	 * FIXME: list them here.
 	 */
-	int enabled;
+	int allocated;
 	/*
 	 * A private pointer that is accessible everywhere the tracker object
 	 * is accessible, the caller is responsible of the memory allocation of

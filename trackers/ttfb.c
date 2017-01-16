@@ -317,10 +317,6 @@ int __init ttfb_init(void)
 	if (ret != 0)
 		goto error;
 
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
-
 	ret = lttng_wrapper_tracepoint_probe_register(
 			"sys_enter", probe_syscall_enter, NULL);
 	WARN_ON(ret);

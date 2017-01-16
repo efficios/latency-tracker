@@ -1844,10 +1844,6 @@ int __init rt_init(void)
 	if (ret != 0)
 		goto error;
 
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
-
 	if (!timer_tracing)
 		config.timer_tracing = 0;
 
