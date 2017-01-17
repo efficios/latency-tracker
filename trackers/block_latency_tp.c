@@ -36,37 +36,6 @@
 
 #include <trace/events/latency_tracker.h>
 
-/*
- * Threshold to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_BLK_LATENCY_THRESHOLD 5 * 1000
-#define DEFAULT_USEC_BLK_LATENCY_TIMEOUT 0
-/*
- * Garbage collector parameters (microseconds).
- */
-#define DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD 0
-#define DEFAULT_USEC_BLK_LATENCY_GC_PERIOD 0
-
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-static unsigned long usec_threshold = DEFAULT_USEC_BLK_LATENCY_THRESHOLD;
-module_param(usec_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
-
-static unsigned long usec_timeout = DEFAULT_USEC_BLK_LATENCY_TIMEOUT;
-module_param(usec_timeout, ulong, 0644);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
-
-static unsigned long usec_gc_threshold = DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD;
-module_param(usec_gc_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_gc_threshold, "Garbage collector threshold in microseconds");
-
-static unsigned long usec_gc_period = DEFAULT_USEC_BLK_LATENCY_GC_PERIOD;
-module_param(usec_gc_period, ulong, 0644);
-MODULE_PARM_DESC(usec_gc_period, "Garbage collector period in microseconds");
-
 struct blkkey {
 	dev_t dev;
 	sector_t sector;
@@ -276,10 +245,6 @@ int __init block_latency_tp_init(void)
 	tracker = latency_tracker_create("block_latency");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 100);
-	latency_tracker_set_timer_period(tracker, usec_gc_period * 1000);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
-	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, blk_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 

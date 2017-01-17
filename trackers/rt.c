@@ -50,17 +50,6 @@
 #undef DEBUG
 
 /*
- * Threshold to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_RT_THRESH 5 * 1000 * 1000
-/*
- * Timeout to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_RT_TIMEOUT 0
-
-#define DEFAULT_TIMER_TRACING 1
-
-/*
  * On x86, if we have kretprobes, we can use it to hook on the do_IRQ function
  * and get closer to the interrupts entry point. For other architectures or
  * when kretprobes is not available, we fallback to the irq_handler_entry
@@ -69,23 +58,6 @@
 #if defined(CONFIG_KRETPROBES) && (defined(__x86_64__) || defined(__i386__))
 #define DO_IRQ_KRETPROBE
 #endif
-
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-static unsigned long usec_threshold = DEFAULT_USEC_RT_THRESH;
-module_param(usec_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
-
-static unsigned long usec_timeout = DEFAULT_USEC_RT_TIMEOUT;
-module_param(usec_timeout, ulong, 0644);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
-
-static unsigned long timer_tracing = DEFAULT_TIMER_TRACING;
-module_param(timer_tracing, ulong, 0644);
-MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts "
-		"and hrtimer latency");
 
 static struct latency_tracker *tracker;
 
@@ -1819,11 +1791,6 @@ int __init rt_init(void)
 	tracker = latency_tracker_create("rt");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 10000);
-	/* FIXME: makes us crash after rmmod */
-	//latency_tracker_set_timer_period(tracker, 100000000);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
-	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, rt_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 	latency_tracker_set_priv_data_size(tracker, sizeof(struct event_data));
@@ -1831,9 +1798,6 @@ int __init rt_init(void)
 	ret = setup_debugfs_extras();
 	if (ret != 0)
 		goto error;
-
-	if (!timer_tracing)
-		config.timer_tracing = 0;
 
 #ifdef BENCH
 	alloc_measurements();

@@ -463,8 +463,8 @@ struct latency_tracker *latency_tracker_create(const char *name)
 	tracker->hash_fct = jhash;
 	tracker->match_fct = memcmp;
 	tracker->key_size = sizeof(long);
-	tracker->free_list_nelems = DEFAULT_STARTUP_ALLOC_EVENTS;
-	tracker->threshold = DEFAULT_THRESHOLD;
+	tracker->free_list_nelems = LT_DEFAULT_STARTUP_ALLOC_EVENTS;
+	tracker->threshold = LT_DEFAULT_THRESHOLD;
 	tracker->tracking_on = 0;
 	if (!name)
 		goto error_free;

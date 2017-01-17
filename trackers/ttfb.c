@@ -38,27 +38,6 @@
 
 #include <trace/events/latency_tracker.h>
 
-/*
- * Threshold to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_OFFCPU_THRESH 5 * 1000 * 1000
-/*
- * Timeout to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_OFFCPU_TIMEOUT 0
-
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-static unsigned long usec_threshold = DEFAULT_USEC_OFFCPU_THRESH;
-module_param(usec_threshold, ulong, 0444);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
-
-static unsigned long usec_timeout = DEFAULT_USEC_OFFCPU_TIMEOUT;
-module_param(usec_timeout, ulong, 0444);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
-
 struct ttfbkey {
 	struct inode *f_inode;
 } __attribute__((__packed__));
@@ -305,10 +284,6 @@ int __init ttfb_init(void)
 	tracker = latency_tracker_create("ttfb");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 2000);
-	latency_tracker_set_timer_period(tracker, 100000000);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
-	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, ttfb_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 

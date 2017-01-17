@@ -54,45 +54,12 @@
 
 #include <trace/events/latency_tracker.h>
 
-/*
- * Threshold to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_NET_LATENCY_THRESH 5 * 1000
-/*
- * Timeout to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_NET_LATENCY_TIMEOUT 100 * 1000
-
-/* By default, every 1s, garbage collect every event older than 5ms */
-#define DEFAULT_USEC_NET_LATENCY_GC_PERIOD 1000000
-#define DEFAULT_USEC_NET_LATENCY_GC_THRESH 5000
-
-static unsigned long usec_gc_period = DEFAULT_USEC_NET_LATENCY_GC_PERIOD;
-module_param(usec_gc_period, ulong, 0444);
-MODULE_PARM_DESC(usec_gc_period, "Garbage collector period in microseconds");
-
-static unsigned long usec_gc_threshold = DEFAULT_USEC_NET_LATENCY_GC_THRESH;
-module_param(usec_gc_threshold, ulong, 0444);
-MODULE_PARM_DESC(usec_gc_threshold, "Garbage collector threshold in microseconds");
-
 enum net_exit_reason {
 	NET_EXIT_COPY_IOVEC = 0,
 	NET_EXIT_CONSUME = 1,
 	NET_EXIT_FREE = 2,
 	NET_EXIT_KPROBE_FREE = 3,
 };
-
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-static unsigned long usec_threshold = DEFAULT_USEC_NET_LATENCY_THRESH;
-module_param(usec_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
-
-static unsigned long usec_timeout = DEFAULT_USEC_NET_LATENCY_TIMEOUT;
-module_param(usec_timeout, ulong, 0644);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
 struct netkey {
 	struct sk_buff *skb;
@@ -236,10 +203,6 @@ int __init net_latency_tp_init(void)
 	tracker = latency_tracker_create("net");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 100);
-	latency_tracker_set_timer_period(tracker, usec_gc_period * 1000);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
-	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, net_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 
