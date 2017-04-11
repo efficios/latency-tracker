@@ -165,12 +165,13 @@ int latency_tracker_set_destroy_event_cb(struct latency_tracker *tracker,
 
 /*
  * The change_tracking_on_cb callback if not NULL is called when the tracker
- * tracking_on value changes. When tracking_on changes from any value to 0,
- * the HT of the tracker is emptied, no callbacks are emitted when this
- * happens.
+ * tracking_on value changes. If there is no callback of if the callback
+ * returns 1, the tracker clears the HT. If this callback returns 0, the
+ * cleanup of the HT is skipped.
  */
+
 int latency_tracker_set_change_tracking_on_cb(struct latency_tracker *tracker,
-		void (*change_tracking_on_cb) (struct latency_tracker *tracker,
+		int (*change_tracking_on_cb) (struct latency_tracker *tracker,
 			int prev_value, int new_value));
 
 void *latency_tracker_get_priv(struct latency_tracker *tracker);

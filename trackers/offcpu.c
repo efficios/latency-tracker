@@ -232,6 +232,16 @@ int match_fct(const void *key1, const void *key2, size_t length)
 }
 
 static
+int tracking_on_cb(struct latency_tracker *tracker, int prev, int new)
+{
+	/*
+	 * Disable clearing the HT because we are tracking the calls that
+	 * lead to this write and risk deadlocking in the synchronize_rcu.
+	 */
+	return 0;
+}
+
+static
 int __init offcpu_init(void)
 {
 	int ret;
@@ -251,6 +261,7 @@ int __init offcpu_init(void)
 	latency_tracker_set_hash_fct(tracker, hash_fct);
 	latency_tracker_set_match_fct(tracker, match_fct);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
+	latency_tracker_set_change_tracking_on_cb(tracker, tracking_on_cb);
 
 	ret = offcpu_setup_priv(offcpu_priv);
 	WARN_ON(ret);

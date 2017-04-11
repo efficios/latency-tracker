@@ -188,7 +188,7 @@ struct latency_tracker {
 	/*
 	 * Clear all the internal state of the tracker.
 	 */
-	void (*change_tracking_on_cb) (struct latency_tracker *tracker,
+	int (*change_tracking_on_cb) (struct latency_tracker *tracker,
 			int old_value, int new_value);
         /*
          * Protects the access to the HT, the free_list and the timer.

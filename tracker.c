@@ -381,14 +381,19 @@ int latency_tracker_set_tracking_on(struct latency_tracker *tracker,
 
 	tracker->tracking_on = val;
 
-	/* This cannot be done from within a tracepoint probe (deadlock) */
+	if (tracker->change_tracking_on_cb)
+		cleanup = tracker->change_tracking_on_cb(tracker, old, val);
+
+	/*
+	 * This cannot be done from within a tracepoint probe (deadlock), if
+	 * the write to the tracking_on file risks to be tracked, return 0 in
+	 * the tracking_on_cb.
+	 */
 	if (cleanup) {
 		synchronize_sched();
 		if (old > 0 && val == 0)
 			latency_tracker_clear_ht(tracker);
 	}
-	if (tracker->change_tracking_on_cb)
-		tracker->change_tracking_on_cb(tracker, old, val);
 
 	ret = 0;
 
@@ -439,7 +444,7 @@ int latency_tracker_set_destroy_event_cb(struct latency_tracker *tracker,
 EXPORT_SYMBOL_GPL(latency_tracker_set_destroy_event_cb);
 
 int latency_tracker_set_change_tracking_on_cb(struct latency_tracker *tracker,
-		void (*change_tracking_on_cb) (struct latency_tracker *tracker,
+		int (*change_tracking_on_cb) (struct latency_tracker *tracker,
 			int prev_value, int new_value))
 {
 	if (tracker->allocated)
