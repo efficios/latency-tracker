@@ -339,7 +339,7 @@ void __wrapper_freelist_put_event(struct latency_tracker *tracker,
 	 */
 	if (e->pool != ll->pool) {
 //		printk("DEBUG cross-pool put_event\n");
-		llist_add(&e->llist, &ll->pool->llist);
+		llist_add(&e->llist, &e->pool->llist);
 	} else if (local_read(&ll->current_count) < FREELIST_PERCPU_CACHE) {
 		/*
 		 * Fill our local cache if needed.
