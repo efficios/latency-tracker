@@ -171,8 +171,13 @@ void latency_tracker_handle_timeouts(struct latency_tracker *tracker, int flush)
 				break;
 			s = caa_container_of(qnode->next,
 					struct latency_tracker_event, u.timeout_node);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+			if (refcount_read(&s->refcount.refcount) > 1 &&
+					(s->start_ts + tracker->timeout) > now)
+#else
 			if (atomic_read(&s->refcount.refcount) > 1 &&
 					(s->start_ts + tracker->timeout) > now)
+#endif
 				break;
 		}
 
