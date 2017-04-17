@@ -126,7 +126,12 @@ LT_PROBE_DEFINE(block_rq_issue, struct request_queue *q,
 		return;
 
 	rq_cnt++;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+	if ((req_op(rq) == REQ_OP_SCSI_IN) || (req_op(rq) == REQ_OP_SCSI_OUT))
+#else
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+#endif
 		return;
 
 	if (blk_rq_sectors(rq) == 0)
@@ -152,7 +157,11 @@ LT_PROBE_DEFINE(block_rq_complete, struct request_queue *q,
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+	if ((req_op(rq) == REQ_OP_SCSI_IN) || (req_op(rq) == REQ_OP_SCSI_OUT))
+#else
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+#endif
 		return;
 
 	rq_to_key(&key, rq);
