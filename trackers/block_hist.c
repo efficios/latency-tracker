@@ -375,7 +375,9 @@ int io_syscall(long id)
 		case __NR_preadv:
 		case __NR_recvfrom:
 		case __NR_recvmsg:
+#if !defined(__aarch64__)
 		case __NR_getdents:
+#endif
 		case __NR_getdents64:
 		case __NR_statfs:
 		case __NR_fstatfs:
@@ -387,11 +389,13 @@ int io_syscall(long id)
 		case __NR_pwritev:
 		case __NR_sendto:
 		case __NR_sendmsg:
+#if !defined(__aarch64__)
 		case __NR_mkdir:
-		case __NR_mkdirat:
 		case __NR_rmdir:
 		case __NR_creat:
 		case __NR_mknod:
+#endif
+		case __NR_mkdirat:
 		case __NR_mknodat:
 		case __NR_vmsplice:
 		case __NR_sendmmsg:
@@ -404,16 +408,17 @@ int io_syscall(long id)
 		case __NR_fsync:
 		case __NR_fdatasync:
 		case __NR_sync:
+		case __NR_syncfs:
+			return IO_SYSCALL_SYNC;
 #if defined(__i386) || defined(__x86_64)
 		case __NR_sync_file_range:
 #endif
-		case __NR_syncfs:
-			return IO_SYSCALL_SYNC;
-
+#if !defined(__aarch64__)
 		case __NR_open:
-		case __NR_pipe:
-		case __NR_pipe2:
 		case __NR_dup2:
+		case __NR_pipe:
+#endif
+		case __NR_pipe2:
 		case __NR_dup3:
 		case __NR_socket:
 		case __NR_connect:
