@@ -83,7 +83,7 @@ struct cds_lfht *alloc_cds_lfht(unsigned long min_nr_alloc_buckets,
 	nr_chunks = max_nr_buckets / min_nr_alloc_buckets;
 	cds_lfht_size = offsetof(struct cds_lfht, tbl_chunk) +
 			sizeof(struct cds_lfht_node *) * nr_chunks;
-	cds_lfht_size = max(cds_lfht_size, sizeof(struct cds_lfht));
+	cds_lfht_size = max(cds_lfht_size, (unsigned long) sizeof(struct cds_lfht));
 
 	return __default_alloc_cds_lfht(
 			&cds_lfht_mm_chunk, cds_lfht_size,

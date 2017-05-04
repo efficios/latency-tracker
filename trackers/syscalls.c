@@ -34,8 +34,12 @@
 #include <linux/jhash.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/sched.h>
 #include <linux/stacktrace.h>
+#include <linux/sched.h>
+#include <linux/version.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+#include <linux/sched/signal.h>
+#endif
 #include <asm/stacktrace.h>
 #include "syscalls.h"
 #include "../latency_tracker.h"
