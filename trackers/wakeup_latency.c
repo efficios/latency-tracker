@@ -5,17 +5,7 @@
  *
  * In this example, we call the callback function wakeup_cb when the delay
  * between a sched wakeup and its completion (sched_switch) takes more than
- * DEFAULT_USEC_WAKEUP_LATENCY_THRESH microseconds. Moreover, if the task is
- * still not scheduled after DEFAULT_USEC_WAKEUP_LATENCY_TIMEOUT microseconds,
- * the callback is called with timeout = 1.
- *
- * The 2 parameters can be controlled at run-time by writing the value in
- * micro-seconds in:
- * /sys/module/wakeup_latency/parameters/usec_threshold and
- * /sys/module/wakeup_latency/parameters/usec_timeout
- *
- * It is possible to use nanoseconds, but you have to write manually the value
- * in this source code.
+ * the threshold.
  *
  * Copyright (C) 2014 Julien Desfossez <jdesfossez@efficios.com>
  *
@@ -48,28 +38,7 @@
 
 #include <trace/events/latency_tracker.h>
 
-/*
- * Threshold to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_WAKEUP_LATENCY_THRESH 5 * 1000
-/*
- * Timeout to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_WAKEUP_LATENCY_TIMEOUT 0
-
 static pid_t current_pid[NR_CPUS];
-
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-static unsigned long usec_threshold = DEFAULT_USEC_WAKEUP_LATENCY_THRESH;
-module_param(usec_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
-
-static unsigned long usec_timeout = DEFAULT_USEC_WAKEUP_LATENCY_TIMEOUT;
-module_param(usec_timeout, ulong, 0644);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
 struct schedkey {
 	pid_t pid;
@@ -191,17 +160,9 @@ int __init wakeup_latency_init(void)
 	tracker = latency_tracker_create("wakeup");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_timer_period(tracker, 100000000);
-	latency_tracker_set_max_resize(tracker, 1000);
-	latency_tracker_set_startup_events(tracker, 200);
 	latency_tracker_set_priv(tracker, wakeup_priv);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
-	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, wakeup_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
 
 	ret = lttng_wrapper_tracepoint_probe_register("sched_waking",
 			probe_sched_waking, NULL);

@@ -30,8 +30,11 @@
 
 static struct dentry *debugfs_root;
 static struct dentry *debugfs_create_tracking_on(umode_t mode,
-		struct dentry *parent, int *value,
-		struct latency_tracker *tracker);
+		struct dentry *parent, struct latency_tracker *tracker);
+static struct dentry *debugfs_create_alloc_size(umode_t mode,
+		struct dentry *parent, struct latency_tracker *tracker);
+static struct dentry *debugfs_create_allocate(umode_t mode,
+		struct dentry *parent, struct latency_tracker *tracker);
 
 int latency_tracker_debugfs_setup(void)
 {
@@ -55,15 +58,27 @@ int setup_default_entries(struct latency_tracker *tracker)
 	struct dentry *dir;
 
 	dir = debugfs_create_u64("threshold", S_IRUSR|S_IWUSR,
-			tracker->debugfs_dir, &tracker->threshold);
+			tracker->debugfs_instance_dir, &tracker->threshold);
 	if (!dir)
 		goto error;
+
 	dir = debugfs_create_u64("timeout", S_IRUSR|S_IWUSR,
-			tracker->debugfs_dir, &tracker->timeout);
+			tracker->debugfs_instance_dir, &tracker->timeout);
 	if (!dir)
 		goto error;
+
 	dir = debugfs_create_tracking_on(S_IRUSR|S_IWUSR,
-			tracker->debugfs_dir, &tracker->tracking_on, tracker);
+			tracker->debugfs_instance_dir, tracker);
+	if (!dir)
+		goto error;
+
+	dir = debugfs_create_alloc_size(S_IRUSR|S_IWUSR,
+			tracker->debugfs_instance_dir, tracker);
+	if (!dir)
+		goto error;
+
+	dir = debugfs_create_allocate(S_IRUSR|S_IWUSR,
+			tracker->debugfs_instance_dir, tracker);
 	if (!dir)
 		goto error;
 
@@ -150,7 +165,7 @@ int latency_tracker_debugfs_setup_wakeup_pipe(struct latency_tracker *tracker)
 	/* FIXME: param */
 	tracker->wakeup_rate_limit_ns = 1000000000;
 	tracker->wakeup_pipe = debugfs_create_file("wakeup_pipe", S_IRUSR,
-			tracker->debugfs_dir, tracker, &wakeup_pipe_fops);
+			tracker->debugfs_instance_dir, tracker, &wakeup_pipe_fops);
 	if (!tracker->wakeup_pipe)
 		return -1;
 
@@ -174,10 +189,19 @@ int latency_tracker_debugfs_add_tracker(
 	struct dentry *dir;
 	int ret;
 
+	/*
+	 * FIXME: when dealing with multiple instances, we will have to
+	 * test to see if this directory already exists.
+	 */
 	dir = debugfs_create_dir(tracker->tracker_name, debugfs_root);
 	if (!dir)
 		goto error;
-	tracker->debugfs_dir = dir;
+	tracker->debugfs_tracker_dir = dir;
+
+	dir = debugfs_create_dir(tracker->instance_name, dir);
+	if (!dir)
+		goto error;
+	tracker->debugfs_instance_dir = dir;
 
 	ret = setup_default_entries(tracker);
 	if (ret != 0)
@@ -194,10 +218,10 @@ error:
 
 void latency_tracker_debugfs_remove_tracker(struct latency_tracker *tracker)
 {
-	if (!tracker->debugfs_dir)
+	if (!tracker->debugfs_instance_dir)
 		return;
 	destroy_wakeup_pipe(tracker);
-	debugfs_remove_recursive(tracker->debugfs_dir);
+	debugfs_remove_recursive(tracker->debugfs_tracker_dir);
 }
 
 struct dentry *latency_tracker_debugfs_add_subfolder(
@@ -205,10 +229,10 @@ struct dentry *latency_tracker_debugfs_add_subfolder(
 {
 	struct dentry *dir;
 
-	if (!tracker->debugfs_dir)
+	if (!tracker->debugfs_instance_dir)
 		goto error;
 
-	dir = debugfs_create_dir(name, tracker->debugfs_dir);
+	dir = debugfs_create_dir(name, tracker->debugfs_instance_dir);
 	if (!dir)
 		goto error;
 
@@ -279,6 +303,7 @@ struct dentry *debugfs_create_int(const char *name, umode_t mode,
 	return debugfs_create_file(name, mode, parent, value, &fops_int);
 }
 
+/* tracking_on debugfs file */
 static
 ssize_t tracking_on_read(struct file *filp, char __user *ubuf,
 		size_t count, loff_t *ppos)
@@ -323,8 +348,112 @@ const struct file_operations fops_tracking_on = {
 
 static
 struct dentry *debugfs_create_tracking_on(umode_t mode, struct dentry *parent,
-		int *value, struct latency_tracker *tracker)
+		struct latency_tracker *tracker)
 {
-	return  debugfs_create_file("tracking_on", mode, parent,
+	return debugfs_create_file("tracking_on", mode, parent,
 			tracker, &fops_tracking_on);
+}
+
+/* Tracker allocated size before startup */
+static
+ssize_t alloc_size_read(struct file *filp, char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	int r, ret;
+	char buf[64];
+	struct latency_tracker *tracker = filp->private_data;
+
+	r = snprintf(buf, min_t(size_t, count, 64), "%d\n",
+			tracker->free_list_nelems);
+
+	ret = simple_read_from_buffer(ubuf, count, ppos, buf, r);
+	return ret;
+}
+
+static
+ssize_t alloc_size_write(struct file *filp, const char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	int val, ret;
+	struct latency_tracker *tracker = filp->private_data;
+
+	ret = kstrtoint_from_user(ubuf, count, 10, &val);
+	if (ret)
+		return ret;
+
+	/* Once the memory has been allocated, we cannot change this size */
+	if (tracker->allocated)
+		return -EPERM;
+
+	latency_tracker_set_startup_events(tracker, val);
+
+	return count;
+}
+
+static
+const struct file_operations fops_alloc_size = {
+	.open           = open_int,
+	.read           = alloc_size_read,
+	.write		= alloc_size_write,
+	.llseek         = default_llseek,
+};
+
+static
+struct dentry *debugfs_create_alloc_size(umode_t mode, struct dentry *parent,
+		struct latency_tracker *tracker)
+{
+	return  debugfs_create_file("alloc_size", mode, parent,
+			tracker, &fops_alloc_size);
+}
+
+/* Allocate the tracker memory */
+static
+ssize_t allocate_read(struct file *filp, char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	int r, ret;
+	char buf[64];
+	struct latency_tracker *tracker = filp->private_data;
+
+	r = snprintf(buf, min_t(size_t, count, 64), "%d\n",
+			tracker->allocated);
+
+	ret = simple_read_from_buffer(ubuf, count, ppos, buf, r);
+	return ret;
+}
+
+static
+ssize_t allocate_write(struct file *filp, const char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	int val, ret;
+	struct latency_tracker *tracker = filp->private_data;
+
+	ret = kstrtoint_from_user(ubuf, count, 10, &val);
+	if (ret)
+		return ret;
+	if (tracker->allocated)
+		return -EPERM;
+
+	ret = latency_tracker_allocate(tracker);
+	if (ret != 0)
+		return ret;
+
+	return count;
+}
+
+static
+const struct file_operations fops_allocate = {
+	.open           = open_int,
+	.read           = allocate_read,
+	.write		= allocate_write,
+	.llseek         = default_llseek,
+};
+
+static
+struct dentry *debugfs_create_allocate(umode_t mode, struct dentry *parent,
+		struct latency_tracker *tracker)
+{
+	return  debugfs_create_file("allocate", mode, parent,
+			tracker, &fops_allocate);
 }

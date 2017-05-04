@@ -48,10 +48,6 @@
 #include <trace/events/latency_tracker.h>
 
 /*
- * Threshold to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_SYSCALL_THRESH 1 * 1000 * 1000
-/*
  * At threshold/2 start taking the kernel stack at every
  * sched_switch of the process until the syscall is completed.
  */
@@ -63,14 +59,6 @@
 #define DEFAULT_WATCH_ALL_PROCESSES 0
 
 #define MAX_STACK_TXT 256
-
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-static unsigned long usec_threshold = DEFAULT_USEC_SYSCALL_THRESH;
-module_param(usec_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
 
 static unsigned long take_kernel_stack = DEFAULT_TAKE_KERNEL_STACK;
 module_param(take_kernel_stack, ulong, 0644);
@@ -346,16 +334,9 @@ int __init syscalls_init(void)
 	tracker = latency_tracker_create("syscalls");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_timer_period(tracker, 100000000);
-	latency_tracker_set_startup_events(tracker, 1000);
-	latency_tracker_set_max_resize(tracker, 20000);
 	latency_tracker_set_priv(tracker, tracker_priv);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
 	latency_tracker_set_callback(tracker, syscall_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
 
 	ret = lttng_wrapper_tracepoint_probe_register(
 			"sys_enter", probe_syscall_enter, NULL);

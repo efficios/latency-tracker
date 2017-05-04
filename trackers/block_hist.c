@@ -43,30 +43,6 @@
 
 #include <trace/events/latency_tracker.h>
 
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-unsigned long usec_threshold = DEFAULT_USEC_BLK_LATENCY_THRESHOLD;
-unsigned long usec_timeout = DEFAULT_USEC_BLK_LATENCY_TIMEOUT;
-unsigned long usec_gc_threshold = DEFAULT_USEC_BLK_LATENCY_GC_THRESHOLD;
-unsigned long usec_gc_period = DEFAULT_USEC_BLK_LATENCY_GC_PERIOD;
-
-/*
- * FIXME: action on update (all modules)
- */
-module_param(usec_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
-
-module_param(usec_timeout, ulong, 0644);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
-
-module_param(usec_gc_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_gc_threshold, "Garbage collector threshold in microseconds");
-
-module_param(usec_gc_period, ulong, 0644);
-MODULE_PARM_DESC(usec_gc_period, "Garbage collector period in microseconds");
-
 DEFINE_PER_CPU(struct iohist, live_hist);
 DEFINE_PER_CPU(struct iohist, current_hist);
 
@@ -152,7 +128,12 @@ LT_PROBE_DEFINE(block_rq_insert, struct request_queue *q,
 		return;
 
 	rq_cnt++;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+	if ((req_op(rq) == REQ_OP_SCSI_IN) || (req_op(rq) == REQ_OP_SCSI_OUT))
+#else
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+#endif
 		return;
 
 	if (blk_rq_sectors(rq) == 0)
@@ -185,7 +166,12 @@ LT_PROBE_DEFINE(block_rq_issue, struct request_queue *q,
 		return;
 
 	rq_cnt++;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+	if ((req_op(rq) == REQ_OP_SCSI_IN) || (req_op(rq) == REQ_OP_SCSI_OUT))
+#else
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+#endif
 		return;
 
 	if (blk_rq_sectors(rq) == 0)
@@ -349,7 +335,11 @@ LT_PROBE_DEFINE(block_rq_complete, struct request_queue *q,
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+	if ((req_op(rq) == REQ_OP_SCSI_IN) || (req_op(rq) == REQ_OP_SCSI_OUT))
+#else
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC)
+#endif
 		return;
 
 	rq_to_key(&key, rq, KEY_BLOCK);
@@ -414,7 +404,9 @@ int io_syscall(long id)
 		case __NR_fsync:
 		case __NR_fdatasync:
 		case __NR_sync:
+#if defined(__i386) || defined(__x86_64)
 		case __NR_sync_file_range:
+#endif
 		case __NR_syncfs:
 			return IO_SYSCALL_SYNC;
 
@@ -452,7 +444,6 @@ LT_PROBE_DEFINE(syscall_enter, struct pt_regs *regs, long id)
 	struct task_struct* task = current;
 	struct syscall_key_t syscall_key;
 	enum latency_tracker_event_in_ret ret;
-	u64 thresh, timeout;
 
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
@@ -462,8 +453,6 @@ LT_PROBE_DEFINE(syscall_enter, struct pt_regs *regs, long id)
 
 	syscall_key.pid = task->pid;
 	syscall_key.type = KEY_SYSCALL;
-	thresh = usec_threshold * 1000;
-	timeout = usec_timeout * 1000;
 
 	ret = latency_tracker_event_in(tracker, &syscall_key, sizeof(syscall_key),
 			0, (void *) id);
@@ -540,7 +529,7 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 	struct block_hist_tracker *b = (struct block_hist_tracker *) m->private;
 	int index, i, j, k;
 	struct iohist *tmp;
-	uint64_t begin = 0, end = 0;
+	uint64_t begin = 0, end = 0, tmpdiv;
 
 	index = get_index(b, 1);
 	if (b->latency_history[index].ts_end == 0) {
@@ -568,7 +557,10 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 			}
 		}
 	}
-	seq_printf(m, "5 min [%llu, %llu] %llu\n", begin, end, ((end - begin)/1000000000)/60);
+	tmpdiv = end - begin;
+	do_div(tmpdiv, NSEC_PER_SEC);
+	do_div(tmpdiv, 60);
+	seq_printf(m, "5 min [%llu, %llu] %llu\n", begin, end, tmpdiv);
 	output_history_hist(m, &b->tmp_display);
 
 	end = 0;
@@ -586,8 +578,12 @@ static int block_hist_show_history(struct seq_file *m, void *v)
 			}
 		}
 	}
-	seq_printf(m, "15 min [%llu, %llu] %llu\n", begin, end, ((end - begin)/1000000000)/60);
+	tmpdiv = end - begin;
+	do_div(tmpdiv, NSEC_PER_SEC);
+	do_div(tmpdiv, 60);
+	seq_printf(m, "15 min [%llu, %llu] %llu\n", begin, end, tmpdiv);
 	output_history_hist(m, &b->tmp_display);
+
 	return 0;
 }
 
@@ -724,16 +720,9 @@ int __init block_hist_latency_tp_init(void)
 	tracker = latency_tracker_create("block_hist");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 100000);
-	latency_tracker_set_timer_period(tracker, usec_gc_period * 1000);
 	latency_tracker_set_priv(tracker, block_hist_priv);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
-	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, blk_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
 
 	init_histograms();
 	init_timer(&block_hist_priv->timer);

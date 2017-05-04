@@ -142,9 +142,15 @@ struct latency_tracker {
 	 */
 	char tracker_name[TRACKER_NAME_SIZE + 1];
 	/*
+	 * Name of this instance of the tracker (to allow multiple trackers
+	 * to run simulataneously.
+	 */
+	char instance_name[TRACKER_NAME_SIZE + 1];
+	/*
 	 * debugfs control dir
 	 */
-	struct dentry *debugfs_dir;
+	struct dentry *debugfs_instance_dir;
+	struct dentry *debugfs_tracker_dir;
 	/*
 	 * debugfs wakeup_pipe stuff
 	 */
@@ -182,19 +188,18 @@ struct latency_tracker {
 	/*
 	 * Clear all the internal state of the tracker.
 	 */
-	void (*change_tracking_on_cb) (struct latency_tracker *tracker,
+	int (*change_tracking_on_cb) (struct latency_tracker *tracker,
 			int old_value, int new_value);
         /*
          * Protects the access to the HT, the free_list and the timer.
          */
         spinlock_t lock;
 	/*
-	 * When enabled, the tracking actually starts and some parameters
-	 * cannot be changed anymore.
-	 *
+	 * When allocated, the tracking can start and some parameters cannot
+	 * be changed anymore.
 	 * FIXME: list them here.
 	 */
-	int enabled;
+	int allocated;
 	/*
 	 * A private pointer that is accessible everywhere the tracker object
 	 * is accessible, the caller is responsible of the memory allocation of

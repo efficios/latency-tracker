@@ -50,32 +50,14 @@
 #undef DEBUG
 
 /*
- * Threshold to execute the callback (microseconds).
+ * On x86, if we have kretprobes, we can use it to hook on the do_IRQ function
+ * and get closer to the interrupts entry point. For other architectures or
+ * when kretprobes is not available, we fallback to the irq_handler_entry
+ * tracepoint.
  */
-#define DEFAULT_USEC_RT_THRESH 5 * 1000 * 1000
-/*
- * Timeout to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_RT_TIMEOUT 0
-
-#define DEFAULT_TIMER_TRACING 1
-
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-static unsigned long usec_threshold = DEFAULT_USEC_RT_THRESH;
-module_param(usec_threshold, ulong, 0644);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
-
-static unsigned long usec_timeout = DEFAULT_USEC_RT_TIMEOUT;
-module_param(usec_timeout, ulong, 0644);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
-
-static unsigned long timer_tracing = DEFAULT_TIMER_TRACING;
-module_param(timer_tracing, ulong, 0644);
-MODULE_PARM_DESC(timer_tracing, "Enable/Disable tracing of timer interrupts "
-		"and hrtimer latency");
+#if defined(CONFIG_KRETPROBES) && (defined(__x86_64__) || defined(__i386__))
+#define DO_IRQ_KRETPROBE
+#endif
 
 static struct latency_tracker *tracker;
 
@@ -403,7 +385,7 @@ int exit_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 	return 0;
 }
 
-#ifdef CONFIG_KRETPROBES
+#ifdef DO_IRQ_KRETPROBE
 static
 int entry_do_irq(struct kretprobe_instance *p, struct pt_regs *regs)
 {
@@ -618,6 +600,7 @@ end:
 	return event_out;
 }
 
+#if defined(__i386) || defined(__x86_64)
 LT_PROBE_DEFINE(local_timer_entry, int vector)
 {
 	enum latency_tracker_event_in_ret ret;
@@ -646,8 +629,8 @@ LT_PROBE_DEFINE(local_timer_entry, int vector)
 	latency_tracker_unref_event(s);
 
 #ifdef DEBUG
-	trace_printk("%llu local_timer_entry (cpu %u)\n", trace_clock_monotonic_wrapper(),
-			key.cpu);
+	trace_printk("%llu local_timer_entry (cpu %u)\n",
+			trace_clock_monotonic_wrapper(), key.cpu);
 #endif
 
 end:
@@ -670,8 +653,9 @@ LT_PROBE_DEFINE(local_timer_exit, int vector)
 end:
 	return;
 }
+#endif
 
-#ifndef CONFIG_KRETPROBES
+#ifndef DO_IRQ_KRETPROBE
 static
 void irq_handler_entry_no_do_irq(int irq)
 {
@@ -712,7 +696,7 @@ void irq_handler_entry_no_do_irq(int irq)
 #endif
 	return;
 }
-#endif /* CONFIG_KRETPROBES */
+#endif /* DO_IRQ_KRETPROBE */
 
 LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 {
@@ -721,7 +705,7 @@ LT_PROBE_DEFINE(irq_handler_entry, int irq, struct irqaction *action)
 	struct latency_tracker_event *event_in, *event_out;
 	struct event_data *data;
 
-#ifndef CONFIG_KRETPROBES
+#ifndef DO_IRQ_KRETPROBE
 	return irq_handler_entry_no_do_irq(irq);
 #endif
 
@@ -1234,20 +1218,12 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 	 * of the CPU.
 	 */
 	struct waking_key_t waking_key;
-	//struct latency_tracker_event *s;
 
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
 
-	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!p)
 		goto end;
-
-	/*
-	 * TODO: allow non-unique inserts here.
-	 * This would allow multiple processes to be waiting for the same
-	 * target process.
-	 */
 
 	waking_key.p.type = KEY_WAKEUP;
 	waking_key.pid = p->pid;
@@ -1467,7 +1443,6 @@ LT_PROBE_DEFINE(sched_switch, struct task_struct *prev,
 	if (!latency_tracker_get_tracking_on(tracker))
 		return;
 
-	/* FIXME: do we need some RCU magic here to make sure p stays alive ? */
 	if (!prev || !next)
 		goto end;
 
@@ -1620,8 +1595,6 @@ LT_PROBE_DEFINE(tracker_end, char *tp_data, size_t len)
 /*
  * This should be called from a task that has been woken up in the
  * path of interrupt processing.
- * FIXME: what happens if the task was already awake when the interrupt
- * arrived ?
  */
 LT_PROBE_DEFINE(tracker_begin, char *tp_data, size_t len)
 {
@@ -1779,10 +1752,12 @@ void destroy_event_cb(struct latency_tracker_event *event)
 
 void unregister_tracepoints(void)
 {
+#if defined(__i386) || defined(__x86_64)
 	lttng_wrapper_tracepoint_probe_unregister("local_timer_entry",
 			probe_local_timer_entry, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("local_timer_exit",
 			probe_local_timer_exit, NULL);
+#endif
 	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_entry",
 			probe_hrtimer_expire_entry, NULL);
 	lttng_wrapper_tracepoint_probe_unregister("hrtimer_expire_exit",
@@ -1816,12 +1791,6 @@ int __init rt_init(void)
 	tracker = latency_tracker_create("rt");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 100000);
-	latency_tracker_set_max_resize(tracker, 10000);
-	/* FIXME: makes us crash after rmmod */
-	//latency_tracker_set_timer_period(tracker, 100000000);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
-	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, rt_cb);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
 	latency_tracker_set_priv_data_size(tracker, sizeof(struct event_data));
@@ -1830,18 +1799,12 @@ int __init rt_init(void)
 	if (ret != 0)
 		goto error;
 
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
-
-	if (!timer_tracing)
-		config.timer_tracing = 0;
-
 #ifdef BENCH
 	alloc_measurements();
 #endif
 
 	/* Required tracepoints */
+#if defined(__i386) || defined(__x86_64)
 	ret = lttng_wrapper_tracepoint_probe_register("local_timer_entry",
 			probe_local_timer_entry, NULL);
 	if (ret) {
@@ -1856,6 +1819,8 @@ int __init rt_init(void)
 				" not available\n");
 		goto end_unregister;
 	}
+#endif
+
 	ret = lttng_wrapper_tracepoint_probe_register("hrtimer_expire_entry",
 			probe_hrtimer_expire_entry, NULL);
 	if (ret) {
@@ -1929,7 +1894,7 @@ int __init rt_init(void)
 			probe_tracker_end, NULL);
 	WARN_ON(ret);
 
-#ifdef CONFIG_KRETPROBES
+#ifdef DO_IRQ_KRETPROBE
 	ret = register_kretprobe(&probe_do_irq);
 	WARN_ON(ret);
 #endif
@@ -1954,7 +1919,7 @@ void __exit rt_exit(void)
 	uint64_t skipped, tracked;
 
 	unregister_tracepoints();
-#ifdef CONFIG_KRETPROBES
+#ifdef DO_IRQ_KRETPROBE
 	unregister_kretprobe(&probe_do_irq);
 #endif
 	tracepoint_synchronize_unregister();

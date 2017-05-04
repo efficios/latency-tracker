@@ -48,7 +48,7 @@ entry point when analysing the trace either manually or with
 
 This project exposes the `latency-tracker` API to other kernel modules, but
 also comes with a list of ready-to-use trackers (source code in
-[`examples`](examples/)).
+[`trackers`](trackers/)).
 
 Installation requirements
 -------------------------
@@ -72,19 +72,22 @@ Usage
 The `latency_tracker.ko` is required for all trackers it is the base
 architecture. Each tracker is compiled as its own module:
 `latency_tracker_$TRACKER.ko`. When a tracker is loaded in memory, it can be
-configured through `debugfs`.
+configured through `debugfs`. For now, only instance of each tracker is created
+when loading a tracker module. In the future, it will be possible to create
+multiple instances with different parameters. The default tracker instance is
+always called "default".
 
 ```
 insmod latency_tracker.ko
 insmod latency_tracker_$TRACKER.ko
-ls /sys/kernel/debug/latency/$TRACKER
+ls /sys/kernel/debug/latency/$TRACKER/default
 ```
 
 Implemented modules
 -------------------
 
-Here is a list and the description of the examples ready to run (in the
-[`examples/`](examples/) directory).
+Here is a list and the description of the trackers ready to run (in the
+[`trackers/`](trackers/) directory).
 
 
 ### Wakeup latency
@@ -247,7 +250,7 @@ Latency range   |                    syscall        |      fs   |   iosched |   
 
 ```
 
-Coding examples
+Coding trackers
 ---------------
 
 ### Block I/O requests
@@ -258,7 +261,7 @@ To get a callback for all I/O requests that take more than 5 usec to complete:
   - in `block_rq_complete`, call `latency_tracker_event_out` with the same key
   - if the delay between the event_in and out for the same device + sector is longer than 2 usec, your callback is called.
 
-This example is implemented in [`examples/block_latency_tp.c`](examples/block_latency_tp.c).
+This example is implemented in [`trackers/block_latency_tp.c`](trackers/block_latency_tp.c).
 You can also change dynamically the threshold and timeout parameters by writing the
 value in `/sys/module/latency_tracker_block/parameters/usec_treshold` and `/sys/module/latency_tracker_block/parameters/usec_timeout`
 
@@ -273,11 +276,11 @@ it is still not scheduled in:
 You can also change dynamically the threshold and timeout parameters by writing the
 value in `/sys/module/latency_tracker_wakeup/parameters/usec_treshold` and `/sys/module/latency_tracker_wakeup/parameters/usec_timeout`
 
-This example is implemented in [`examples/wakeup_latency.c`](examples/wakeup_latency.c).
+This example is implemented in [`trackers/wakeup_latency.c`](trackers/wakeup_latency.c).
 
 Loading the modules
 -------------------
-For example to load two examples provided:
+For example to load two trackers provided:
 
 ```
 insmod latency_tracker.ko
@@ -348,7 +351,7 @@ happened. The size of the history depends on the LTTng sesssion configuration
 (subbuff size, number and enabled events) and the rate of events generated.  It
 can range from a few milliseconds to minutes.
 
-To try it, the script [`examples/watch-block-event.sh`](examples/watch-block-event.sh)
+To try it, the script [`trackers/watch-block-event.sh`](trackers/watch-block-event.sh)
 give a good starting point.
 
 Using it in the kernel

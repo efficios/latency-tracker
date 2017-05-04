@@ -4,15 +4,7 @@
  * Example of usage of latency_tracker with kernel tracepoints.
  *
  * In this example, we call the callback function offcpu_cb when a task has
- * been scheduled out for longer that DEFAULT_USEC_OFFCPU_THRESH microseconds.
- *
- * The 2 parameters can be controlled at run-time by writing the value in
- * micro-seconds in:
- * /sys/module/offcpu/parameters/usec_threshold and
- * /sys/module/offcpu/parameters/usec_timeout
- *
- * It is possible to use nanoseconds, but you have to write manually the value
- * in this source code.
+ * been scheduled out for longer than the threshold.
  *
  * Copyright (C) 2015 Julien Desfossez <jdesfossez@efficios.com>
  *
@@ -47,30 +39,9 @@
 
 #include <trace/events/latency_tracker.h>
 
-/*
- * Threshold to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_OFFCPU_THRESH 5 * 1000 * 1000
-/*
- * Timeout to execute the callback (microseconds).
- */
-#define DEFAULT_USEC_OFFCPU_TIMEOUT 0
-
 #define MAX_STACK_TXT 256
 
 static pid_t current_pid[NR_CPUS];
-
-/*
- * microseconds because we can't guarantee the passing of 64-bit
- * arguments to insmod on all architectures.
- */
-static unsigned long usec_threshold = DEFAULT_USEC_OFFCPU_THRESH;
-module_param(usec_threshold, ulong, 0444);
-MODULE_PARM_DESC(usec_threshold, "Threshold in microseconds");
-
-static unsigned long usec_timeout = DEFAULT_USEC_OFFCPU_TIMEOUT;
-module_param(usec_timeout, ulong, 0444);
-MODULE_PARM_DESC(usec_timeout, "Timeout in microseconds");
 
 struct schedkey {
 	pid_t pid;
@@ -137,10 +108,8 @@ void offcpu_cb(struct latency_tracker_event_ctx *ctx)
 	if (cb_out_id == SCHED_EXIT_DIED)
 		return;
 
-	delay = (end_ts - start_ts) / 1000;
-#ifdef SCHEDWORST
-	usec_threshold = delay;
-#endif
+	delay = end_ts - start_ts;
+	do_div(delay, 1000);
 
 	rcu_read_lock();
 	p = pid_task(find_vpid(key->pid), PIDTYPE_PID);
@@ -221,7 +190,7 @@ LT_PROBE_DEFINE(sched_waking, struct task_struct *p, int success)
 		goto end;
 	now = trace_clock_read64();
 	delta = now - latency_tracker_event_get_start_ts(s);
-	if (delta > (usec_threshold * 1000)) {
+	if (delta > latency_tracker_get_threshold(tracker)) {
 		/* skip our own stack (3 levels) */
 		extract_stack(current, stacktxt_waker, 0, 3);
 		trace_latency_tracker_offcpu_sched_wakeup(current, stacktxt_waker, p, delta, 0);
@@ -263,6 +232,16 @@ int match_fct(const void *key1, const void *key2, size_t length)
 }
 
 static
+int tracking_on_cb(struct latency_tracker *tracker, int prev, int new)
+{
+	/*
+	 * Disable clearing the HT because we are tracking the calls that
+	 * lead to this write and risk deadlocking in the synchronize_rcu.
+	 */
+	return 0;
+}
+
+static
 int __init offcpu_init(void)
 {
 	int ret;
@@ -277,19 +256,12 @@ int __init offcpu_init(void)
 	tracker = latency_tracker_create("offcpu");
 	if (!tracker)
 		goto error;
-	latency_tracker_set_startup_events(tracker, 2000);
-	latency_tracker_set_max_resize(tracker, 10000);
-	latency_tracker_set_timer_period(tracker, 100000000);
 	latency_tracker_set_priv(tracker, offcpu_priv);
-	latency_tracker_set_threshold(tracker, usec_threshold * 1000);
-	latency_tracker_set_timeout(tracker, usec_timeout * 1000);
 	latency_tracker_set_callback(tracker, offcpu_cb);
 	latency_tracker_set_hash_fct(tracker, hash_fct);
 	latency_tracker_set_match_fct(tracker, match_fct);
 	latency_tracker_set_key_size(tracker, MAX_KEY_SIZE);
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
+	latency_tracker_set_change_tracking_on_cb(tracker, tracking_on_cb);
 
 	ret = offcpu_setup_priv(offcpu_priv);
 	WARN_ON(ret);

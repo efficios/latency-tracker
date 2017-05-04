@@ -135,7 +135,7 @@ void tracker_call_rcu_workqueue(struct work_struct *work)
 
 
 /*
- * Must be called with proper locking.
+ * Must be called with rcu_read_lock_sched_notrace.
  */
 void __latency_tracker_event_destroy(struct kref *kref)
 {
@@ -171,8 +171,13 @@ void latency_tracker_handle_timeouts(struct latency_tracker *tracker, int flush)
 				break;
 			s = caa_container_of(qnode->next,
 					struct latency_tracker_event, u.timeout_node);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+			if (refcount_read(&s->refcount.refcount) > 1 &&
+					(s->start_ts + tracker->timeout) > now)
+#else
 			if (atomic_read(&s->refcount.refcount) > 1 &&
 					(s->start_ts + tracker->timeout) > now)
+#endif
 				break;
 		}
 
@@ -209,7 +214,7 @@ void latency_tracker_timer_cb(unsigned long ptr)
 	spin_unlock_irqrestore(&tracker->lock, flags);
 }
 
-/* Must be called with the lock held. */
+/* Must be called with the tracker->lock held. */
 static
 void latency_tracker_enable_timer(struct latency_tracker *tracker)
 {
@@ -272,7 +277,7 @@ int latency_tracker_set_match_fct(struct latency_tracker *tracker,
 		int (*match_fct) (const void *key1, const void *key2,
 			size_t length))
 {
-	if (tracker->enabled)
+	if (tracker->allocated)
 		return -1;
 
 	tracker->match_fct = match_fct;
@@ -283,7 +288,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_match_fct);
 int latency_tracker_set_hash_fct(struct latency_tracker *tracker,
 		u32 (*hash_fct) (const void *key, u32 length, u32 initval))
 {
-	if (tracker->enabled)
+	if (tracker->allocated)
 		return -1;
 
 	tracker->hash_fct = hash_fct;
@@ -294,10 +299,14 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_hash_fct);
 int latency_tracker_set_startup_events(struct latency_tracker *tracker,
 		int startup_events)
 {
-	if (tracker->enabled)
+	if (tracker->allocated)
 		return -1;
 
 	tracker->free_list_nelems = startup_events;
+
+	if (tracker->max_resize < startup_events)
+		tracker->max_resize = startup_events;
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_startup_events);
@@ -305,7 +314,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_startup_events);
 int latency_tracker_set_max_resize(struct latency_tracker *tracker,
 		int max_resize)
 {
-	if (tracker->enabled)
+	if (tracker->allocated)
 		return -1;
 
 	tracker->max_resize = max_resize;
@@ -361,20 +370,40 @@ EXPORT_SYMBOL_GPL(latency_tracker_get_tracking_on);
 int latency_tracker_set_tracking_on(struct latency_tracker *tracker,
 		int val, int cleanup)
 {
-	int old;
+	int old, ret;
 
 	old = tracker->tracking_on;
+
+	/*
+	 * Allocate the memory when we enable the tracker if it is not already
+	 * done.
+	 */
+	if (old == 0 && val > 0) {
+		ret = latency_tracker_allocate(tracker);
+		if (ret != 0)
+			goto end;
+	}
+
 	tracker->tracking_on = val;
-	/* This cannot be done from within a tracepoint probe (deadlock) */
+
+	if (tracker->change_tracking_on_cb)
+		cleanup = tracker->change_tracking_on_cb(tracker, old, val);
+
+	/*
+	 * This cannot be done from within a tracepoint probe (deadlock), if
+	 * the write to the tracking_on file risks to be tracked, return 0 in
+	 * the tracking_on_cb.
+	 */
 	if (cleanup) {
 		synchronize_sched();
 		if (old > 0 && val == 0)
 			latency_tracker_clear_ht(tracker);
 	}
-	if (tracker->change_tracking_on_cb)
-		tracker->change_tracking_on_cb(tracker, old, val);
 
-	return 0;
+	ret = 0;
+
+end:
+	return ret;
 }
 EXPORT_SYMBOL_GPL(latency_tracker_set_tracking_on);
 
@@ -389,7 +418,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_callback);
 int latency_tracker_set_key_size(struct latency_tracker *tracker,
 		int size)
 {
-	if (tracker->enabled)
+	if (tracker->allocated)
 		return -1;
 
 	tracker->key_size = size;
@@ -400,7 +429,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_key_size);
 int latency_tracker_set_priv_data_size(struct latency_tracker *tracker,
 		int size)
 {
-	if (tracker->enabled)
+	if (tracker->allocated)
 		return -1;
 
 	tracker->priv_data_size = size;
@@ -411,7 +440,7 @@ EXPORT_SYMBOL_GPL(latency_tracker_set_priv_data_size);
 int latency_tracker_set_destroy_event_cb(struct latency_tracker *tracker,
 		void (*destroy_event_cb) (struct latency_tracker_event *event))
 {
-	if (tracker->enabled)
+	if (tracker->allocated)
 		return -1;
 
 	tracker->destroy_event_cb = destroy_event_cb;
@@ -420,10 +449,10 @@ int latency_tracker_set_destroy_event_cb(struct latency_tracker *tracker,
 EXPORT_SYMBOL_GPL(latency_tracker_set_destroy_event_cb);
 
 int latency_tracker_set_change_tracking_on_cb(struct latency_tracker *tracker,
-		void (*change_tracking_on_cb) (struct latency_tracker *tracker,
+		int (*change_tracking_on_cb) (struct latency_tracker *tracker,
 			int prev_value, int new_value))
 {
-	if (tracker->enabled)
+	if (tracker->allocated)
 		return -1;
 
 	tracker->change_tracking_on_cb = change_tracking_on_cb;
@@ -444,12 +473,15 @@ struct latency_tracker *latency_tracker_create(const char *name)
 	tracker->hash_fct = jhash;
 	tracker->match_fct = memcmp;
 	tracker->key_size = sizeof(long);
-	tracker->free_list_nelems = DEFAULT_STARTUP_ALLOC_EVENTS;
-	tracker->threshold = DEFAULT_THRESHOLD;
+	tracker->free_list_nelems = LT_DEFAULT_STARTUP_ALLOC_EVENTS;
+	tracker->threshold = LT_DEFAULT_THRESHOLD;
 	tracker->tracking_on = 0;
 	if (!name)
 		goto error_free;
-	strncpy(tracker->tracker_name, name, TRACKER_NAME_SIZE);
+	if (!strncpy(tracker->tracker_name, name, TRACKER_NAME_SIZE))
+		goto error_free;
+	if (!snprintf(tracker->instance_name, TRACKER_NAME_SIZE, "default"))
+		goto error_free;
 	ret = latency_tracker_debugfs_add_tracker(tracker);
 	if (ret != 0) {
 		printk("latency_tracker: debugfs creation error\n");
@@ -480,12 +512,15 @@ end:
 }
 EXPORT_SYMBOL_GPL(latency_tracker_create);
 
-int latency_tracker_enable(struct latency_tracker *tracker)
+int latency_tracker_allocate(struct latency_tracker *tracker)
 {
-	tracker->enabled = 1;
+	if (tracker->allocated)
+		return 0;
+
+	tracker->allocated = 1;
 	return wrapper_freelist_init(tracker, tracker->free_list_nelems);
 }
-EXPORT_SYMBOL_GPL(latency_tracker_enable);
+EXPORT_SYMBOL_GPL(latency_tracker_allocate);
 
 int latency_tracker_clear_ht(struct latency_tracker *tracker)
 {
@@ -534,7 +569,8 @@ void latency_tracker_destroy(struct latency_tracker *tracker)
 	 */
 	rcu_barrier_sched();
 
-	wrapper_freelist_destroy(tracker);
+	if (tracker->allocated)
+		wrapper_freelist_destroy(tracker);
 
 #ifdef BENCH
 	output_measurements();
@@ -589,7 +625,7 @@ enum latency_tracker_event_in_ret _latency_tracker_event_in_get(
 		ret = LATENCY_TRACKER_ERR;
 		goto end;
 	}
-	if (!tracker->enabled) {
+	if (!latency_tracker_get_tracking_on(tracker)) {
 		ret = LATENCY_TRACKER_DISABLED;
 		goto end;
 	}
@@ -702,10 +738,10 @@ int _latency_tracker_event_out(struct latency_tracker *tracker,
 	u64 now;
 	struct latency_tracker_key tkey;
 
-	if (!tracker) {
+	if (!tracker)
 		goto error;
-	}
-	if (!tracker->enabled) {
+
+	if (!latency_tracker_get_tracking_on(tracker)) {
 		ret = LATENCY_TRACKER_DISABLED;
 		goto end;
 	}
@@ -873,66 +909,6 @@ void example_cb(struct latency_tracker_event_ctx *ctx)
 }
 
 static
-int test_tracker(void)
-{
-	char *k1 = "blablabla1";
-	char *k2 = "bliblibli1";
-	int ret, i;
-	struct latency_tracker *tracker;
-
-	tracker = latency_tracker_create("test");
-	if (!tracker)
-		goto error;
-	ret = latency_tracker_set_startup_events(tracker, 300);
-	if (ret)
-		goto error;
-	ret = latency_tracker_set_timer_period(tracker, 100*1000*1000);
-	if (ret)
-		goto error;
-	ret = latency_tracker_set_key_size(tracker, strlen(k1) + 1);
-	if (ret)
-		goto error;
-	ret = latency_tracker_enable(tracker);
-	if (ret)
-		goto error;
-
-	for (i = 0; i < 10; i++) {
-	printk("insert k1\n");
-	ret = latency_tracker_event_in(tracker, k1, strlen(k1) + 1, 0, NULL);
-	if (ret)
-		printk("failed\n");
-	udelay(10000);
-	}
-
-	printk("insert k2\n");
-	rcu_read_lock_sched_notrace();
-	ret = _latency_tracker_event_in(tracker, k2, strlen(k2) + 1, 0, 0, NULL);
-	rcu_read_unlock_sched_notrace();
-	if (ret)
-		printk("failed\n");
-
-	printk("lookup k1\n");
-	latency_tracker_event_out(tracker, NULL, k1, strlen(k1) + 1, 0, 0);
-	printk("lookup k2\n");
-	latency_tracker_event_out(tracker, NULL, k2, strlen(k2) + 1, 0, 0);
-	printk("lookup k1\n");
-	rcu_read_lock_sched_notrace();
-	_latency_tracker_event_out(tracker, NULL, k1, strlen(k1) + 1, 0, 0);
-	rcu_read_unlock_sched_notrace();
-
-	printk("done\n");
-	latency_tracker_destroy(tracker);
-
-	ret = 0;
-	goto end;
-
-error:
-	ret = -1;
-end:
-	return ret;
-}
-
-static
 int __init latency_tracker_init(void)
 {
 	int ret;
@@ -940,7 +916,6 @@ int __init latency_tracker_init(void)
 	ret = latency_tracker_debugfs_setup();
 	if (ret < 0)
 		goto end;
-	ret = test_tracker();
 
 	ret = lttng_tracepoint_init();
 	if (ret)
