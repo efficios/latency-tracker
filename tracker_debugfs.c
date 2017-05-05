@@ -35,6 +35,7 @@ static struct dentry *debugfs_create_alloc_size(umode_t mode,
 		struct dentry *parent, struct latency_tracker *tracker);
 static struct dentry *debugfs_create_allocate(umode_t mode,
 		struct dentry *parent, struct latency_tracker *tracker);
+static int latency_tracker_debugfs_setup_stats(struct latency_tracker *tracker);
 
 int latency_tracker_debugfs_setup(void)
 {
@@ -56,6 +57,7 @@ void latency_tracker_debugfs_cleanup(void)
 int setup_default_entries(struct latency_tracker *tracker)
 {
 	struct dentry *dir;
+	int ret;
 
 	dir = debugfs_create_u64("threshold", S_IRUSR|S_IWUSR,
 			tracker->debugfs_instance_dir, &tracker->threshold);
@@ -80,6 +82,10 @@ int setup_default_entries(struct latency_tracker *tracker)
 	dir = debugfs_create_allocate(S_IRUSR|S_IWUSR,
 			tracker->debugfs_instance_dir, tracker);
 	if (!dir)
+		goto error;
+
+	ret = latency_tracker_debugfs_setup_stats(tracker);
+	if (ret)
 		goto error;
 
 	return 0;
@@ -183,6 +189,61 @@ void destroy_wakeup_pipe(struct latency_tracker *tracker)
 	tracker->wakeup_pipe = NULL;
 }
 
+static
+int read_stats(struct seq_file *m, void *v)
+{
+	struct latency_tracker *tracker = (struct latency_tracker *) m->private;
+
+	seq_printf(m, "count: %llu\n", tracker->count_delay);
+	seq_printf(m, "min (ns): %llu\n", tracker->min_delay);
+	seq_printf(m, "max (ns): %llu\n", tracker->max_delay);
+	if (tracker->count_delay > 0)
+		seq_printf(m, "average (ns): %llu\n",
+				tracker->total_delay / tracker->count_delay);
+	else
+		seq_printf(m, "average (ns): 0\n");
+	seq_printf(m, "total (ns): %llu\n", tracker->total_delay);
+
+	return 0;
+}
+
+static
+int open_stats(struct inode *inode, struct file *filp)
+{
+	struct latency_tracker *tracker = inode->i_private;
+
+	return single_open(filp, read_stats, tracker);
+}
+
+static
+const struct file_operations stats_fops = {
+	.open           = open_stats,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.release        = single_release,
+};
+
+static
+void destroy_stats(struct latency_tracker *tracker)
+{
+	if (!tracker->stats_file)
+		return;
+
+	debugfs_remove(tracker->stats_file);
+	tracker->stats_file = NULL;
+}
+
+static
+int latency_tracker_debugfs_setup_stats(struct latency_tracker *tracker)
+{
+	tracker->stats_file = debugfs_create_file("stats", S_IRUSR,
+			tracker->debugfs_instance_dir, tracker, &stats_fops);
+	if (!tracker->stats_file)
+		return -1;
+
+	return 0;
+}
+
 int latency_tracker_debugfs_add_tracker(
 		struct latency_tracker *tracker)
 {
@@ -221,6 +282,7 @@ void latency_tracker_debugfs_remove_tracker(struct latency_tracker *tracker)
 	if (!tracker->debugfs_instance_dir)
 		return;
 	destroy_wakeup_pipe(tracker);
+	destroy_stats(tracker);
 	debugfs_remove_recursive(tracker->debugfs_tracker_dir);
 }
 

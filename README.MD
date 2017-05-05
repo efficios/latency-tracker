@@ -336,7 +336,8 @@ Example output:
 trusty block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector =
 7668496, delay = 6486352 } [16:04:13.029836068] (+0.000041694) trusty
 block_latency: { cpu_id = 1 }, { major = 253, minor = 16, sector = 7669504,
-delay = 6531005 } ```
+delay = 6531005 }
+```
 
 Integration with LTTng snapshots
 --------------------------------

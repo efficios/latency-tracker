@@ -376,12 +376,18 @@ int latency_tracker_set_tracking_on(struct latency_tracker *tracker,
 
 	/*
 	 * Allocate the memory when we enable the tracker if it is not already
-	 * done.
+	 * done. Also clear the accounting values.
 	 */
 	if (old == 0 && val > 0) {
 		ret = latency_tracker_allocate(tracker);
 		if (ret != 0)
 			goto end;
+
+		/* Reset the accounting values. */
+		tracker->min_delay = -1ULL;
+		tracker->max_delay = 0;
+		tracker->count_delay = 0;
+		tracker->total_delay = 0;
 	}
 
 	tracker->tracking_on = val;

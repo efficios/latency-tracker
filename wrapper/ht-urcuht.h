@@ -221,8 +221,21 @@ static inline
 void wrapper_check_cb(struct latency_tracker *tracker, uint64_t now,
 		unsigned int id, struct latency_tracker_event *event)
 {
-	if ((now - event->start_ts) > tracker->threshold)
+	uint64_t delay;
+
+	delay = now - event->start_ts;
+
+	if (delay > tracker->threshold)
 		callback(event, tracker, now, id, LATENCY_TRACKER_CB_NORMAL);
+
+	/* Accounting */
+	/* TODO: make that optional */
+	if (delay < tracker->min_delay)
+		tracker->min_delay = delay;
+	if (delay > tracker->max_delay)
+		tracker->max_delay = delay;
+	tracker->count_delay++;
+	tracker->total_delay += delay;
 }
 
 static inline

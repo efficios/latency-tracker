@@ -206,6 +206,17 @@ struct latency_tracker {
 	 * this pointer.
 	 */
         void *priv;
+
+	/*
+	 * Accounting, cleared when the tracking starts (every time we go
+	 * from tracking_on == 0 to 1).
+	 */
+	uint64_t min_delay;
+	uint64_t max_delay;
+	uint64_t count_delay; /* Same as the tracked_count but can be reset. */
+	uint64_t total_delay;
+	struct dentry *stats_file;
+	atomic_t stats_readers;
 };
 
 /*
