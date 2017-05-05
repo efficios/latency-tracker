@@ -54,6 +54,9 @@ obj-m += $(shell \
 latency_tracker_self_test-objs := trackers/self_test.o
 obj-m += latency_tracker_self_test.o
 
+latency_tracker_userspace-objs := trackers/userspace.o wrapper/trace-clock.o tracker_debugfs.o
+obj-m += latency_tracker_userspace.o
+
 else # KERNELRELEASE
 
 # This part of the Makefile is used when the 'make' command is run in the
