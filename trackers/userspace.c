@@ -96,7 +96,7 @@ LT_PROBE_DEFINE(tracker_begin, char *tp_data, size_t len)
 	memset(&key.cookie, 0, sizeof(key.cookie));
 	memcpy(&key.cookie, tp_data, len);
 
-	ret = latency_tracker_event_in(tracker, &key, sizeof(key), 0, NULL);
+	ret = latency_tracker_event_in(tracker, &key, sizeof(key), 1, NULL);
 	WARN_ON_ONCE(ret);
 }
 
