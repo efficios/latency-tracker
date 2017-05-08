@@ -216,7 +216,6 @@ struct latency_tracker {
 	uint64_t count_delay; /* Same as the tracked_count but can be reset. */
 	uint64_t total_delay;
 	struct dentry *stats_file;
-	atomic_t stats_readers;
 };
 
 /*
