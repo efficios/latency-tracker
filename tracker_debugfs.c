@@ -69,6 +69,12 @@ int setup_default_entries(struct latency_tracker *tracker)
 	if (!dir)
 		goto error;
 
+	dir = debugfs_create_u32("worst_threshold", S_IRUSR|S_IWUSR,
+			tracker->debugfs_instance_dir,
+			&tracker->worst_threshold);
+	if (!dir)
+		goto error;
+
 	dir = debugfs_create_tracking_on(S_IRUSR|S_IWUSR,
 			tracker->debugfs_instance_dir, tracker);
 	if (!dir)

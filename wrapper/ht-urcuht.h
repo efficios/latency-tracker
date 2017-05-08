@@ -225,8 +225,12 @@ void wrapper_check_cb(struct latency_tracker *tracker, uint64_t now,
 
 	delay = now - event->start_ts;
 
-	if (delay > tracker->threshold)
+	if (delay > tracker->threshold) {
 		callback(event, tracker, now, id, LATENCY_TRACKER_CB_NORMAL);
+		if (tracker->worst_threshold)
+			tracker->threshold = delay;
+	}
+
 
 	/* Accounting */
 	/* TODO: make that optional */

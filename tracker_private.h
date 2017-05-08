@@ -124,6 +124,11 @@ struct latency_tracker {
 	 */
 	uint64_t threshold;
 	/*
+	 * If set to 1, always increase the threshold to the worst delay
+	 * seen.
+	 */
+	unsigned int worst_threshold;
+	/*
 	 * After "timeout" ns, if the event_out has still not happened, call
 	 * the callback with cb_flag set to LATENCY_TRACKER_CB_TIMEOUT. The
 	 * event is not removed from the HT, so the callback will be called
