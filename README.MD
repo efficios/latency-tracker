@@ -3,6 +3,16 @@ latency-tracker
 
 _by [Julien Desfossez](mailto:jdesfossez@efficios.com), [Mathieu Desnoyers](mailto:mathieu.desnoyers@efficios.com)_
 
+## Project Status
+
+This project is not currently maintained, and will likely not work without
+modifications to support both more recent Linux kernels and
+[LTTng-modules](https://github.com/lttng/lttng-modules). Those interested in
+financing continued efforts on this project may contact
+[EfficiOS](mailto:sales@efficios.com).
+
+## About
+
 This kernel module is a simple latency tracker. It is designed to be called
 from anywhere in the kernel (mostly used with tracepoints and kprobes) and is
 designed to execute actions when an operation takes longer than a specified
